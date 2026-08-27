@@ -134,15 +134,6 @@ function buildHive() {
       onClick: () => { location.hash = `#/${svc.key}`; },
     });
   }
-  // Keep the hive to exactly 10 hexagons: fill the gap between the services and
-  // the settings/logout tail with empty "add service" slots. Showing/hiding a
-  // service swaps an icon in/out of a box rather than adding/removing hexagons.
-  const authOn = state.config.auth && state.config.auth.plexEnabled;
-  const tailLen = 1 + (authOn ? 1 : 0); // Settings + optional Log out
-  const emptyCount = isMobile ? 0 : Math.max(0, 10 - cells.length - tailLen);
-  for (let s = 0; s < emptyCount; s++) {
-    cells.push({ kind: 'placeholder', title: 'Empty slot — add a service in config.json and restart', glyph: '＋', onClick: () => toast('Add a service in config.json, then restart, to fill this slot.', 'info', 2800) });
-  }
   cells.push({ kind: 'settings', active: route === 'settings', title: 'Settings', icon: hiveImg('/icons/command-center.svg'), onClick: () => { location.hash = '#/settings'; } });
   if (state.config.auth && state.config.auth.plexEnabled) {
     cells.push({ kind: 'logout', title: 'Log out', glyph: '⏻', onClick: () => confirmModal({
