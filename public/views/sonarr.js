@@ -6,6 +6,7 @@ import { tabSystem, tabWanted } from './arrSystem.js';
 import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, invalidate } from '../lib/cache.js';
+import { libraryFilter } from '../lib/libraryFilter.js';
 
 export async function renderSonarr(root, ctx) {
   const svc = ctx.service;
@@ -64,14 +65,21 @@ async function tabSeries(root, arr, ctx) {
     series.sort((a, b) => a.title.localeCompare(b.title));
     if (!series.length) return mount(root, empty('', 'No series yet', 'Add a series to get started', { label: '＋ Add Series', onClick: () => openAddModal(arr, ctx) }));
     const isHex = effectiveMode(ctx.service.key) === 'hex';
+    const listWrap = h('div', {});
+    const renderList = (items) => {
+      if (!items.length) return mount(listWrap, empty('', 'No matches', 'No series match this filter'));
+      mount(listWrap, pagedLibrary(items, {
+        isHex,
+        makeCard: (s) => seriesHex(s, arr, ctx),
+        makeRow: (s) => seriesRow(s, arr, ctx),
+      }));
+    };
     const libHead = h('div', { class: 'lib-head' },
+      libraryFilter('series', series, renderList),
       h('button', { class: 'btn sm', title: 'Bulk select', onclick: () => bulkLibrary(root, { items: series, kind: 'series', arr, invalidateKey: `arr:${ctx.service.key}:series`, onExit: () => tabSeries(root, arr, ctx) }) }, '☑ Select'),
     );
-    mount(root, libHead, pagedLibrary(series, {
-      isHex,
-      makeCard: (s) => seriesHex(s, arr, ctx),
-      makeRow: (s) => seriesRow(s, arr, ctx),
-    }));
+    mount(root, libHead, listWrap);
+    renderList(series);
   } catch (err) {
     mount(root, empty('', 'Failed to load series', err.message, { label: 'Retry', onClick: () => tabSeries(root, arr, ctx) }));
   }

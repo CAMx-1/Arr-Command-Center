@@ -65,6 +65,7 @@ async function navigate() {
   closeSidebarMobile();
 
   // Restart the view entrance animation.
+  els.view.dataset.route = route;
   els.view.classList.remove('view-enter');
   void els.view.offsetWidth;
   els.view.classList.add('view-enter');

@@ -240,8 +240,15 @@ app.delete('/api/config/service/:key', (req, res) => {
   }
 });
 
-// Static frontend.
-app.use(express.static(PUBLIC_DIR));
+// Static frontend. Force revalidation of HTML/CSS/JS so UI changes are picked
+// up on a normal refresh (avoids stale cached views during development).
+app.use(express.static(PUBLIC_DIR, {
+  setHeaders(res, filePath) {
+    if (/\.(html|css|js)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
+}));
 // SPA fallback for any non-API route.
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
