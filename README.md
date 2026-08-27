@@ -14,12 +14,43 @@ Access, and secrets never touch the browser.
 
 ---
 
-## Screenshot
+## Screenshots
+
+### Overview dashboard
 
 ![Arr Command Center home dashboard](docs/home-page.png)
 
-*The Overview dashboard: live status hexes for each service with at-a-glance stats,
-quick activity filters, and a recent-requests feed.*
+*Live status hexes for each service with at-a-glance stats, quick activity filters, and a recent-requests feed.*
+
+### Sonarr library (Hexagon view)
+
+![Sonarr library in hexagon view](docs/sonarr-library.png)
+
+*Poster hexes show monitored status and episode progress, with per-title Info, Seasons, Search, and Auto actions.*
+
+### Radarr library (List view)
+
+![Radarr library in list view](docs/radarr-library.png)
+
+*A compact list view with download/monitor status, file size, and quick actions — toggle between Hexagon and List per page.*
+
+### Filter your library
+
+![Filtering the library by title](docs/library-filter.png)
+
+*Filter Sonarr/Radarr libraries instantly by title, plus a status dropdown (Monitored, Missing, Downloaded, …), right next to the bulk Select button.*
+
+### Tautulli — active streams
+
+![Tautulli active streams](docs/tautulli.png)
+
+*See who's watching what: active stream count, direct-play/transcode, bandwidth, and now-playing details.*
+
+### Settings
+
+![Settings page](docs/settings.png)
+
+*Drag to reorder services, hide them from the sidebar, edit connections, and manage appearance — all secrets stay server-side.*
 
 ---
 
