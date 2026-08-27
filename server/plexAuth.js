@@ -161,17 +161,24 @@ export function createPlexAuth(cfg, { root, publicDir }) {
   });
 
   // ---- Gate middleware ----
-  const ALLOW_UNAUTH = new Set(['/login.html', '/login.js', '/login.css', '/styles.css', '/favicon.ico']);
+  const ALLOW_UNAUTH = new Set(['/login.html', '/login.js', '/login.css', '/styles.css', '/favicon.ico', '/robots.txt']);
   function middleware(req, res, next) {
     if (!enabled) return next();
     const p = req.path;
     if (p.startsWith('/api/auth/')) return next();
     if (ALLOW_UNAUTH.has(p) || p.startsWith('/icons/')) return next();
 
+    // Keep this private dashboard — and especially the branded sign-in page —
+    // out of search-engine indexes and Safe Browsing crawls.
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+
     const user = verify(getCookie(req, COOKIE));
     if (user) { req.plexUser = user; return next(); }
     if (p.startsWith('/api/')) return res.status(401).json({ error: 'Authentication required' });
-    return res.sendFile(path.join(publicDir, 'login.html'));
+    // Serve the login page with a 401 so crawlers treat it as protected and
+    // don't index it as a public "deceptive login" page. No WWW-Authenticate
+    // header is sent, so browsers still render the body (no basic-auth popup).
+    return res.status(401).sendFile(path.join(publicDir, 'login.html'));
   }
 
   return { enabled, router, middleware, verify, getCookie: (req) => verify(getCookie(req, COOKIE)) };
