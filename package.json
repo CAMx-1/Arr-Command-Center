@@ -1,0 +1,19 @@
+{
+  "name": "arr-command-center",
+  "version": "1.0.0",
+  "description": "A locally-hosted dashboard to manage Sonarr, Radarr, Overseerr/Seerr and SABnzbd behind Cloudflare Access. A self-hosted LunaSea replacement.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "demo": "MOCK=1 node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "4.19.2"
+  },
+  "license": "MIT"
+}

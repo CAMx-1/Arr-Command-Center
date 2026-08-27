@@ -1,0 +1,590 @@
+import { api } from './lib/api.js';
+import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, debounce, spinner, empty, poster, fmtBytes, copyable } from './lib/ui.js';
+import { orderServices, isHidden } from './lib/servicePrefs.js';
+import { cachedGet } from './lib/cache.js';
+import { renderHome, refreshHome } from './views/home.js';
+import { renderSonarr } from './views/sonarr.js';
+import { renderRadarr } from './views/radarr.js';
+import { renderOverseerr, openSeasonModal } from './views/overseerr.js';
+import { renderSabnzbd } from './views/sabnzbd.js';
+import { renderTautulli } from './views/tautulli.js';
+import { renderProwlarr } from './views/prowlarr.js';
+import { renderPlex } from './views/plex.js';
+import { renderEmbed } from './views/embed.js';
+import { renderSettings } from './views/settings.js';
+import { openDetailModal } from './views/detail.js';
+import { fetchNotifications, getLastSeen, markSeen, notifKind } from './lib/notifications.js';
+import { initAppearance } from './lib/theme.js';
+
+export const SERVICE_META = {
+  sonarr: { logo: '/icons/sonarr.svg', emoji: '', renderer: renderSonarr },
+  radarr: { logo: '/icons/radarr.svg', emoji: '', renderer: renderRadarr },
+  overseerr: { logo: '/icons/overseerr.svg', emoji: '', renderer: renderOverseerr },
+  sabnzbd: { logo: '/icons/sabnzbd.svg', emoji: '⬇', renderer: renderSabnzbd },
+  tautulli: { logo: '/icons/tautulli.svg', emoji: '', renderer: renderTautulli },
+  prowlarr: { logo: '/icons/prowlarr.png', emoji: '', renderer: renderProwlarr },
+  plex: { logo: '/icons/plex.svg', emoji: '▶', renderer: renderPlex },
+};
+
+const state = {
+  config: null,
+  status: {},
+  services: [],
+};
+
+let homeCtx = null;
+let notifOpen = false;
+let notifications = [];
+let errorLog = [];
+
+const els = {
+  hive: document.getElementById('hive'),
+  hiveBg: document.getElementById('hive-bg'),
+  view: document.getElementById('view'),
+  title: document.getElementById('page-title'),
+  actions: document.getElementById('topbar-actions'),
+  sidebar: document.getElementById('sidebar'),
+  notifBtn: document.getElementById('notif-btn'),
+  notifBadge: document.getElementById('notif-badge'),
+  notifPanel: document.getElementById('notif-panel'),
+  searchBtn: document.getElementById('search-btn'),
+};
+
+// ---------- Routing ----------
+function currentRoute() {
+  const hash = location.hash.replace(/^#\/?/, '');
+  return hash || 'home';
+}
+
+async function navigate() {
+  const route = currentRoute();
+  try { localStorage.setItem('acc:last-route', route); } catch { /* ignore */ }
+  buildHive();
+  updateTopbarTools(route);
+  els.actions && clear(els.actions);
+  closeSidebarMobile();
+
+  // Restart the view entrance animation.
+  els.view.classList.remove('view-enter');
+  void els.view.offsetWidth;
+  els.view.classList.add('view-enter');
+
+  const ctx = {
+    api,
+    state,
+    setTitle: (t) => { els.title.textContent = t; },
+    setActions: (...nodes) => { mount(els.actions, ...nodes); },
+    reload: navigate,
+  };
+
+  if (route === 'home') {
+    els.title.textContent = 'Overview';
+    homeCtx = ctx;
+    return renderHome(els.view, ctx);
+  }
+  homeCtx = null;
+
+  if (route === 'settings') {
+    els.title.textContent = 'Settings';
+    return renderSettings(els.view, ctx);
+  }
+
+  const svc = state.services.find((s) => s.key === route);
+  if (!svc) {
+    els.title.textContent = 'Not found';
+    return mount(els.view, h('div', { class: 'empty' }, h('div', { class: 'empty-icon' }, ''), 'Unknown or disabled service'));
+  }
+  els.title.textContent = svc.label;
+  ctx.service = svc;
+  // Embed mode: render the real app in an iframe instead of the custom panel.
+  if (svc.embed && svc.embedUrl) {
+    return renderEmbed(els.view, ctx);
+  }
+  const meta = SERVICE_META[svc.type];
+  if (!meta || !meta.renderer) {
+    return mount(els.view, h('div', { class: 'empty' }, 'No panel for this service type'));
+  }
+  return meta.renderer(els.view, ctx);
+}
+
+// ---------- Sidebar honeycomb ("hive") ----------
+function hiveImg(src) { return h('img', { class: 'hive-logo', src, alt: '' }); }
+
+function buildHive() {
+  const route = currentRoute();
+  const isMobile = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 720px)').matches;
+  const cells = [];
+  cells.push({ kind: 'home', active: route === 'home', title: 'Home', icon: hiveImg('/icons/home-icon.png'), onClick: () => { location.hash = '#/home'; } });
+  // Nav order: default puts Seerr (overseerr) right below Home; the saved order
+  // (from Settings) overrides it. On desktop, hidden services become an empty
+  // slot in place; on mobile they (and the empty "add" slots) are omitted.
+  const base = [...state.services].sort((a, b) => (a.type === 'overseerr' ? 0 : 1) - (b.type === 'overseerr' ? 0 : 1));
+  const navServices = orderServices(base);
+  for (const svc of navServices) {
+    if (isHidden(svc.key)) {
+      if (!isMobile) cells.push({ kind: 'placeholder', title: `${svc.label} is hidden — show it in Settings`, glyph: '＋', onClick: () => toast(`${svc.label} is hidden. Enable it in Settings → Services.`, 'info', 2800) });
+      continue;
+    }
+    const meta = SERVICE_META[svc.type] || {};
+    const st = state.status[svc.key];
+    cells.push({
+      kind: 'service', active: route === svc.key, title: svc.label,
+      dot: st ? (st.ok ? 'ok' : 'down') : '',
+      icon: svcIcon(meta.logo, meta.emoji || '', 34),
+      onClick: () => { location.hash = `#/${svc.key}`; },
+    });
+  }
+  // Keep the hive to exactly 10 hexagons: fill the gap between the services and
+  // the settings/logout tail with empty "add service" slots. Showing/hiding a
+  // service swaps an icon in/out of a box rather than adding/removing hexagons.
+  const authOn = state.config.auth && state.config.auth.plexEnabled;
+  const tailLen = 1 + (authOn ? 1 : 0); // Settings + optional Log out
+  const emptyCount = isMobile ? 0 : Math.max(0, 10 - cells.length - tailLen);
+  for (let s = 0; s < emptyCount; s++) {
+    cells.push({ kind: 'placeholder', title: 'Empty slot — add a service in config.json and restart', glyph: '＋', onClick: () => toast('Add a service in config.json, then restart, to fill this slot.', 'info', 2800) });
+  }
+  cells.push({ kind: 'settings', active: route === 'settings', title: 'Settings', icon: hiveImg('/icons/command-center.svg'), onClick: () => { location.hash = '#/settings'; } });
+  if (state.config.auth && state.config.auth.plexEnabled) {
+    cells.push({ kind: 'logout', title: 'Log out', glyph: '⏻', onClick: () => confirmModal({
+      title: 'Sign out', message: 'Are you sure you want to sign out?', confirmLabel: 'Sign out', danger: true,
+      onConfirm: async () => { try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ } location.href = '/login.html'; },
+    }) });
+  }
+
+  // Single centered column of flat-top hexagons, stacked touching so they fill
+  // the sidebar top-to-bottom like a honeycomb strip.
+  const W = 100, H = 88, step = 88, oy = 10;
+  let maxBottom = 0;
+  const nodes = cells.map((c, i) => {
+    const y = oy + i * step;
+    maxBottom = y + H;
+    return h('button', {
+      class: `hive-cell hive-${c.kind} ${c.active ? 'active' : ''}`, title: c.title,
+      style: { left: `calc(50% - ${W / 2}px)`, top: `${y}px` },
+      onclick: () => { closeSidebarMobile(); c.onClick(); },
+    },
+      c.dot !== undefined ? h('span', { class: `hive-dot ${c.dot || ''}` }) : null,
+      h('span', { class: 'hive-icon' }, c.icon || h('span', { class: 'hive-glyph' }, c.glyph)),
+    );
+  });
+  mount(els.hive, ...nodes);
+  if (state.config.mock) {
+    els.hive.appendChild(h('div', { class: 'hive-demo', style: { top: `${maxBottom + 6}px` } }, 'DEMO'));
+    maxBottom += 30;
+  }
+  els.hive.style.height = `${maxBottom + oy}px`;
+  // Rebuild the background now that the nav buttons exist, so it aligns to them.
+  buildHiveBackground();
+}
+
+function setSidebar(open) {
+  els.sidebar.classList.toggle('open', open);
+  let bd = document.getElementById('sidebar-backdrop');
+  if (open && !bd) {
+    bd = document.createElement('div');
+    bd.id = 'sidebar-backdrop';
+    bd.className = 'sidebar-backdrop';
+    bd.addEventListener('click', () => setSidebar(false));
+    document.getElementById('app').appendChild(bd);
+  }
+  if (bd) requestAnimationFrame(() => bd.classList.toggle('show', open));
+}
+function closeSidebarMobile() { setSidebar(false); }
+
+// Show the notifications bell + global search only on Home, Sonarr, and Radarr.
+function toolsAllowed(route = currentRoute()) {
+  if (route === 'home') return true;
+  const svc = state.services.find((s) => s.key === route);
+  return !!(svc && (svc.type === 'sonarr' || svc.type === 'radarr'));
+}
+function updateTopbarTools(route) {
+  const show = toolsAllowed(route);
+  if (els.searchBtn) els.searchBtn.style.display = show ? '' : 'none';
+  const wrap = document.getElementById('notif-wrap');
+  if (wrap) wrap.style.display = show ? '' : 'none';
+  if (!show && notifOpen) toggleNotif(false);
+}
+
+// ---------- Notifications ----------
+async function refreshNotifications() {
+  try {
+    notifications = await fetchNotifications({ api, state });
+    updateNotifBadge();
+    if (notifOpen) renderNotifPanel();
+  } catch { /* ignore */ }
+}
+
+function updateNotifBadge() {
+  const lastSeen = getLastSeen();
+  const unread = notifications.filter((e) => e.at > lastSeen).length + errorLog.length;
+  const b = els.notifBadge;
+  if (!b) return;
+  if (unread > 0) { b.textContent = unread > 99 ? '99+' : String(unread); b.classList.remove('hidden'); }
+  else b.classList.add('hidden');
+}
+
+function dismissError(id) {
+  errorLog = errorLog.filter((e) => e.id !== id);
+  updateNotifBadge();
+  if (notifOpen) renderNotifPanel();
+}
+
+function renderNotifPanel() {
+  const panel = els.notifPanel;
+  const errorRows = errorLog.map((e) => h('div', { class: 'notif-row' },
+    h('span', { class: 'pill down' }, 'Issue'),
+    h('div', { class: 'notif-main' },
+      h('div', { class: 'notif-title' }, e.message),
+      h('div', { class: 'notif-meta dim' }, relTime(e.at)),
+    ),
+    h('button', { class: 'btn sm', title: 'Dismiss', onclick: (ev) => { ev.stopPropagation(); dismissError(e.id); } }, '✕'),
+  ));
+  const rows = notifications.map((e) => {
+    const k = notifKind(e.kind);
+    return h('button', { class: 'notif-row', onclick: () => { location.hash = `#/${e.svcKey}`; toggleNotif(false); } },
+      h('span', { class: `pill ${k.cls}` }, k.label),
+      h('div', { class: 'notif-main' },
+        h('div', { class: 'notif-title' }, e.title),
+        h('div', { class: 'notif-meta dim' }, `${e.label} · ${relTime(e.at)}`),
+      ),
+    );
+  });
+  mount(panel,
+    h('div', { class: 'notif-head' },
+      h('span', {}, 'Notifications'),
+      errorLog.length ? h('button', { class: 'btn sm', style: { marginLeft: 'auto' }, onclick: () => { errorLog = []; updateNotifBadge(); renderNotifPanel(); } }, 'Clear issues') : null,
+    ),
+    (errorRows.length || rows.length)
+      ? h('div', { class: 'notif-list' }, ...errorRows, ...rows)
+      : h('div', { class: 'empty', style: { padding: '24px' } }, 'No recent events'),
+  );
+}
+
+function relTime(ms) {
+  const diff = Date.now() - ms;
+  const m = Math.round(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const hrs = Math.round(m / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
+function toggleNotif(open) {
+  notifOpen = open ?? !notifOpen;
+  els.notifPanel.classList.toggle('hidden', !notifOpen);
+  if (notifOpen) { renderNotifPanel(); markSeen(); updateNotifBadge(); }
+}
+
+// ---------- Global search ----------
+async function loadLibraries() {
+  const out = [];
+  const arrs = state.services.filter((s) => (s.type === 'sonarr' || s.type === 'radarr') && s.configured);
+  await Promise.all(arrs.map(async (svc) => {
+    try {
+      const path = svc.type === 'sonarr' ? 'series' : 'movie';
+      const items = await cachedGet(`arr:${svc.key}:${path}`, () => api.arr(svc.key).get(path), 300000);
+      for (const it of (items || [])) {
+        out.push({
+          svc, title: it.title, year: it.year, tmdbId: it.tmdbId,
+          mediaType: svc.type === 'sonarr' ? 'tv' : 'movie',
+          poster: (it.images || []).find((i) => i.coverType === 'poster'),
+          path: it.path,
+          hasFile: it.hasFile,
+          sizeOnDisk: it.sizeOnDisk ?? (it.statistics && it.statistics.sizeOnDisk),
+          file: it.movieFile ? {
+            name: it.movieFile.relativePath,
+            size: it.movieFile.size,
+            quality: it.movieFile.quality && it.movieFile.quality.quality && it.movieFile.quality.quality.name,
+          } : null,
+          stats: it.statistics ? { episodeFileCount: it.statistics.episodeFileCount, episodeCount: it.statistics.episodeCount } : null,
+        });
+      }
+    } catch { /* ignore */ }
+  }));
+  return out;
+}
+
+function openShortcutsHelp() {
+  const row = (k, d) => h('div', { class: 'setting-row' },
+    h('span', {}, d),
+    h('span', { class: 'right' }, h('kbd', {}, k)),
+  );
+  openModal({
+    title: 'Keyboard shortcuts',
+    body: h('div', {},
+      row('?', 'Show this help'),
+      row('/', 'Search your libraries'),
+      row('r', 'Refresh connection status'),
+      row('1 – 9', 'Jump to a nav item (1 = Home)'),
+      row('Esc', 'Close dialogs'),
+    ),
+  });
+}
+
+function openSearch() {
+  const input = h('input', { class: 'input', placeholder: 'Search libraries & discover new titles…' });
+  const results = h('div', { class: 'list', style: { marginTop: '12px' } });
+  let typeFilter = 'all';
+  const seg = (t, label) => h('button', { class: `view-seg ${typeFilter === t ? 'active' : ''}`, dataset: { t }, onclick: () => setType(t) }, label);
+  const filterBar = h('div', { class: 'view-toggle', style: { marginTop: '10px' } }, seg('all', 'All'), seg('movie', 'Movies'), seg('tv', 'TV'));
+  const tf = (mt) => typeFilter === 'all' || typeFilter === mt;
+  const run = debounce(async () => {
+    const q = input.value.trim();
+    if (!q) { clear(results); return; }
+    mount(results, spinner());
+    const ql = q.toLowerCase();
+    const lib = await loadLibraries();
+    let libMatches = lib.filter((x) => x.title.toLowerCase().includes(ql) && tf(x.mediaType)).slice(0, 40);
+    const ownedTmdb = new Set(lib.map((x) => x.tmdbId).filter(Boolean));
+    let discover = [];
+    const seerrSvc = state.services.find((s) => s.type === 'overseerr' && s.configured);
+    if (seerrSvc) {
+      try {
+        const data = await api.seerr(seerrSvc.key).get(`search?query=${encodeURIComponent(q)}`);
+        discover = (data.results || []).filter((x) => x.mediaType !== 'person' && tf(x.mediaType) && !ownedTmdb.has(x.id)).slice(0, 20);
+      } catch { /* ignore */ }
+    }
+    if (!libMatches.length && !discover.length) return mount(results, empty('', 'No matches', 'Try a different title'));
+    const nodes = [];
+    if (libMatches.length) { nodes.push(h('div', { class: 'section-title' }, 'In your library')); nodes.push(...libMatches.map(searchRow)); }
+    if (discover.length) { nodes.push(h('div', { class: 'section-title', style: { marginTop: '14px' } }, 'Discover')); nodes.push(...discover.map((r) => discoverSearchRow(r, seerrSvc))); }
+    mount(results, ...nodes);
+  }, 300);
+  function setType(t) { typeFilter = t; for (const b of filterBar.children) b.classList.toggle('active', b.dataset.t === t); run(); }
+  input.addEventListener('input', run);
+  openModal({ title: 'Search', body: h('div', {}, input, filterBar, results), wide: true });
+  setTimeout(() => input.focus(), 50);
+}
+
+function discoverSearchRow(r, seerrSvc) {
+  const isTv = r.mediaType === 'tv';
+  const title = r.title || r.name || 'Untitled';
+  const date = r.releaseDate || r.firstAirDate || '';
+  const year = date ? ` (${new Date(date).getFullYear()})` : '';
+  const url = r.posterPath ? `https://image.tmdb.org/t/p/w154${r.posterPath}` : null;
+  const openMeta = () => openDetailModal({ api, state }, { mediaType: r.mediaType, tmdbId: r.id, fallback: { title, overview: r.overview, posterUrl: url } });
+  const st = r.mediaInfo && r.mediaInfo.status;
+  const stLabel = { 2: 'Requested', 3: 'Processing', 4: 'Partially Available', 5: 'Available' }[st];
+  const canRequest = seerrSvc && (!st || st === 1 || (isTv && st === 4));
+  const requestBtn = h('button', { class: 'btn sm primary', onclick: async (e) => {
+    if (isTv) {
+      // Let the user pick which seasons to download instead of forcing all.
+      return openSeasonModal(api.seerr(seerrSvc.key), { service: { key: seerrSvc.key } }, r, title);
+    }
+    const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Requesting…';
+    try {
+      await api.seerr(seerrSvc.key).post('request', { mediaType: 'movie', mediaId: r.id });
+      toast(`Requested ${title}`, 'success');
+      btn.textContent = 'Requested'; btn.classList.remove('primary');
+    } catch (err) { toast(err.message || 'Request failed', 'error'); btn.disabled = false; btn.textContent = 'Request'; }
+  } }, isTv ? (st === 4 ? '＋ Seasons' : '＋ Select seasons') : '＋ Request');
+  return h('div', { class: 'row' },
+    h('div', { style: { cursor: 'pointer', flexShrink: '0' }, title: 'View details', onclick: openMeta }, poster(url, '')),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title', style: { cursor: 'pointer' }, onclick: openMeta }, title, h('span', { class: 'dim' }, year)),
+      h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+        h('span', { class: 'pill muted' }, isTv ? 'TV' : 'Movie'),
+        stLabel ? h('span', { class: `pill ${st >= 5 ? 'ok' : st >= 3 ? 'info' : 'warn'}` }, stLabel) : h('span', { class: 'pill info' }, 'Not in library'),
+      ),
+    ),
+    h('div', { class: 'row-actions' }, canRequest ? requestBtn : null),
+  );
+}
+
+function searchRow(m) {
+  const url = m.poster && (m.poster.remoteUrl || m.poster.url);
+  const openMeta = () => { if (m.tmdbId) openDetailModal({ api, state }, { mediaType: m.mediaType, tmdbId: m.tmdbId, fallback: { title: m.title, year: m.year, posterUrl: url } }); };
+  const posterWrap = h('div', { style: { cursor: 'pointer', flexShrink: '0' }, title: 'View details', onclick: openMeta }, poster(url, ''));
+  return h('div', { class: 'row' },
+    posterWrap,
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title', style: { cursor: 'pointer' }, title: 'View details', onclick: openMeta }, m.title, h('span', { class: 'dim' }, m.year ? ` (${m.year})` : '')),
+      h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+        h('span', { class: 'pill muted' }, m.svc.label),
+        m.hasFile ? h('span', { class: 'pill ok' }, 'Downloaded') : (m.hasFile === false ? h('span', { class: 'pill warn' }, 'Missing') : null),
+        m.sizeOnDisk ? h('span', {}, fmtBytes(m.sizeOnDisk)) : null,
+      ),
+    ),
+    h('div', { class: 'row-actions' },
+      h('button', { class: 'btn sm', onclick: () => openArrInfo(m), title: 'Storage & file info' }, 'Info'),
+      h('button', { class: 'btn sm', onclick: () => { closeModal(); location.hash = `#/${m.svc.key}`; } }, 'Open'),
+    ),
+  );
+}
+
+function arrInfoRow(label, value) {
+  return h('div', { class: 'setting-row' },
+    h('span', { class: 'dim' }, label),
+    h('span', { class: 'right', style: { textAlign: 'right', maxWidth: '72%', wordBreak: 'break-all' } }, value),
+  );
+}
+
+// Storage/file details for a Sonarr series or Radarr movie (the "Info" action).
+function openArrInfo(m) {
+  const rows = [];
+  rows.push(arrInfoRow('Service', m.svc.label));
+  rows.push(arrInfoRow('Status', m.hasFile ? 'Downloaded' : (m.hasFile === false ? 'Missing' : 'Unknown')));
+  if (m.path) rows.push(arrInfoRow('Stored in', copyable(m.path)));
+  if (m.sizeOnDisk) rows.push(arrInfoRow('Size on disk', fmtBytes(m.sizeOnDisk)));
+  if (m.file && m.file.name) rows.push(arrInfoRow('Grabbed file', copyable(m.file.name)));
+  if (m.file && m.file.size) rows.push(arrInfoRow('File size', fmtBytes(m.file.size)));
+  if (m.file && m.file.quality) rows.push(arrInfoRow('Quality', m.file.quality));
+  if (m.stats) rows.push(arrInfoRow('Episodes on disk', `${m.stats.episodeFileCount} / ${m.stats.episodeCount}`));
+  openModal({
+    title: `${m.title}${m.year ? ` (${m.year})` : ''}`,
+    body: h('div', {}, ...rows),
+    footer: h('div', { style: { display: 'flex', gap: '10px', justifyContent: 'flex-end', width: '100%' } },
+      h('button', { class: 'btn', onclick: closeModal }, 'Close'),
+      h('button', { class: 'btn primary', onclick: () => { closeModal(); location.hash = `#/${m.svc.key}`; } }, `Open ${m.svc.label}`),
+    ),
+  });
+}
+
+// Background honeycomb swath: aligned to the nav hex grid, flowing out of the
+// Sonarr cell diagonally down-and-right, fading from purple to gray.
+function buildHiveBackground() {
+  const el = els.hiveBg;
+  if (!el) return;
+  const VW = window.innerWidth, VH = window.innerHeight;
+  // Align the background grid to the ACTUAL rendered nav button (position + size)
+  // so the polygons sit exactly on the sidebar hexes.
+  const firstCell = document.querySelector('#hive .hive-cell');
+  let W = 100, H = 88, ax = 58, ay = 54;
+  if (firstCell) {
+    const r = firstCell.getBoundingClientRect();
+    W = r.width; H = r.height;
+    ax = r.left + r.width / 2; ay = r.top + r.height / 2;
+  }
+  if (ax < 20) ax = 58; // sidebar off-canvas on mobile — anchor the honeycomb near the left edge
+  const dxc = 0.75 * W;             // flat-top column spacing
+  const maxDim = Math.max(VW, VH);
+  const hexPts = (cx, cy) => {
+    const x = cx - W / 2, y = cy - H / 2;
+    return [[x + 0.25 * W, y], [x + 0.75 * W, y], [x + W, y + 0.5 * H], [x + 0.75 * W, y + H], [x + 0.25 * W, y + H], [x, y + 0.5 * H]].map((q) => q.join(',')).join(' ');
+  };
+  const cl = (x) => Math.max(0, Math.min(255, Math.round(x)));
+  const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const DEEP = [109, 40, 217], VIOLET = [168, 85, 247], SLATE = [226, 232, 240];
+  const colorAt = (t) => (t < 0.5 ? mix(DEEP, VIOLET, t / 0.5) : mix(VIOLET, SLATE, (t - 0.5) / 0.5));
+  // Deterministic per-hex pseudo-random (stable across rebuilds) for shade variation.
+  const hash = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
+  // Tessellate on the SAME grid as the sidebar hexes: column 0 sits exactly on the
+  // nav button so the polygons line up with (and overlap) the buttons. Extends left
+  // of the sidebar and generates outward to the right, densest at the left.
+  const fadeL = 12 * dxc;  // left field fade distance (to the right)
+  const fadeR = 10 * dxc;  // right field base fade distance (to the left)
+  let polys = '';
+  const cStart = Math.floor((-W - ax) / dxc) - 1;
+  const cEnd = Math.ceil((VW + W - ax) / dxc) + 1;
+  for (let c = cStart; c <= cEnd; c++) {
+    const xc = ax + c * dxc;
+    const parity = ((c % 2) + 2) % 2;
+    for (let row = -2; row < Math.ceil(VH / H) + 2; row++) {
+      const yc = ay + parity * (H / 2) + row * H;
+      if (yc < -H || yc > VH + H) continue;
+      // Left field: dense behind the sidebar, fading right — with a per-hex random
+      // reach so its inner edge juts out irregularly like the right field.
+      const jutL = hash(c * 2.3 + 4.1, row * 3.3 + 2.7);
+      const reachL = fadeL * (0.5 + jutL * 1.0);
+      const leftOp = 0.34 * Math.max(0, Math.min(1, 1 - xc / reachL));
+      // Right field: dense at the right edge, fading left, with a per-hex random
+      // reach so its inner edge randomly juts out into the page.
+      const jut = hash(c * 3.7 + 1.3, row * 2.9 + 0.7);
+      const reachR = fadeR * (0.5 + jut * 1.0);
+      const rightOp = 0.28 * Math.max(0, Math.min(1, 1 - (VW - xc) / reachR));
+      const baseOp = Math.max(leftOp, rightOp);
+      if (baseOp <= 0.02) continue;
+      const rightDom = rightOp > leftOp;
+      const t = rightDom
+        ? Math.max(0, Math.min(1, 0.35 + (hash(c, row) - 0.5) * 0.2))
+        : Math.max(0, Math.min(1, xc / (maxDim * 0.8) + (hash(c, row) - 0.5) * 0.2));
+      const rgb = colorAt(t);
+      const f = 0.8 + hash(c * 1.7 + 3.1, row * 2.3 + 1.9) * 0.4;
+      const op = baseOp * (0.8 + hash(row + 5, c + 9) * 0.4);
+      polys += `<polygon points="${hexPts(xc, yc)}" fill="rgb(${cl(rgb[0] * f)},${cl(rgb[1] * f)},${cl(rgb[2] * f)})" fill-opacity="${op.toFixed(3)}"/>`;
+    }
+  }
+  el.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="${VW}" height="${VH}" viewBox="0 0 ${VW} ${VH}">${polys}</svg>`;
+}
+
+// ---------- Status polling ----------
+async function refreshStatus() {
+  try {
+    state.status = await api.status();
+    buildHive();
+  } catch (err) {
+    console.error('status error', err);
+  }
+}
+
+// ---------- Init ----------
+async function init() {
+  initAppearance();
+  try {
+    state.config = await api.config();
+  } catch (err) {
+    mount(els.view, h('div', { class: 'empty' }, h('div', { class: 'empty-icon' }, ''), 'Could not load config', h('div', { class: 'dim' }, String(err.message))));
+    return;
+  }
+  state.services = Object.values(state.config.services || {});
+
+  // The sidebar is a permanent icon-only rail.
+  document.getElementById('app').classList.add('collapsed');
+
+  buildHiveBackground();
+  let resizeTimer;
+  window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { buildHive(); }, 200); });
+
+  await refreshStatus();
+  // Restore the last route if no explicit hash was provided.
+  if (!location.hash) {
+    try { const last = localStorage.getItem('acc:last-route'); if (last && last !== 'home') location.hash = `#/${last}`; } catch { /* ignore */ }
+  }
+  window.addEventListener('hashchange', navigate);
+  await navigate();
+
+  // Poll connection status every 15s.
+  setInterval(refreshStatus, 15000);
+
+  // Auto-refresh the Overview activity area every 30s (silent, no flash).
+  setInterval(() => {
+    if (currentRoute() === 'home' && homeCtx) refreshHome(homeCtx);
+  }, 30000);
+
+  // Notifications: initial load + poll every 30s.
+  refreshNotifications();
+  setInterval(refreshNotifications, 30000);
+
+  // Global controls
+  document.getElementById('menu-toggle').addEventListener('click', () => setSidebar(!els.sidebar.classList.contains('open')));
+  if (els.notifBtn) els.notifBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleNotif(); });
+  if (els.searchBtn) els.searchBtn.addEventListener('click', openSearch);
+  // Close the notifications panel on outside click.
+  document.addEventListener('click', (e) => {
+    if (notifOpen && !document.getElementById('notif-wrap').contains(e.target)) toggleNotif(false);
+  });
+  // Persist error toasts into the notifications bell (action center).
+  window.addEventListener('app-error', (e) => {
+    const d = e.detail || {};
+    errorLog.unshift({ id: Date.now() + Math.random(), message: d.message || 'Error', at: d.at || Date.now() });
+    errorLog = errorLog.slice(0, 25);
+    updateNotifBadge();
+    if (notifOpen) renderNotifPanel();
+  });
+  document.addEventListener('keydown', (e) => {
+    const typing = /input|textarea|select/i.test(document.activeElement.tagName);
+    if (e.key === 'Escape' && notifOpen) toggleNotif(false);
+    if (typing) return;
+    if (e.key === 'r') { refreshStatus(); navigate(); }
+    if (e.key === '/') { if (toolsAllowed()) { e.preventDefault(); openSearch(); } }
+    if (e.key === '?') { e.preventDefault(); openShortcutsHelp(); }
+    if (/^[1-9]$/.test(e.key) && !document.getElementById('modal-root').hasChildNodes()) {
+      const cells = document.querySelectorAll('#hive .hive-cell');
+      const cell = cells[Number(e.key) - 1];
+      if (cell) cell.click();
+    }
+  });
+}
+
+init();

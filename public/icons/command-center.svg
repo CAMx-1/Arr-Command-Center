@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+  <!-- slider tracks -->
+  <line x1="12" y1="17" x2="52" y2="17"/>
+  <line x1="12" y1="30" x2="52" y2="30"/>
+  <line x1="12" y1="43" x2="40" y2="43"/>
+  <!-- slider handles -->
+  <rect x="33" y="11" width="11" height="12" rx="2.5"/>
+  <rect x="16" y="24" width="11" height="12" rx="2.5"/>
+  <rect x="27" y="37" width="11" height="12" rx="2.5"/>
+  <!-- hand pointer reaching up to the bottom slider -->
+  <path d="M40 55 v-8 a2.4 2.4 0 0 1 4.8 0 v6.5
+           l3.4 .6 a3 3 0 0 1 2.4 3.5 l-.7 3.9 a4 4 0 0 1 -3.9 3.3 h-6.5
+           a4 4 0 0 1 -3.2 -1.6 l-3.4 -4.5 a2.3 2.3 0 0 1 .5 -3.2
+           a2.3 2.3 0 0 1 3.1 .4 z"/>
+</svg>
