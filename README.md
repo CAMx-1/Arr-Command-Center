@@ -14,6 +14,15 @@ Access, and secrets never touch the browser.
 
 ---
 
+## Screenshot
+
+![Arr Command Center home dashboard](docs/home-page.png)
+
+*The Overview dashboard: live status hexes for each service with at-a-glance stats,
+quick activity filters, and a recent-requests feed.*
+
+---
+
 ## Why a backend proxy?
 
 Your services sit behind Cloudflare Access. To reach their APIs, each request needs:
