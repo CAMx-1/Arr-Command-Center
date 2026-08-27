@@ -22,34 +22,61 @@ btn.addEventListener('click', async () => {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Could not start Plex sign-in');
 
-    // Open the Plex auth page in a popup.
+    // Open the Plex auth page. On mobile this typically opens a new tab rather
+    // than a real popup, which backgrounds this page.
     const popup = window.open(d.authUrl, 'plexAuth', 'width=800,height=720');
-    setStatus('Waiting for Plex sign-in… (complete it in the popup)');
+    setStatus('Waiting for Plex sign-in… (complete it in the Plex tab)');
 
     const start = Date.now();
-    const timer = setInterval(async () => {
+    let finished = false;   // stop once we succeed / fail / time out
+    let checking = false;   // guard against overlapping checks
+    let timer = null;
+
+    const cleanup = () => {
+      finished = true;
+      if (timer) clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+
+    // One authorization check. Returns nothing; drives the flow via side effects.
+    const checkOnce = async () => {
+      if (finished || checking) return;
       if (Date.now() - start > 180000) { // 3 min timeout
-        clearInterval(timer); busy = false; btn.disabled = false;
+        cleanup(); busy = false; btn.disabled = false;
         setStatus('Sign-in timed out. Please try again.', true);
         return;
       }
+      checking = true;
       try {
         const cr = await fetch(`/api/auth/plex/check?pinId=${encodeURIComponent(d.pinId)}&code=${encodeURIComponent(d.code)}`);
         const cd = await cr.json();
         if (cr.status === 403) {
-          clearInterval(timer); busy = false; btn.disabled = false;
+          cleanup(); busy = false; btn.disabled = false;
           setStatus(cd.error || 'This Plex account is not permitted.', true);
           if (popup && !popup.closed) popup.close();
           return;
         }
         if (cd.authorized) {
-          clearInterval(timer);
+          cleanup();
           setStatus('Signed in! Redirecting…');
           if (popup && !popup.closed) popup.close();
           location.href = '/';
         }
       } catch { /* keep polling */ }
-    }, 2000);
+      finally { checking = false; }
+    };
+
+    // Mobile browsers throttle timers in backgrounded tabs, so the interval may
+    // not fire while the user is on the Plex tab. Re-check immediately whenever
+    // this page regains visibility/focus so returning after auth signs the user
+    // in without needing a manual refresh.
+    const onVisible = () => { if (!document.hidden) checkOnce(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+
+    timer = setInterval(checkOnce, 2000);
+    checkOnce();
   } catch (e) {
     busy = false; btn.disabled = false;
     setStatus(e.message, true);
