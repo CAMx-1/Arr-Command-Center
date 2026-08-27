@@ -1,0 +1,25 @@
+services:
+  arr-command-center:
+    build: .
+    # Or use a prebuilt image once you publish one:
+    # image: yourname/arr-command-center:latest
+    container_name: arr-command-center
+    restart: unless-stopped
+    init: true
+    ports:
+      - "7373:7373"
+    volumes:
+      # Provide your real config with secrets via a bind mount (recommended).
+      - ./config.json:/app/config.json:ro
+    # Alternatively, drop the volume above and configure entirely via env vars:
+    # env_file: .env
+    environment:
+      - PORT=7373
+      - HOST=0.0.0.0
+      # - MOCK=1   # uncomment to run the bundled demo with fake data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7373/healthcheck').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
