@@ -6,6 +6,7 @@ import { tabSystem, tabWanted } from './arrSystem.js';
 import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, invalidate } from '../lib/cache.js';
+import { libraryFilter } from '../lib/libraryFilter.js';
 
 export async function renderRadarr(root, ctx) {
   const svc = ctx.service;
@@ -96,14 +97,21 @@ async function tabMovies(root, arr, ctx) {
     movies.sort((a, b) => a.title.localeCompare(b.title));
     if (!movies.length) return mount(root, empty('', 'No movies yet', 'Add a movie to get started', { label: '＋ Add Movie', onClick: () => openAddModal(arr, ctx) }));
     const isHex = effectiveMode(ctx.service.key) === 'hex';
+    const listWrap = h('div', {});
+    const renderList = (items) => {
+      if (!items.length) return mount(listWrap, empty('', 'No matches', 'No movies match this filter'));
+      mount(listWrap, pagedLibrary(items, {
+        isHex,
+        makeCard: (m) => movieHex(m, arr, ctx),
+        makeRow: (m) => movieRow(m, arr, ctx),
+      }));
+    };
     const libHead = h('div', { class: 'lib-head' },
+      libraryFilter('movie', movies, renderList),
       h('button', { class: 'btn sm', title: 'Bulk select', onclick: () => bulkLibrary(root, { items: movies, kind: 'movie', arr, invalidateKey: `arr:${ctx.service.key}:movie`, onExit: () => tabMovies(root, arr, ctx) }) }, '☑ Select'),
     );
-    mount(root, libHead, pagedLibrary(movies, {
-      isHex,
-      makeCard: (m) => movieHex(m, arr, ctx),
-      makeRow: (m) => movieRow(m, arr, ctx),
-    }));
+    mount(root, libHead, listWrap);
+    renderList(movies);
   } catch (err) {
     mount(root, empty('', 'Failed to load movies', err.message, { label: 'Retry', onClick: () => tabMovies(root, arr, ctx) }));
   }

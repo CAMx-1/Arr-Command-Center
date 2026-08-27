@@ -112,7 +112,7 @@ export async function renderSettings(root, ctx) {
     h('div', { class: 'section-title' }, 'Services'),
     h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', margin: '-4px 0 12px' } },
       h('div', { class: 'dim', style: { fontSize: '13px', flex: '1' } }, 'Drag a service card to reorder it, and use Hide to remove one from the sidebar and Home (it stays configured and reachable directly).'),
-      cfg.mock ? null : h('button', { class: 'btn sm primary', onclick: () => openServiceForm(root, ctx, null, null) }, '＋ Add service'),
+      cfg.mock ? null : h('button', { class: 'btn sm primary hex-btn', onclick: () => openServiceForm(root, ctx, null, null) }, '＋ Add service'),
     ),
     h('div', { class: 'grid cols-2' }, ...serviceCards),
     h('div', { class: 'section-title' }, 'About'),
@@ -216,7 +216,7 @@ function appearanceCard(root, ctx) {
   const theme = getTheme();
   const accent = getAccent();
   const themeBtn = (val, label) => h('button', {
-    class: `btn sm ${theme === val ? 'primary' : ''}`,
+    class: `btn sm hex-btn ${theme === val ? 'primary' : ''}`,
     onclick: () => { applyTheme(val); renderSettings(root, ctx); },
   }, label);
   const swatches = ACCENT_NAMES.map((name) => h('button', {
@@ -227,7 +227,7 @@ function appearanceCard(root, ctx) {
   }));
   const gmode = globalMode();
   const viewBtn = (val, label) => h('button', {
-    class: `btn sm ${gmode === val ? 'primary' : ''}`,
+    class: `btn sm hex-btn ${gmode === val ? 'primary' : ''}`,
     onclick: () => { setGlobalMode(val); renderSettings(root, ctx); },
   }, label);
   return h('div', { class: 'card' },
