@@ -2,10 +2,11 @@ import { api } from './lib/api.js';
 import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, debounce, spinner, empty, poster, fmtBytes, copyable } from './lib/ui.js';
 import { orderServices, isHidden } from './lib/servicePrefs.js';
 import { cachedGet } from './lib/cache.js';
+import { setPendingFilter } from './lib/libraryFilter.js';
 import { renderHome, refreshHome } from './views/home.js';
 import { renderSonarr } from './views/sonarr.js';
 import { renderRadarr } from './views/radarr.js';
-import { renderOverseerr, openSeasonModal } from './views/overseerr.js';
+import { renderOverseerr, openSeasonModal, openMovieRequestModal } from './views/overseerr.js';
 import { renderSabnzbd } from './views/sabnzbd.js';
 import { renderTautulli } from './views/tautulli.js';
 import { renderProwlarr } from './views/prowlarr.js';
@@ -185,12 +186,9 @@ function setSidebar(open) {
 }
 function closeSidebarMobile() { setSidebar(false); }
 
-// Show the notifications bell + global search only on Home, Sonarr, and Radarr.
-function toolsAllowed(route = currentRoute()) {
-  if (route === 'home') return true;
-  const svc = state.services.find((s) => s.key === route);
-  return !!(svc && (svc.type === 'sonarr' || svc.type === 'radarr'));
-}
+// The global search + notifications bell are available on every route (they
+// aggregate across services, so they're useful regardless of the current page).
+function toolsAllowed() { return true; }
 function updateTopbarTools(route) {
   const show = toolsAllowed(route);
   if (els.searchBtn) els.searchBtn.style.display = show ? '' : 'none';
@@ -366,12 +364,8 @@ function discoverSearchRow(r, seerrSvc) {
       // Let the user pick which seasons to download instead of forcing all.
       return openSeasonModal(api.seerr(seerrSvc.key), { service: { key: seerrSvc.key } }, r, title);
     }
-    const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Requesting…';
-    try {
-      await api.seerr(seerrSvc.key).post('request', { mediaType: 'movie', mediaId: r.id });
-      toast(`Requested ${title}`, 'success');
-      btn.textContent = 'Requested'; btn.classList.remove('primary');
-    } catch (err) { toast(err.message || 'Request failed', 'error'); btn.disabled = false; btn.textContent = 'Request'; }
+    // Movies: offer install location + quality profile (same as the Overseerr view).
+    return openMovieRequestModal(api.seerr(seerrSvc.key), { service: { key: seerrSvc.key } }, r, title);
   } }, isTv ? (st === 4 ? '＋ Seasons' : '＋ Select seasons') : '＋ Request');
   return h('div', { class: 'row' },
     h('div', { style: { cursor: 'pointer', flexShrink: '0' }, title: 'View details', onclick: openMeta }, poster(url, '')),
@@ -402,7 +396,7 @@ function searchRow(m) {
     ),
     h('div', { class: 'row-actions' },
       h('button', { class: 'btn sm', onclick: () => openArrInfo(m), title: 'Storage & file info' }, 'Info'),
-      h('button', { class: 'btn sm', onclick: () => { closeModal(); location.hash = `#/${m.svc.key}`; } }, 'Open'),
+      h('button', { class: 'btn sm primary', title: `Open in ${m.svc.label} and filter to this title`, onclick: () => { setPendingFilter(m.svc.key, m.title); closeModal(); location.hash = `#/${m.svc.key}`; } }, 'Open'),
     ),
   );
 }
@@ -430,7 +424,7 @@ function openArrInfo(m) {
     body: h('div', {}, ...rows),
     footer: h('div', { style: { display: 'flex', gap: '10px', justifyContent: 'flex-end', width: '100%' } },
       h('button', { class: 'btn', onclick: closeModal }, 'Close'),
-      h('button', { class: 'btn primary', onclick: () => { closeModal(); location.hash = `#/${m.svc.key}`; } }, `Open ${m.svc.label}`),
+      h('button', { class: 'btn primary', onclick: () => { setPendingFilter(m.svc.key, m.title); closeModal(); location.hash = `#/${m.svc.key}`; } }, `Open ${m.svc.label}`),
     ),
   });
 }
