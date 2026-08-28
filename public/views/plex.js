@@ -1,4 +1,4 @@
-import { h, mount, tabs, skeletonList, empty, fmtRelative, timeEl } from '../lib/ui.js';
+import { h, mount, tabs, skeletonList, empty, fmtRelative, timeEl, fmtBytes, copyable } from '../lib/ui.js';
 
 export async function renderPlex(root, ctx) {
   const svc = ctx.service;
@@ -6,11 +6,36 @@ export async function renderPlex(root, ctx) {
   const body = h('div', {});
   const bar = tabs(body, [
     { id: 'watchlist', label: 'Watchlist', render: (c) => tabWatchlist(c, ctx) },
+    { id: 'duplicates', label: 'Duplicates', render: (c) => tabDuplicates(c, ctx) },
     { id: 'users', label: 'Users', render: (c) => tabUsers(c, ctx) },
     { id: 'friends', label: 'Friends', render: (c) => tabFriends(c, ctx) },
     { id: 'sessions', label: 'Now Playing', render: (c) => tabSessions(c, ctx) },
   ], `tabs-${svc.key}`);
   mount(root, bar, body);
+}
+
+// Duplicates as Plex sees them on disk — works even when Radarr/Sonarr paths are
+// broken, since Plex scans the real filesystem. Shows each file so you can tell
+// which copy to remove.
+async function tabDuplicates(root, ctx) {
+  mount(root, skeletonList());
+  try {
+    const items = await ctx.api.plex.duplicates();
+    if (!items.length) return mount(root, empty('', 'No duplicates in Plex', 'Every movie/episode has a single file.'));
+    mount(root,
+      h('div', { class: 'dim', style: { margin: '0 0 12px', lineHeight: '1.55', fontSize: '13px' } },
+        `${items.length} ${items.length === 1 ? 'title has' : 'titles have'} more than one file on disk. Remove the copy you don't want on disk (or via Plex with media deletion enabled).`),
+      h('div', { class: 'list' }, ...items.map((it) => h('div', { class: 'row' },
+        h('div', { class: 'row-main' },
+          h('div', { class: 'row-title' }, `${it.title || 'Unknown'}${it.year ? ` (${it.year})` : ''}`,
+            h('span', { class: 'pill warn', style: { marginLeft: '8px' } }, `${it.parts.length} files`),
+            it.section ? h('span', { class: 'pill muted', style: { marginLeft: '6px' } }, it.section) : null),
+          ...it.parts.map((p) => h('div', { class: 'meta-line', style: { marginTop: '4px', wordBreak: 'break-all', display: 'block' } },
+            copyable(p.file), p.size ? h('span', { class: 'dim', style: { marginLeft: '8px' } }, fmtBytes(p.size)) : null)),
+        ),
+      ))),
+    );
+  } catch (err) { needsAuth(root, err); }
 }
 
 function needsAuth(root, err) {

@@ -40,6 +40,45 @@ async function pj(url, token, cid) {
 
 export function hasToken(cfg) { return !!plexToken(cfg); }
 
+// Parse a Plex library "duplicate" Metadata item into { title, year, type,
+// section, parts:[{file,size}] }. Exported for testing. A Plex duplicate has
+// more than one Media/Part (the same movie/episode present as multiple files).
+export function parseDuplicateItem(m, section) {
+  const parts = [];
+  for (const media of (m.Media || [])) {
+    for (const p of (media.Part || [])) {
+      if (p && p.file) parts.push({ file: p.file, size: Number(p.size) || 0 });
+    }
+  }
+  return { title: m.title, year: m.year, type: m.type, section, ratingKey: m.ratingKey, parts };
+}
+
+// Ask the Plex server for duplicates across all movie/show libraries. Works even
+// when Radarr/Sonarr paths are broken, because Plex scanned the real disk.
+export async function getDuplicates(cfg) {
+  const t = plexToken(cfg);
+  const url = plexServerUrl(cfg);
+  if (!t) throw new Error('No Plex token — sign in with Plex first');
+  if (!url) throw new Error('Set the Plex server URL (services.plex.baseUrl) to scan for duplicates');
+  const base = url.replace(/\/$/, '');
+  const cid = clientId(cfg);
+  const sects = await pj(`${base}/library/sections`, t, cid);
+  const dirs = (sects.MediaContainer && sects.MediaContainer.Directory) || [];
+  const out = [];
+  for (const d of dirs) {
+    if (!['movie', 'show'].includes(d.type)) continue;
+    try {
+      const data = await pj(`${base}/library/sections/${d.key}/all?duplicate=1`, t, cid);
+      const md = (data.MediaContainer && data.MediaContainer.Metadata) || [];
+      for (const m of md) {
+        const item = parseDuplicateItem(m, d.title);
+        if (item.parts.length > 1) out.push(item);
+      }
+    } catch { /* skip a section that errors */ }
+  }
+  return out;
+}
+
 export async function getWatchlist(cfg) {
   const t = plexToken(cfg);
   if (!t) throw new Error('No Plex token — sign in with Plex first');
