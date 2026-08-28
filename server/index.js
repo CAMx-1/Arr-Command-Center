@@ -162,6 +162,7 @@ app.get('/api/plex/watchlist', async (req, res) => { try { res.json(await plex.g
 app.get('/api/plex/users', async (req, res) => { try { res.json(await plex.getUsers(cfg)); } catch (e) { res.status(502).json({ error: e.message }); } });
 app.get('/api/plex/friends', async (req, res) => { try { res.json(await plex.getFriends(cfg)); } catch (e) { res.status(502).json({ error: e.message }); } });
 app.get('/api/plex/sessions', async (req, res) => { try { res.json(await plex.getSessions(cfg)); } catch (e) { res.status(502).json({ error: e.message }); } });
+app.get('/api/plex/duplicates', async (req, res) => { try { res.json(await plex.getDuplicates(cfg)); } catch (e) { res.status(502).json({ error: e.message }); } });
 
 // Image proxy: fetches a Plex image with the token server-side (token never sent
 // to the browser). Restricted to Plex hosts / the configured server to avoid SSRF.

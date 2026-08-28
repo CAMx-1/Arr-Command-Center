@@ -25,6 +25,7 @@ export const api = {
     users: async () => parse(await fetch('/api/plex/users')),
     friends: async () => parse(await fetch('/api/plex/friends')),
     sessions: async () => parse(await fetch('/api/plex/sessions')),
+    duplicates: async () => parse(await fetch('/api/plex/duplicates')),
   },
   // Custom links (Organizr-style)
   async links() { return parse(await fetch('/api/links')); },
