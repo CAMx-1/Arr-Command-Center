@@ -39,9 +39,9 @@ function makeSonarr() {
   const app = express();
   app.use(express.json());
   let series = [
-    { id: 1, title: 'Severance', year: 2022, status: 'continuing', monitored: true, seasonCount: 2, network: 'Apple TV+', overview: 'Employees at Lumon undergo a procedure that severs work and personal memories.', statistics: { episodeFileCount: 18, episodeCount: 19, percentOfEpisodes: 94.7, sizeOnDisk: 40802189312 }, images: [] },
-    { id: 2, title: 'The Bear', year: 2022, status: 'continuing', monitored: true, seasonCount: 3, network: 'FX', overview: 'A young chef returns to Chicago to run his family sandwich shop.', statistics: { episodeFileCount: 28, episodeCount: 28, percentOfEpisodes: 100, sizeOnDisk: 30064771072 }, images: [] },
-    { id: 3, title: 'Foundation', year: 2021, status: 'continuing', monitored: false, seasonCount: 2, network: 'Apple TV+', overview: 'A band of exiles races to save humanity and rebuild civilization.', statistics: { episodeFileCount: 20, episodeCount: 20, percentOfEpisodes: 100, sizeOnDisk: 64424509440 }, images: [] },
+    { id: 1, title: 'Severance', year: 2022, status: 'continuing', monitored: true, seasonCount: 2, network: 'Apple TV+', overview: 'Employees at Lumon undergo a procedure that severs work and personal memories.', path: 'C:\\Media\\TV\\Severance', rootFolderPath: 'C:\\Media\\TV', statistics: { episodeFileCount: 18, episodeCount: 19, percentOfEpisodes: 94.7, sizeOnDisk: 40802189312 }, images: [] },
+    { id: 2, title: 'The Bear', year: 2022, status: 'continuing', monitored: true, seasonCount: 3, network: 'FX', overview: 'A young chef returns to Chicago to run his family sandwich shop.', path: 'C:\\Media\\TV\\The Bear', rootFolderPath: 'C:\\Media\\TV', statistics: { episodeFileCount: 28, episodeCount: 28, percentOfEpisodes: 100, sizeOnDisk: 30064771072 }, images: [] },
+    { id: 3, title: 'Foundation', year: 2021, status: 'continuing', monitored: false, seasonCount: 2, network: 'Apple TV+', overview: 'A band of exiles races to save humanity and rebuild civilization.', path: 'C:\\Media\\TV\\Foundation', rootFolderPath: 'C:\\Media\\TV', statistics: { episodeFileCount: 20, episodeCount: 20, percentOfEpisodes: 100, sizeOnDisk: 64424509440 }, images: [] },
   ];
   let queue = [
     { id: 101, title: 'Severance S02E10', seriesId: 1, status: 'downloading', trackedDownloadState: 'downloading', size: 2147483648, sizeleft: 536870912, timeleft: '00:04:12', estimatedCompletionTime: new Date(Date.now() + 252000).toISOString(), downloadClient: 'SABnzbd', indexer: 'NZBgeek' },
@@ -54,7 +54,9 @@ function makeSonarr() {
   });
   app.get('/__debug', (req, res) => res.json({ cf: cfSeen.sonarr || null }));
   app.get('/api/v3/system/status', (req, res) => res.json({ version: '4.0.10.2544', appName: 'Sonarr', instanceName: 'Sonarr (mock)' }));
-  app.get('/api/v3/rootfolder', (req, res) => res.json([{ id: 1, path: '/tv', freeSpace: 824633720832, accessible: true }]));
+  let rootFolders = [{ id: 1, path: 'C:\\Media\\TV', freeSpace: 0, accessible: false, unmappedFolders: [] }];
+  app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
+  app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 500000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
   app.get('/api/v3/qualityprofile', (req, res) => res.json([{ id: 1, name: 'HD-1080p' }, { id: 2, name: 'Ultra-HD' }, { id: 3, name: 'Any' }]));
   app.get('/api/v3/series', (req, res) => res.json(series));
   app.get('/api/v3/queue', (req, res) => res.json({ page: 1, pageSize: 20, totalRecords: queue.length, records: queue }));
@@ -112,9 +114,9 @@ function makeRadarr() {
   const app = express();
   app.use(express.json());
   let movies = [
-    { id: 1, title: 'Dune: Part Two', year: 2024, status: 'released', monitored: true, hasFile: true, runtime: 166, overview: 'Paul Atreides unites with the Fremen to wage war against House Harkonnen.', sizeOnDisk: 32212254720, studio: 'Legendary', images: [] },
-    { id: 2, title: 'Oppenheimer', year: 2023, status: 'released', monitored: true, hasFile: true, runtime: 180, overview: 'The story of J. Robert Oppenheimer and the atomic bomb.', sizeOnDisk: 27917287424, studio: 'Universal', images: [] },
-    { id: 3, title: 'Furiosa', year: 2024, status: 'released', monitored: true, hasFile: false, runtime: 148, overview: 'The origin story of Furiosa before Mad Max: Fury Road.', sizeOnDisk: 0, studio: 'Warner Bros', images: [] },
+    { id: 1, title: 'Dune: Part Two', year: 2024, status: 'released', monitored: true, hasFile: true, runtime: 166, overview: 'Paul Atreides unites with the Fremen to wage war against House Harkonnen.', path: 'C:\\Media\\Movies\\Dune Part Two (2024)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 32212254720, studio: 'Legendary', images: [] },
+    { id: 2, title: 'Oppenheimer', year: 2023, status: 'released', monitored: true, hasFile: true, runtime: 180, overview: 'The story of J. Robert Oppenheimer and the atomic bomb.', path: 'C:\\Media\\Movies\\Oppenheimer (2023)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 27917287424, studio: 'Universal', images: [] },
+    { id: 3, title: 'Furiosa', year: 2024, status: 'released', monitored: true, hasFile: false, runtime: 148, overview: 'The origin story of Furiosa before Mad Max: Fury Road.', path: 'C:\\Media\\Movies\\Furiosa (2024)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 0, studio: 'Warner Bros', images: [] },
   ];
   let queue = [
     { id: 201, title: 'Furiosa 2024 2160p', movieId: 3, status: 'downloading', trackedDownloadState: 'downloading', size: 21474836480, sizeleft: 6442450944, timeleft: '00:11:38', downloadClient: 'SABnzbd', indexer: 'DrunkenSlug' },
@@ -127,7 +129,9 @@ function makeRadarr() {
   });
   app.get('/__debug', (req, res) => res.json({ cf: cfSeen.radarr || null }));
   app.get('/api/v3/system/status', (req, res) => res.json({ version: '5.11.0.9244', appName: 'Radarr', instanceName: 'Radarr (mock)' }));
-  app.get('/api/v3/rootfolder', (req, res) => res.json([{ id: 1, path: '/movies', freeSpace: 1099511627776, accessible: true }]));
+  let rootFolders = [{ id: 1, path: 'C:\\Media\\Movies', freeSpace: 0, accessible: false, unmappedFolders: [] }];
+  app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
+  app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 900000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
   app.get('/api/v3/qualityprofile', (req, res) => res.json([{ id: 1, name: 'HD-1080p' }, { id: 2, name: 'Ultra-HD' }, { id: 3, name: 'Any' }]));
   app.get('/api/v3/movie', (req, res) => res.json(movies));
   app.get('/api/v3/calendar', (req, res) => res.json([

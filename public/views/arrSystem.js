@@ -1,6 +1,7 @@
 // Shared "System" + "Wanted" tabs for Sonarr/Radarr — health checks, disk space,
 // system status, maintenance commands, and the missing/wanted list.
 import { h, mount, skeletonList, empty, toast, fmtBytes, pct, timeEl } from '../lib/ui.js';
+import { openPathFix } from '../lib/pathFix.js';
 
 const HEALTH_CLS = { error: 'down', warning: 'warn', notice: 'info' };
 
@@ -26,8 +27,9 @@ export async function tabSystem(root, arr, ctx, kind) {
 
     mount(root,
       h('div', { class: 'section-title' }, 'Maintenance'),
-      h('div', { class: 'meta-line', style: { gap: '8px', marginBottom: '16px' } },
+      h('div', { class: 'meta-line', style: { gap: '8px', marginBottom: '16px', flexWrap: 'wrap' } },
         ...commands.map(([name, label]) => h('button', { class: 'btn sm', onclick: () => run(name) }, label)),
+        h('button', { class: 'btn sm primary', title: 'Re-point moved libraries to the real disk (e.g. after a Windows → Mac move)', onclick: () => openPathFix(arr, ctx, kind) }, '🛠 Fix paths'),
       ),
       h('div', { class: 'section-title' }, 'Health'),
       (health && health.length)
