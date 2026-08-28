@@ -9,6 +9,7 @@ import { renderOverseerr, openSeasonModal } from './views/overseerr.js';
 import { renderSabnzbd } from './views/sabnzbd.js';
 import { renderTautulli } from './views/tautulli.js';
 import { renderProwlarr } from './views/prowlarr.js';
+import { renderBazarr } from './views/bazarr.js';
 import { renderPlex } from './views/plex.js';
 import { renderEmbed } from './views/embed.js';
 import { renderSettings } from './views/settings.js';
@@ -23,6 +24,7 @@ export const SERVICE_META = {
   sabnzbd: { logo: '/icons/sabnzbd.svg', emoji: '⬇', renderer: renderSabnzbd },
   tautulli: { logo: '/icons/tautulli.svg', emoji: '', renderer: renderTautulli },
   prowlarr: { logo: '/icons/prowlarr.png', emoji: '', renderer: renderProwlarr },
+  bazarr: { logo: '/icons/bazarr.svg', emoji: '', renderer: renderBazarr },
   plex: { logo: '/icons/plex.svg', emoji: '▶', renderer: renderPlex },
 };
 

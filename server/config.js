@@ -27,7 +27,7 @@ export function loadDotEnv() {
   }
 }
 
-const SERVICE_TYPES = ['sonarr', 'radarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'plex'];
+const SERVICE_TYPES = ['sonarr', 'radarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'plex'];
 export const ALLOWED_SERVICE_TYPES = SERVICE_TYPES;
 export const CONFIG_PATH = path.join(ROOT, 'config.json');
 
@@ -87,6 +87,7 @@ function buildMockConfig() {
       overseerr: mk('overseerr', 'Overseerr', 'overseerr', MOCK_PORTS.overseerr),
       sabnzbd: mk('sabnzbd', 'SABnzbd', 'sabnzbd', MOCK_PORTS.sabnzbd),
       tautulli: mk('tautulli', 'Tautulli', 'tautulli', MOCK_PORTS.tautulli),
+      bazarr: mk('bazarr', 'Bazarr', 'bazarr', MOCK_PORTS.bazarr),
     },
   };
 }

@@ -73,6 +73,16 @@ export const api = {
     };
   },
 
+  // ---- Bazarr helper (subtitle manager; API base is /api/, no version prefix) ----
+  bazarr(service) {
+    return {
+      get: (p) => this.proxy(service, `api/${p}`),
+      post: (p, body) => this.proxy(service, `api/${p}`, { method: 'POST', body }),
+      patch: (p, body) => this.proxy(service, `api/${p}`, { method: 'PATCH', body }),
+      del: (p) => this.proxy(service, `api/${p}`, { method: 'DELETE' }),
+    };
+  },
+
   // ---- SABnzbd helper (query-based API) ----
   sab(service, params = {}) {
     const qs = new URLSearchParams({ output: 'json', ...params });

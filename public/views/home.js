@@ -12,8 +12,9 @@ const ACTIVITY_DEFS = [
   { id: 'radarr', label: 'Radarr Queue', type: 'radarr' },
   { id: 'seerr-approval', label: 'Needs Approval', type: 'overseerr' },
   { id: 'seerr-requests', label: 'Recent Requests', type: 'overseerr' },
+  { id: 'bazarr', label: 'Wanted Subtitles', type: 'bazarr' },
 ];
-const ACTIVITY_DEFAULTS = { failed: true, streams: true, sab: true, sonarr: true, radarr: true, 'seerr-approval': true, 'seerr-requests': false };
+const ACTIVITY_DEFAULTS = { failed: true, streams: true, sab: true, sonarr: true, radarr: true, 'seerr-approval': true, 'seerr-requests': false, bazarr: false };
 const REQ_STATUS = { 1: 'Pending', 2: 'Approved', 3: 'Declined' };
 
 function loadActivityPrefs() {
@@ -191,6 +192,10 @@ async function hydrateCardStats(svc, ctx) {
       const bw = Number(data.total_bandwidth) || 0;
       const bwLabel = bw >= 1000 ? `${(bw / 1000).toFixed(1)} Mbps` : `${bw} kbps`;
       mount(el, stat(data.stream_count ?? (data.sessions || []).length, 'Streams'), stat(bwLabel, 'Bandwidth'));
+    } else if (svc.type === 'bazarr') {
+      const badges = await api.bazarr(svc.key).get('badges');
+      const wanted = (badges.episodes || 0) + (badges.movies || 0);
+      mount(el, stat(wanted, 'Wanted'), stat(badges.providers ?? 0, 'Throttled'));
     } else {
       clear(el);
     }
@@ -291,6 +296,21 @@ async function fetchSource(def, svc, ctx) {
         const prog = r.size ? ((r.size - (r.sizeleft || 0)) / r.size) * 100 : 0;
         rows.push(activityRow({ icon: svcIcon(meta.logo, meta.emoji || '', 22), title: r.title, sub: `${svc.label} · ${r.status} · ${fmtBytes(r.sizeleft || 0)} left`, progress: prog,
           nav: { key: svc.key, tab: 'queue' } }));
+      }
+    } else if (def.id === 'bazarr') {
+      const meta = SERVICE_META.bazarr || {};
+      const [epResp, mvResp] = await Promise.all([
+        api.bazarr(svc.key).get('episodes/wanted').catch(() => ({ data: [] })),
+        api.bazarr(svc.key).get('movies/wanted').catch(() => ({ data: [] })),
+      ]);
+      const langNames = (list) => (list || []).map((l) => l.name || l.code2).join(', ');
+      for (const e of ((epResp && epResp.data) || [])) {
+        rows.push(activityRow({ icon: svcIcon(meta.logo, meta.emoji || '', 22), title: `${e.seriesTitle}${e.episode_number ? ` · ${e.episode_number}` : ''}`,
+          sub: `${svc.label} · Missing ${langNames(e.missing_subtitles)}`, progress: 0, nav: { key: svc.key, tab: 'wanted' } }));
+      }
+      for (const m of ((mvResp && mvResp.data) || [])) {
+        rows.push(activityRow({ icon: svcIcon(meta.logo, meta.emoji || '', 22), title: `${m.title}${m.year ? ` (${m.year})` : ''}`,
+          sub: `${svc.label} · Missing ${langNames(m.missing_subtitles)}`, progress: 0, nav: { key: svc.key, tab: 'wanted' } }));
       }
     } else if (def.id === 'seerr-approval' || def.id === 'seerr-requests') {
       const q = def.id === 'seerr-approval' ? 'request?filter=pending&take=10' : 'request?take=10&sort=added';
