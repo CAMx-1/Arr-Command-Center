@@ -67,6 +67,38 @@ export function bulkLibrary(root, opts) {
     });
   };
 
+  const rootEditor = async () => {
+    const ids = [...selected];
+    if (!ids.length) { toast('Nothing selected', 'info'); return; }
+    let roots = [];
+    try { roots = await arr.get('rootfolder'); } catch { /* ignore */ }
+    const sel = h('select', { class: 'input' }, ...roots.map((r) => h('option', { value: r.path }, `${r.path}${r.accessible === false ? ' (not available)' : ''}`)));
+    const moveChk = h('input', { type: 'checkbox' });
+    const apply = async () => {
+      const rootFolderPath = sel.value;
+      if (!rootFolderPath) { toast('Pick a root folder', 'info'); return; }
+      const key = isSeries ? 'seriesIds' : 'movieIds';
+      try {
+        await arr.put(isSeries ? 'series/editor' : 'movie/editor', { [key]: ids, rootFolderPath, moveFiles: moveChk.checked });
+        if (invalidateKey) invalidate(invalidateKey);
+        toast(`Moved ${ids.length} item(s) to ${rootFolderPath}${moveChk.checked ? ' (files moved)' : ' (re-pointed)'}`, 'success');
+        closeModal(); onExit();
+      } catch (e) { toast(e.message, 'error'); }
+    };
+    openModal({
+      title: `Root folder · ${ids.length} selected`,
+      body: h('div', { class: 'pw-form' },
+        h('label', { class: 'pw-field' }, h('span', { class: 'pw-field-label' }, 'Move to'), sel),
+        h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, moveChk, 'Move files on disk (leave off to only update the stored path)'),
+        h('div', { class: 'dim', style: { fontSize: '12px' } }, 'Use this to correct items that ended up on the wrong drive.'),
+      ),
+      footer: h('div', { style: { display: 'flex', gap: '10px', justifyContent: 'flex-end', width: '100%' } },
+        h('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
+        h('button', { class: 'btn primary', onclick: apply }, 'Move'),
+      ),
+    });
+  };
+
   const selectAll = h('input', { type: 'checkbox' });
   const listEl = h('div', { class: 'list' });
   const renderRows = () => mount(listEl, ...items.slice(0, 500).map(rowFor));
@@ -99,6 +131,7 @@ export function bulkLibrary(root, opts) {
       h('button', { class: 'btn sm', onclick: () => monitor(false) }, 'Unmonitor'),
       h('button', { class: 'btn sm', onclick: search }, 'Search'),
       h('button', { class: 'btn sm', onclick: tagsEditor }, 'Tags'),
+      h('button', { class: 'btn sm', title: 'Move selected to a different root folder / drive', onclick: rootEditor }, 'Root'),
       h('button', { class: 'btn sm danger', onclick: del }, 'Delete'),
       h('button', { class: 'btn sm primary', onclick: onExit }, 'Done'),
     ),
