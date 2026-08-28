@@ -245,7 +245,7 @@ function settingRow(label, value) {
   );
 }
 
-const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'plex'];
+const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'plex'];
 
 function field(label, control, hint) {
   return h('label', { class: 'pw-field' },

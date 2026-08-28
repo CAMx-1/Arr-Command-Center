@@ -35,6 +35,10 @@ function authFor(svc) {
   if (type === 'sabnzbd' || type === 'tautulli') {
     // SABnzbd and Tautulli authenticate via ?apikey= query param.
     if (svc.apiKey) query.apikey = svc.apiKey;
+  } else if (type === 'bazarr') {
+    // Bazarr authenticates via the X-API-KEY header (header names are
+    // case-insensitive, but Bazarr's docs use this exact casing).
+    if (svc.apiKey) headers['X-API-KEY'] = svc.apiKey;
   } else {
     // Sonarr / Radarr / Overseerr use the X-Api-Key header.
     if (svc.apiKey) headers['X-Api-Key'] = svc.apiKey;
@@ -128,6 +132,7 @@ const HEALTH_PATH = {
   sabnzbd: 'api?mode=version&output=json',
   tautulli: 'api/v2?cmd=status',
   prowlarr: 'api/v1/system/status',
+  bazarr: 'api/system/status',
 };
 
 export async function pingService(svc) {
@@ -145,7 +150,7 @@ export async function pingService(svc) {
     let version;
     try {
       const data = await upstream.json();
-      version = data.version || data.settings?.version || undefined;
+      version = data.version || data.settings?.version || data.data?.bazarr_version || undefined;
     } catch { /* non-json */ }
     const error = upstream.ok ? undefined
       : (upstream.status === 401 || upstream.status === 403) ? 'Auth / access denied'

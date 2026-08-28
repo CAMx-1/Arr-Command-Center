@@ -11,6 +11,7 @@ export const MOCK_PORTS = {
   overseerr: 15055,
   sabnzbd: 18080,
   tautulli: 18181,
+  bazarr: 16767,
 };
 
 const cfSeen = {}; // service -> last seen CF headers
@@ -304,6 +305,192 @@ function makeTautulli() {
   return app;
 }
 
+// ---------------- Bazarr (subtitle manager) ----------------
+function makeBazarr() {
+  const app = express();
+  app.use(express.json());
+
+  // Language helpers
+  const L = {
+    en: { name: 'English', code2: 'en', code3: 'eng' },
+    es: { name: 'Spanish', code2: 'es', code3: 'spa' },
+    fr: { name: 'French', code2: 'fr', code3: 'fra' },
+  };
+  const missing = (code, { forced = false, hi = false } = {}) => ({ ...L[code], forced, hi });
+  const have = (code, path) => ({ ...L[code], forced: false, hi: false, path });
+
+  // Library: series (subtitle view of Sonarr) and movies (subtitle view of Radarr).
+  let series = [
+    { sonarrSeriesId: 1, title: 'Severance', year: 2022, monitored: true, path: '/tv/Severance', tvdbId: 371980, imdbId: 'tt11280740', profileId: 1, audio_language: [L.en], episodeFileCount: 19, episodeMissingCount: 1 },
+    { sonarrSeriesId: 2, title: 'The Bear', year: 2022, monitored: true, path: '/tv/The Bear', tvdbId: 388477, imdbId: 'tt14452776', profileId: 2, audio_language: [L.en], episodeFileCount: 28, episodeMissingCount: 3 },
+    { sonarrSeriesId: 3, title: 'Foundation', year: 2021, monitored: true, path: '/tv/Foundation', tvdbId: 358711, imdbId: 'tt0804484', profileId: 1, audio_language: [L.en], episodeFileCount: 20, episodeMissingCount: 0 },
+  ];
+  let movies = [
+    { radarrId: 1, title: 'Dune: Part Two', year: 2024, monitored: true, path: '/movies/Dune Part Two (2024)', tmdbId: 693134, imdbId: 'tt15239678', profileId: 1, audio_language: [L.en], subtitles: [have('en', '/movies/Dune.en.srt')], missing_subtitles: [] },
+    { radarrId: 2, title: 'Oppenheimer', year: 2023, monitored: true, path: '/movies/Oppenheimer (2023)', tmdbId: 872585, imdbId: 'tt15398776', profileId: 2, audio_language: [L.en], subtitles: [have('en', '/movies/Oppenheimer.en.srt')], missing_subtitles: [missing('es')] },
+    { radarrId: 3, title: 'Furiosa', year: 2024, monitored: true, path: '/movies/Furiosa (2024)', tmdbId: 786892, imdbId: 'tt12037194', profileId: 2, audio_language: [L.en], subtitles: [], missing_subtitles: [missing('en'), missing('es')] },
+  ];
+  let wantedEpisodes = [
+    { sonarrSeriesId: 1, sonarrEpisodeId: 1010, seriesTitle: 'Severance', episodeTitle: 'Cold Harbor', episode_number: '2x10', sceneName: 'Severance.S02E10.1080p.WEB-DL', tags: [], failedAttempts: 0, missing_subtitles: [missing('en')] },
+    { sonarrSeriesId: 2, sonarrEpisodeId: 3005, seriesTitle: 'The Bear', episodeTitle: 'Children', episode_number: '3x05', sceneName: 'The.Bear.S03E05.1080p.WEB-DL', tags: [], failedAttempts: 1, missing_subtitles: [missing('en'), missing('es')] },
+    { sonarrSeriesId: 2, sonarrEpisodeId: 3006, seriesTitle: 'The Bear', episodeTitle: 'Napkins', episode_number: '3x06', sceneName: 'The.Bear.S03E06.1080p.WEB-DL', tags: [], failedAttempts: 0, missing_subtitles: [missing('en')] },
+  ];
+  let wantedMovies = [
+    { radarrId: 3, title: 'Furiosa', year: 2024, sceneName: 'Furiosa.2024.2160p.WEB-DL', tags: [], failedAttempts: 0, missing_subtitles: [missing('en'), missing('es')] },
+    { radarrId: 2, title: 'Oppenheimer', year: 2023, sceneName: 'Oppenheimer.2023.1080p.BluRay', tags: [], failedAttempts: 0, missing_subtitles: [missing('es')] },
+  ];
+  let seriesHistory = [
+    { action: 1, timestamp: new Date(Date.now() - 3600000).toISOString(), description: 'English subtitles downloaded from OpenSubtitles.com with a score of 98%.', language: L.en, provider: 'opensubtitlescom', score: '98%', seriesTitle: 'Severance', episode_number: '2x01', episodeTitle: 'Hello, Ms. Cobel', sonarrSeriesId: 1, sonarrEpisodeId: 1001, subtitles_path: '/tv/Severance/S02E01.en.srt' },
+    { action: 2, timestamp: new Date(Date.now() - 9000000).toISOString(), description: 'English subtitles manually downloaded from Addic7ed.', language: L.en, provider: 'addic7ed', score: '91%', seriesTitle: 'The Bear', episode_number: '3x04', episodeTitle: 'Violet', sonarrSeriesId: 2, sonarrEpisodeId: 3004, subtitles_path: '/tv/The Bear/S03E04.en.srt' },
+    { action: 3, timestamp: new Date(Date.now() - 172800000).toISOString(), description: 'English subtitles upgraded from a better release.', language: L.en, provider: 'opensubtitlescom', score: '100%', seriesTitle: 'Foundation', episode_number: '2x10', episodeTitle: 'Creation Myths', sonarrSeriesId: 3, sonarrEpisodeId: 3110, subtitles_path: '/tv/Foundation/S02E10.en.srt' },
+  ];
+  let movieHistory = [
+    { action: 1, timestamp: new Date(Date.now() - 5400000).toISOString(), description: 'English subtitles downloaded from Podnapisi with a score of 96%.', language: L.en, provider: 'podnapisi', score: '96%', title: 'Dune: Part Two', radarrId: 1, subtitles_path: '/movies/Dune.en.srt' },
+    { action: 1, timestamp: new Date(Date.now() - 86400000).toISOString(), description: 'English subtitles downloaded from OpenSubtitles.com with a score of 99%.', language: L.en, provider: 'opensubtitlescom', score: '99%', title: 'Oppenheimer', radarrId: 2, subtitles_path: '/movies/Oppenheimer.en.srt' },
+  ];
+  const providers = [
+    { name: 'opensubtitlescom', status: 'Good', retry: 'now' },
+    { name: 'podnapisi', status: 'Good', retry: 'now' },
+    { name: 'addic7ed', status: 'Good', retry: 'now' },
+    { name: 'subscene', status: 'Throttled until 14:30', retry: '14:30' },
+  ];
+  const languages = [
+    { ...L.en, enabled: true },
+    { ...L.es, enabled: true },
+    { ...L.fr, enabled: false },
+  ];
+  const profiles = [
+    { profileId: 1, name: 'English', cutoff: null, mustContain: [], mustNotContain: [], originalFormat: false, items: [{ id: 1, language: 'en', audio_exclude: 'False', hi: 'False', forced: 'False' }] },
+    { profileId: 2, name: 'English + Spanish', cutoff: null, mustContain: [], mustNotContain: [], originalFormat: false, items: [{ id: 1, language: 'en', audio_exclude: 'False', hi: 'False', forced: 'False' }, { id: 2, language: 'es', audio_exclude: 'False', hi: 'False', forced: 'False' }] },
+  ];
+
+  const badges = () => ({
+    episodes: wantedEpisodes.length,
+    movies: wantedMovies.length,
+    providers: providers.filter((p) => /throttl/i.test(p.status)).length,
+    status: 0,
+    sonarr_signalr: 'LIVE',
+    radarr_signalr: 'LIVE',
+    announcements: 0,
+  });
+
+  app.use((req, res, next) => {
+    recordCf('bazarr', req);
+    if (req.headers['x-api-key'] !== 'MOCK_API_KEY') return res.status(401).json({ error: 'Unauthorized (missing X-API-KEY)' });
+    next();
+  });
+  app.get('/__debug', (req, res) => res.json({ cf: cfSeen.bazarr || null }));
+
+  app.get('/api/system/status', (req, res) => res.json({ data: {
+    bazarr_version: 'v1.4.5', sonarr_version: '4.0.10.2544', radarr_version: '5.11.0.9244',
+    operating_system: 'Linux', python_version: '3.11.9', bazarr_directory: '/app/bazarr', bazarr_config_directory: '/config',
+    package_version: 'Docker', start_time: new Date(Date.now() - 5 * 86400000).toISOString(),
+  } }));
+  app.get('/api/system/health', (req, res) => res.json({ data: [] }));
+  app.get('/api/badges', (req, res) => res.json(badges()));
+
+  app.get('/api/series', (req, res) => res.json({ data: series, total: series.length }));
+  app.get('/api/movies', (req, res) => res.json({ data: movies, total: movies.length }));
+
+  app.get('/api/episodes/wanted', (req, res) => res.json({ data: wantedEpisodes, total: wantedEpisodes.length }));
+  app.get('/api/movies/wanted', (req, res) => res.json({ data: wantedMovies, total: wantedMovies.length }));
+
+  app.get('/api/history/series', (req, res) => res.json({ data: seriesHistory, total: seriesHistory.length }));
+  app.get('/api/history/movies', (req, res) => res.json({ data: movieHistory, total: movieHistory.length }));
+
+  app.get('/api/providers', (req, res) => res.json({ data: providers }));
+  app.get('/api/system/languages', (req, res) => {
+    const enabledOnly = req.query.enabled === 'true';
+    res.json(enabledOnly ? languages.filter((l) => l.enabled) : languages);
+  });
+  app.get('/api/system/languages/profiles', (req, res) => res.json(profiles));
+
+  // ---- Actions (demo: mutate state so the UI feels live) ----
+  // Search subtitles for a wanted episode -> "download" it (move to history).
+  app.patch('/api/episodes', (req, res) => {
+    const epId = Number(req.query.episodeid || (req.body && req.body.episodeid));
+    const item = wantedEpisodes.find((w) => w.sonarrEpisodeId === epId);
+    if (item) {
+      const lang = item.missing_subtitles[0] || L.en;
+      wantedEpisodes = wantedEpisodes.filter((w) => w.sonarrEpisodeId !== epId);
+      const s = series.find((x) => x.sonarrSeriesId === item.sonarrSeriesId);
+      if (s && s.episodeMissingCount > 0) s.episodeMissingCount -= 1;
+      seriesHistory.unshift({ action: 2, timestamp: new Date().toISOString(), description: `${lang.name} subtitles manually downloaded from OpenSubtitles.com with a score of 100%.`, language: lang, provider: 'opensubtitlescom', score: '100%', seriesTitle: item.seriesTitle, episode_number: item.episode_number, episodeTitle: item.episodeTitle, sonarrSeriesId: item.sonarrSeriesId, sonarrEpisodeId: epId });
+    }
+    res.json({});
+  });
+  // Search subtitles for a wanted movie -> "download" it.
+  app.patch('/api/movies', (req, res) => {
+    const rid = Number(req.query.radarrid || (req.body && req.body.radarrid));
+    const item = wantedMovies.find((w) => w.radarrId === rid);
+    if (item) {
+      const lang = item.missing_subtitles[0] || L.en;
+      wantedMovies = wantedMovies.filter((w) => w.radarrId !== rid);
+      const m = movies.find((x) => x.radarrId === rid);
+      if (m) { m.subtitles = [...(m.subtitles || []), have(lang.code2, `${m.path}/subtitle.${lang.code2}.srt`)]; m.missing_subtitles = (m.missing_subtitles || []).filter((s) => s.code2 !== lang.code2); }
+      movieHistory.unshift({ action: 2, timestamp: new Date().toISOString(), description: `${lang.name} subtitles manually downloaded from OpenSubtitles.com with a score of 100%.`, language: lang, provider: 'opensubtitlescom', score: '100%', title: item.title, radarrId: rid });
+    }
+    res.json({});
+  });
+  // Manual subtitle download (from the "search available" modal).
+  app.post('/api/subtitles', (req, res) => res.json({}));
+  app.patch('/api/providers', (req, res) => res.json({}));
+  app.post('/api/system/tasks', (req, res) => res.json({}));
+
+  // ---- Manual search: list candidate subtitles from providers ----
+  const candidates = (title) => ([
+    { language: L.en, provider: 'opensubtitlescom', score: 98, orig_score: 98, uploader: 'subber123', release_info: [`${title}.1080p.WEB-DL.DDP5.1.H.264`], matches: ['series', 'year', 'resolution', 'source'], dont_matches: ['release_group'], hearing_impaired: false, forced: false, subtitle: 'b64-en-1', url: 'https://opensubtitles.com/sub/1' },
+    { language: L.en, provider: 'addic7ed', score: 91, orig_score: 91, uploader: 'addicteam', release_info: [`${title}.720p.WEB-DL`], matches: ['series', 'year'], dont_matches: ['resolution'], hearing_impaired: true, forced: false, subtitle: 'b64-en-2', url: 'https://addic7ed.com/sub/2' },
+    { language: L.es, provider: 'podnapisi', score: 84, orig_score: 84, uploader: 'esteam', release_info: [`${title}.1080p.BluRay.x264`], matches: ['year'], dont_matches: ['source', 'resolution'], hearing_impaired: false, forced: false, subtitle: 'b64-es-1', url: 'https://podnapisi.net/sub/3' },
+  ]);
+  app.get('/api/providers/episodes', (req, res) => {
+    const ep = wantedEpisodes.find((w) => w.sonarrEpisodeId === Number(req.query.episodeid));
+    res.json({ data: candidates(ep ? ep.seriesTitle : 'Episode') });
+  });
+  app.get('/api/providers/movies', (req, res) => {
+    const mv = movies.find((m) => m.radarrId === Number(req.query.radarrid));
+    res.json({ data: candidates(mv ? mv.title : 'Movie') });
+  });
+  // Manual download of a chosen candidate -> record to history (+ clear wanted).
+  app.post('/api/providers/episodes', (req, res) => {
+    const epId = Number(req.query.episodeid || (req.body && req.body.episodeid));
+    const item = wantedEpisodes.find((w) => w.sonarrEpisodeId === epId);
+    if (item) {
+      wantedEpisodes = wantedEpisodes.filter((w) => w.sonarrEpisodeId !== epId);
+      const s = series.find((x) => x.sonarrSeriesId === item.sonarrSeriesId);
+      if (s && s.episodeMissingCount > 0) s.episodeMissingCount -= 1;
+      seriesHistory.unshift({ action: 2, timestamp: new Date().toISOString(), description: `Manually downloaded subtitles from ${req.body?.provider || 'a provider'}.`, language: L.en, provider: req.body?.provider || 'opensubtitlescom', score: '100%', seriesTitle: item.seriesTitle, episode_number: item.episode_number, episodeTitle: item.episodeTitle, sonarrSeriesId: item.sonarrSeriesId, sonarrEpisodeId: epId });
+    }
+    res.json({});
+  });
+  app.post('/api/providers/movies', (req, res) => {
+    const rid = Number(req.query.radarrid || (req.body && req.body.radarrid));
+    const item = wantedMovies.find((w) => w.radarrId === rid);
+    if (item) {
+      wantedMovies = wantedMovies.filter((w) => w.radarrId !== rid);
+      const m = movies.find((x) => x.radarrId === rid);
+      if (m) { m.subtitles = [...(m.subtitles || []), have('en', `${m.path}/subtitle.en.srt`)]; m.missing_subtitles = []; }
+      movieHistory.unshift({ action: 2, timestamp: new Date().toISOString(), description: `Manually downloaded subtitles from ${req.body?.provider || 'a provider'}.`, language: L.en, provider: req.body?.provider || 'opensubtitlescom', score: '100%', title: item.title, radarrId: rid });
+    }
+    res.json({});
+  });
+
+  // ---- Blacklist (subtitles the user has rejected) ----
+  let seriesBlacklist = [
+    { id: 1, provider: 'subscene', subs_id: 'ss-8842', language: L.en, seriesTitle: 'The Bear', episode_number: '3x02', timestamp: new Date(Date.now() - 43200000).toISOString(), subtitles_path: '/tv/The Bear/S03E02.en.srt' },
+  ];
+  let movieBlacklist = [
+    { id: 2, provider: 'addic7ed', subs_id: 'a7-1201', language: L.en, title: 'Furiosa', timestamp: new Date(Date.now() - 129600000).toISOString(), subtitles_path: '/movies/Furiosa.en.srt' },
+  ];
+  app.get('/api/episodes/blacklist', (req, res) => res.json({ data: seriesBlacklist }));
+  app.get('/api/movies/blacklist', (req, res) => res.json({ data: movieBlacklist }));
+  app.post('/api/episodes/blacklist', (req, res) => { seriesBlacklist.unshift({ id: Date.now(), provider: req.body?.provider || 'unknown', subs_id: req.body?.subs_id || 'x', language: L.en, seriesTitle: 'Manual', episode_number: '', timestamp: new Date().toISOString(), subtitles_path: req.body?.subtitles_path || '' }); res.json({}); });
+  app.delete('/api/episodes/blacklist', (req, res) => { if (req.query.all === 'true') seriesBlacklist = []; else seriesBlacklist = seriesBlacklist.filter((b) => String(b.id) !== String(req.query.id) && b.subs_id !== req.query.subs_id); res.json({}); });
+  app.delete('/api/movies/blacklist', (req, res) => { if (req.query.all === 'true') movieBlacklist = []; else movieBlacklist = movieBlacklist.filter((b) => String(b.id) !== String(req.query.id) && b.subs_id !== req.query.subs_id); res.json({}); });
+
+  return app;
+}
+
 export function startMockServices() {
   const defs = [
     ['sonarr', makeSonarr(), MOCK_PORTS.sonarr],
@@ -311,6 +498,7 @@ export function startMockServices() {
     ['overseerr', makeOverseerr(), MOCK_PORTS.overseerr],
     ['sabnzbd', makeSab(), MOCK_PORTS.sabnzbd],
     ['tautulli', makeTautulli(), MOCK_PORTS.tautulli],
+    ['bazarr', makeBazarr(), MOCK_PORTS.bazarr],
   ];
   const servers = [];
   for (const [name, app, port] of defs) {
