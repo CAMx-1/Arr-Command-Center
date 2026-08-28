@@ -369,7 +369,7 @@ function profileSelect(opts) {
     h('option', { value: p.id, selected: p.id === opts.defaultProfileId ? 'selected' : null }, p.name)));
 }
 
-async function openMovieRequestModal(seerr, ctx, r, title) {
+export async function openMovieRequestModal(seerr, ctx, r, title) {
   const bodyEl = h('div', {}, spinner());
   openModal({ title: `Request “${title}”`, body: bodyEl, wide: true });
 

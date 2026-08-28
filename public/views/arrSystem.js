@@ -150,9 +150,17 @@ export async function tabWanted(root, arr, ctx, kind, mode = 'missing') {
     const data = await arr.get(`${endpoint}?page=1&pageSize=50&sortDirection=descending&${inc}`);
     const records = (data && data.records) || [];
     const seg = (m, label) => h('button', { class: `view-seg ${mode === m ? 'active' : ''}`, onclick: () => { if (mode !== m) tabWanted(root, arr, ctx, kind, m); } }, label);
-    const toggle = h('div', { class: 'view-toggle', style: { marginBottom: '12px' } }, seg('missing', 'Missing'), seg('cutoff', 'Cutoff Unmet'));
-    if (!records.length) return mount(root, toggle, empty('', mode === 'cutoff' ? 'Nothing below cutoff' : 'Nothing missing', 'Everything monitored is satisfied.'));
-    mount(root, toggle, h('div', { class: 'list' }, ...records.map((r) => wantedRow(r, arr, kind))));
+    const toggle = h('div', { class: 'view-toggle' }, seg('missing', 'Missing'), seg('cutoff', 'Cutoff Unmet'));
+    const cmd = kind === 'series'
+      ? (mode === 'cutoff' ? 'CutoffUnmetEpisodeSearch' : 'MissingEpisodeSearch')
+      : (mode === 'cutoff' ? 'CutoffUnmetMoviesSearch' : 'MissingMoviesSearch');
+    const searchAll = h('button', { class: 'btn sm primary', title: 'Search all ' + (mode === 'cutoff' ? 'cutoff-unmet' : 'missing') + ' items', onclick: async () => {
+      try { await arr.post('command', { name: cmd }); toast(`Searching all ${mode === 'cutoff' ? 'cutoff-unmet' : 'missing'} items…`, 'success'); }
+      catch (e) { toast(e.message, 'error'); }
+    } }, '⌕ Search all');
+    const head = h('div', { class: 'lib-head', style: { justifyContent: 'space-between', marginBottom: '12px' } }, toggle, searchAll);
+    if (!records.length) return mount(root, head, empty('', mode === 'cutoff' ? 'Nothing below cutoff' : 'Nothing missing', 'Everything monitored is satisfied.'));
+    mount(root, head, h('div', { class: 'list' }, ...records.map((r) => wantedRow(r, arr, kind))));
   } catch (err) {
     mount(root, empty('', 'Failed to load wanted', err.message, { label: 'Retry', onClick: () => tabWanted(root, arr, ctx, kind, mode) }));
   }

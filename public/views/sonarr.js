@@ -1,4 +1,4 @@
-import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, debounce } from '../lib/ui.js';
+import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, debounce } from '../lib/ui.js';
 import { openDetailModal, openArrFileInfo } from './detail.js';
 import { openReleaseSearch } from './releaseSearch.js';
 import { bulkLibrary } from './bulk.js';
@@ -6,7 +6,7 @@ import { tabSystem, tabWanted } from './arrSystem.js';
 import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, invalidate } from '../lib/cache.js';
-import { libraryFilter } from '../lib/libraryFilter.js';
+import { libraryFilter, consumePendingFilter } from '../lib/libraryFilter.js';
 
 export async function renderSonarr(root, ctx) {
   const svc = ctx.service;
@@ -75,11 +75,10 @@ async function tabSeries(root, arr, ctx) {
       }));
     };
     const libHead = h('div', { class: 'lib-head' },
-      libraryFilter('series', series, renderList),
+      libraryFilter('series', series, renderList, { initialTerm: consumePendingFilter(ctx.service.key) }),
       h('button', { class: 'btn sm', title: 'Bulk select', onclick: () => bulkLibrary(root, { items: series, kind: 'series', arr, invalidateKey: `arr:${ctx.service.key}:series`, onExit: () => tabSeries(root, arr, ctx) }) }, '☑ Select'),
     );
     mount(root, libHead, listWrap);
-    renderList(series);
   } catch (err) {
     mount(root, empty('', 'Failed to load series', err.message, { label: 'Retry', onClick: () => tabSeries(root, arr, ctx) }));
   }
@@ -99,6 +98,7 @@ function seriesHex(s, arr, ctx) {
       try { await arr.post('command', { name: 'SeriesSearch', seriesId: s.id }); toast(`Searching for ${s.title}`, 'success'); }
       catch (e2) { toast(e2.message, 'error'); }
     } }, 'Auto'),
+    h('button', { class: 'btn sm', title: 'Edit / delete', onclick: (e) => { e.stopPropagation(); openEditSeries(arr, ctx, s); } }, 'Edit'),
   );
   return posterHexCard({
     posterUrl: url,
@@ -146,6 +146,7 @@ function seriesRow(s, arr, ctx) {
         try { await arr.post('command', { name: 'SeriesSearch', seriesId: s.id }); toast(`Searching for ${s.title}`, 'success'); }
         catch (e2) { toast(e2.message, 'error'); }
       } }, 'Auto'),
+      h('button', { class: 'btn sm', title: 'Edit / delete', onclick: (e) => { e.stopPropagation(); openEditSeries(arr, ctx, s); } }, 'Edit'),
     ),
   );
 }
@@ -213,6 +214,14 @@ function queueRow(r, arr, ctx) {
         try { await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=false`); toast('Removed from queue', 'success'); ctx.reload(); }
         catch (e) { toast(e.message, 'error'); }
       } }, '✕ Remove'),
+      h('button', { class: 'btn sm', title: 'Blocklist this release and search for a replacement', onclick: async () => {
+        try {
+          await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=true`);
+          if (r.episodeId) await arr.post('command', { name: 'EpisodeSearch', episodeIds: [r.episodeId] });
+          else if (r.seriesId) await arr.post('command', { name: 'SeriesSearch', seriesId: r.seriesId });
+          toast('Blocklisted & searching for a replacement', 'success'); ctx.reload();
+        } catch (e) { toast(e.message, 'error'); }
+      } }, '⛔ Blocklist & search'),
     ),
   );
 }
@@ -355,6 +364,51 @@ async function confirmAdd(r, arr, ctx) {
 
 function field(label, control) {
   return h('div', {}, h('div', { class: 'section-title', style: { margin: '0 0 6px' } }, label), control);
+}
+
+// ---- Edit / delete an existing series ----
+async function openEditSeries(arr, ctx, s) {
+  let profiles = [];
+  try { profiles = await cachedGet(`arr:${ctx.service.key}:qualityprofile`, () => arr.get('qualityprofile'), 600000); } catch { /* defaults */ }
+  const monitorChk = h('input', { type: 'checkbox', checked: s.monitored ? 'checked' : null });
+  const profileSel = h('select', { class: 'input' }, ...profiles.map((p) => h('option', { value: p.id, selected: p.id === s.qualityProfileId ? 'selected' : null }, p.name)));
+  const deleteFilesChk = h('input', { type: 'checkbox' });
+
+  const save = async () => {
+    const payload = { ...s, monitored: monitorChk.checked, qualityProfileId: Number(profileSel.value) || s.qualityProfileId };
+    try {
+      await arr.put(`series/${s.id}`, payload);
+      invalidate(`arr:${ctx.service.key}:series`);
+      toast(`Saved ${s.title}`, 'success'); closeModal(); ctx.reload();
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  const del = () => confirmModal({
+    title: 'Remove series', message: `Remove "${s.title}" from ${ctx.service.label}?${deleteFilesChk.checked ? ' Files on disk will be deleted.' : ''}`,
+    confirmLabel: 'Remove', danger: true,
+    onConfirm: async () => {
+      try {
+        await arr.del(`series/${s.id}?deleteFiles=${deleteFilesChk.checked}&addImportListExclusion=false`);
+        invalidate(`arr:${ctx.service.key}:series`);
+        toast(`Removed ${s.title}`, 'success'); closeModal(); ctx.reload();
+      } catch (e) { toast(e.message, 'error'); }
+    },
+  });
+
+  openModal({
+    title: `Edit “${s.title}”`,
+    body: h('div', { class: 'grid', style: { gap: '14px' } },
+      field('Quality Profile', profileSel),
+      h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, monitorChk, 'Monitored'),
+      h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, deleteFilesChk, 'Also delete files on disk (when removing)'),
+    ),
+    footer: h('div', { style: { display: 'flex', gap: '10px', justifyContent: 'space-between', width: '100%' } },
+      h('button', { class: 'btn danger sm', onclick: del }, 'Remove'),
+      h('div', { style: { display: 'flex', gap: '10px' } },
+        h('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
+        h('button', { class: 'btn primary', onclick: save }, 'Save'),
+      ),
+    ),
+  });
 }
 
 // ---- Interactive search: pick a season, then an episode, then browse releases ----

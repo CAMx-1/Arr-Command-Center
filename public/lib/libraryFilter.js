@@ -30,11 +30,12 @@ const FILTERS = {
 
 // Build the filter bar. `kind` is 'series' or 'movie'. `items` is the full list.
 // `onChange` receives the filtered subset whenever the search text or status
-// selection changes. Returns the control element to place in the lib-head.
-export function libraryFilter(kind, items, onChange) {
+// selection changes. `opts.initialTerm` pre-fills the search box (used by the
+// global search "Open" deep-link). Returns the control element for the lib-head.
+export function libraryFilter(kind, items, onChange, { initialTerm = '' } = {}) {
   const defs = FILTERS[kind] || FILTERS.movie;
   let statusId = 'all';
-  let term = '';
+  let term = initialTerm || '';
 
   const apply = () => {
     const def = defs.find((d) => d.id === statusId) || defs[0];
@@ -43,11 +44,20 @@ export function libraryFilter(kind, items, onChange) {
     onChange(filtered);
   };
 
-  const search = h('input', { class: 'input lib-filter-search', type: 'search', placeholder: 'Filter by title…' });
+  const search = h('input', { class: 'input lib-filter-search', type: 'search', placeholder: 'Filter by title…', value: term });
   search.addEventListener('input', () => { term = search.value; apply(); });
 
   const sel = h('select', { class: 'input lib-filter-select' }, ...defs.map((d) => h('option', { value: d.id }, d.label)));
   sel.addEventListener('change', () => { statusId = sel.value; apply(); });
 
+  // Initial render (respects any pre-filled term).
+  apply();
+
   return h('div', { class: 'lib-filter' }, search, sel);
 }
+
+// Deep-link support: the global search "Open" stashes a title here; the
+// Sonarr/Radarr library tab consumes it to pre-fill its filter on arrival.
+const pendingFilter = new Map();
+export function setPendingFilter(key, term) { if (key) pendingFilter.set(key, term || ''); }
+export function consumePendingFilter(key) { const t = pendingFilter.get(key); pendingFilter.delete(key); return t || ''; }

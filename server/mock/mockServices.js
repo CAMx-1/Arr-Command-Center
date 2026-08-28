@@ -86,6 +86,24 @@ function makeSonarr() {
   });
   app.get('/api/v3/release', (req, res) => res.json(mockReleases('Severance')));
   app.post('/api/v3/release', (req, res) => res.status(201).json({ guid: req.body.guid, approved: true }));
+  app.get('/api/v3/health', (req, res) => res.json([
+    { id: 1, type: 'warning', message: 'Indexers unavailable due to failures: NZBgeek', source: 'IndexerStatusCheck', wikiUrl: 'https://wiki.servarr.com/sonarr/system#indexers-are-unavailable-due-to-failures' },
+  ]));
+  app.put('/api/v3/series/:id', (req, res) => {
+    const id = Number(req.params.id);
+    const idx = series.findIndex((s) => s.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'not found' });
+    series[idx] = { ...series[idx], ...req.body, id };
+    res.json(series[idx]);
+  });
+  app.delete('/api/v3/series/:id', (req, res) => { series = series.filter((s) => s.id !== Number(req.params.id)); res.json({}); });
+  app.get('/api/v3/wanted/missing', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 2, records: [
+    { id: 7001, seriesId: 1, seasonNumber: 2, episodeNumber: 10, title: 'Cold Harbor', airDateUtc: new Date(Date.now() - 86400000).toISOString(), series: { title: 'Severance' } },
+    { id: 7002, seriesId: 2, seasonNumber: 3, episodeNumber: 5, title: 'Children', airDateUtc: new Date(Date.now() - 2 * 86400000).toISOString(), series: { title: 'The Bear' } },
+  ] }));
+  app.get('/api/v3/wanted/cutoff', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 1, records: [
+    { id: 7101, seriesId: 3, seasonNumber: 2, episodeNumber: 1, title: 'In Seldon\u2019s Shadow', airDateUtc: new Date(Date.now() - 5 * 86400000).toISOString(), series: { title: 'Foundation' } },
+  ] }));
   return app;
 }
 
@@ -134,6 +152,19 @@ function makeRadarr() {
   app.get('/api/v3/release', (req, res) => res.json(mockReleases('Furiosa')));
   app.post('/api/v3/release', (req, res) => res.status(201).json({ guid: req.body.guid, approved: true }));
   app.post('/api/v3/command', (req, res) => res.status(201).json({ id: Math.floor(Math.random() * 1000), name: req.body.name, status: 'queued' }));
+  app.get('/api/v3/health', (req, res) => res.json([]));
+  app.put('/api/v3/movie/:id', (req, res) => {
+    const id = Number(req.params.id);
+    const idx = movies.findIndex((m) => m.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'not found' });
+    movies[idx] = { ...movies[idx], ...req.body, id };
+    res.json(movies[idx]);
+  });
+  app.delete('/api/v3/movie/:id', (req, res) => { movies = movies.filter((m) => m.id !== Number(req.params.id)); res.json({}); });
+  app.get('/api/v3/wanted/missing', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 1, records: [
+    { id: 8001, title: 'Furiosa', year: 2024, digitalRelease: new Date(Date.now() - 3 * 86400000).toISOString() },
+  ] }));
+  app.get('/api/v3/wanted/cutoff', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 0, records: [] }));
   return app;
 }
 
