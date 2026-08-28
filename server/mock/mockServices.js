@@ -91,6 +91,16 @@ function makeSonarr() {
   app.get('/api/v3/health', (req, res) => res.json([
     { id: 1, type: 'warning', message: 'Indexers unavailable due to failures: NZBgeek', source: 'IndexerStatusCheck', wikiUrl: 'https://wiki.servarr.com/sonarr/system#indexers-are-unavailable-due-to-failures' },
   ]));
+  app.put('/api/v3/series/editor', (req, res) => {
+    const ids = (req.body && req.body.seriesIds) || [];
+    for (const s of series) {
+      if (!ids.includes(s.id)) continue;
+      if (req.body.monitored !== undefined) s.monitored = req.body.monitored;
+      if (req.body.rootFolderPath) { const root = String(req.body.rootFolderPath).replace(/[\\/]+$/, ''); s.rootFolderPath = req.body.rootFolderPath; s.path = `${root}/${s.title}`; }
+    }
+    res.json(series.filter((s) => ids.includes(s.id)));
+  });
+  app.delete('/api/v3/series/editor', (req, res) => { const ids = (req.body && req.body.seriesIds) || []; series = series.filter((s) => !ids.includes(s.id)); res.json({}); });
   app.put('/api/v3/series/:id', (req, res) => {
     const id = Number(req.params.id);
     const idx = series.findIndex((s) => s.id === id);
@@ -115,8 +125,8 @@ function makeRadarr() {
   app.use(express.json());
   let movies = [
     { id: 1, title: 'Dune: Part Two', year: 2024, status: 'released', monitored: true, hasFile: true, runtime: 166, overview: 'Paul Atreides unites with the Fremen to wage war against House Harkonnen.', path: 'C:\\Media\\Movies\\Dune Part Two (2024)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 32212254720, studio: 'Legendary', images: [] },
-    { id: 2, title: 'Oppenheimer', year: 2023, status: 'released', monitored: true, hasFile: true, runtime: 180, overview: 'The story of J. Robert Oppenheimer and the atomic bomb.', path: 'C:\\Media\\Movies\\Oppenheimer (2023)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 27917287424, studio: 'Universal', images: [] },
-    { id: 3, title: 'Furiosa', year: 2024, status: 'released', monitored: true, hasFile: false, runtime: 148, overview: 'The origin story of Furiosa before Mad Max: Fury Road.', path: 'C:\\Media\\Movies\\Furiosa (2024)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 0, studio: 'Warner Bros', images: [] },
+    { id: 2, title: 'Oppenheimer', year: 2023, status: 'released', monitored: true, hasFile: true, runtime: 180, overview: 'The story of J. Robert Oppenheimer and the atomic bomb.', path: 'C:\\Media\\Movies2\\Oppenheimer (2023)', rootFolderPath: 'C:\\Media\\Movies2', sizeOnDisk: 27917287424, studio: 'Universal', images: [] },
+    { id: 3, title: 'Furiosa', year: 2024, status: 'released', monitored: true, hasFile: false, runtime: 148, overview: 'The origin story of Furiosa before Mad Max: Fury Road.', path: 'C:\\Media\\Movies3\\Furiosa (2024)', rootFolderPath: 'C:\\Media\\Movies3', sizeOnDisk: 0, studio: 'Warner Bros', images: [] },
   ];
   let queue = [
     { id: 201, title: 'Furiosa 2024 2160p', movieId: 3, status: 'downloading', trackedDownloadState: 'downloading', size: 21474836480, sizeleft: 6442450944, timeleft: '00:11:38', downloadClient: 'SABnzbd', indexer: 'DrunkenSlug' },
@@ -129,7 +139,11 @@ function makeRadarr() {
   });
   app.get('/__debug', (req, res) => res.json({ cf: cfSeen.radarr || null }));
   app.get('/api/v3/system/status', (req, res) => res.json({ version: '5.11.0.9244', appName: 'Radarr', instanceName: 'Radarr (mock)' }));
-  let rootFolders = [{ id: 1, path: 'C:\\Media\\Movies', freeSpace: 0, accessible: false, unmappedFolders: [] }];
+  let rootFolders = [
+    { id: 1, path: 'C:\\Media\\Movies', freeSpace: 0, accessible: false, unmappedFolders: [] },
+    { id: 2, path: 'C:\\Media\\Movies2', freeSpace: 0, accessible: false, unmappedFolders: [] },
+    { id: 3, path: 'C:\\Media\\Movies3', freeSpace: 0, accessible: false, unmappedFolders: [] },
+  ];
   app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
   app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 900000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
   app.get('/api/v3/qualityprofile', (req, res) => res.json([{ id: 1, name: 'HD-1080p' }, { id: 2, name: 'Ultra-HD' }, { id: 3, name: 'Any' }]));
@@ -157,6 +171,16 @@ function makeRadarr() {
   app.post('/api/v3/release', (req, res) => res.status(201).json({ guid: req.body.guid, approved: true }));
   app.post('/api/v3/command', (req, res) => res.status(201).json({ id: Math.floor(Math.random() * 1000), name: req.body.name, status: 'queued' }));
   app.get('/api/v3/health', (req, res) => res.json([]));
+  app.put('/api/v3/movie/editor', (req, res) => {
+    const ids = (req.body && req.body.movieIds) || [];
+    for (const m of movies) {
+      if (!ids.includes(m.id)) continue;
+      if (req.body.monitored !== undefined) m.monitored = req.body.monitored;
+      if (req.body.rootFolderPath) { const root = String(req.body.rootFolderPath).replace(/[\\/]+$/, ''); m.rootFolderPath = req.body.rootFolderPath; m.path = `${root}/${m.title} (${m.year})`; }
+    }
+    res.json(movies.filter((m) => ids.includes(m.id)));
+  });
+  app.delete('/api/v3/movie/editor', (req, res) => { const ids = (req.body && req.body.movieIds) || []; movies = movies.filter((m) => !ids.includes(m.id)); res.json({}); });
   app.put('/api/v3/movie/:id', (req, res) => {
     const id = Number(req.params.id);
     const idx = movies.findIndex((m) => m.id === id);
