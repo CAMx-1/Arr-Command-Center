@@ -46,8 +46,10 @@ export async function fetchNotifications(ctx) {
     } catch { /* ignore per-service */ }
   }));
 
-  // Service health checks (Sonarr/Radarr/Prowlarr/Bazarr).
-  const healthSvcs = state.services.filter((s) => ['sonarr', 'radarr', 'prowlarr', 'bazarr'].includes(s.type) && s.configured);
+  // Service health checks. Sonarr/Radarr are intentionally excluded — their
+  // health warnings (e.g. transient indexer failures) are noisy and re-appeared
+  // on every poll. View those in each app's System tab instead.
+  const healthSvcs = state.services.filter((s) => ['prowlarr', 'bazarr'].includes(s.type) && s.configured);
   await Promise.all(healthSvcs.map(async (svc) => {
     try {
       let checks = [];
