@@ -1,5 +1,5 @@
 # Arr Command Center
-FROM node:20-alpine
+FROM node:23-alpine
 
 ENV NODE_ENV=production
 WORKDIR /app

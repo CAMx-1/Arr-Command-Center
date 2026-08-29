@@ -10,7 +10,7 @@
     "dev": "node --watch server/index.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=23"
   },
   "dependencies": {
     "express": "4.19.2"
