@@ -211,6 +211,11 @@ app.post('/api/config/service', express.json({ limit: '32kb' }), (req, res) => {
   const apiKey = service.apiKey ? String(service.apiKey).slice(0, 300) : prev.apiKey;
   if (baseUrl) clean.baseUrl = baseUrl;
   if (apiKey) clean.apiKey = apiKey;
+  // qBittorrent username/password fallback (blank keeps the existing value).
+  const username = service.username ? String(service.username).slice(0, 120) : prev.username;
+  const password = service.password ? String(service.password).slice(0, 300) : prev.password;
+  if (username) clean.username = username;
+  if (password) clean.password = password;
   if (service.cloudflareAccess && (service.cloudflareAccess.clientId || service.cloudflareAccess.clientSecret)) {
     clean.cloudflareAccess = {
       clientId: String(service.cloudflareAccess.clientId || '').slice(0, 300),

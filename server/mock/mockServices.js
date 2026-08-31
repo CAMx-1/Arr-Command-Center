@@ -14,6 +14,7 @@ export const MOCK_PORTS = {
   sabnzbd: 18080,
   tautulli: 18181,
   bazarr: 16767,
+  qbittorrent: 18081,
 };
 
 const cfSeen = {}; // service -> last seen CF headers
@@ -557,6 +558,76 @@ function makeBazarr() {
   return app;
 }
 
+// ---------------- qBittorrent (torrent client) ----------------
+function makeQbittorrent() {
+  const app = express();
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
+  const now = Math.floor(Date.now() / 1000);
+  let torrents = [
+    { hash: 'a1a1a1', name: 'ubuntu-24.04.1-desktop-amd64.iso', state: 'downloading', progress: 0.42, dlspeed: 9568256, upspeed: 131072, eta: 540, size: 6033534976, amount_left: 3499450086, completed: 2534084890, num_seeds: 48, num_leechs: 6, category: 'linux', tags: '', ratio: 0.08, added_on: now - 3600, completion_on: 0, save_path: '/downloads' },
+    { hash: 'b2b2b2', name: 'Big Buck Bunny (2008) [1080p BluRay x265]', state: 'stalledUP', progress: 1, dlspeed: 0, upspeed: 262144, eta: 8640000, size: 355566592, amount_left: 0, completed: 355566592, num_seeds: 12, num_leechs: 3, category: 'movies', tags: 'x265', ratio: 2.41, added_on: now - 86400, completion_on: now - 80000, save_path: '/downloads/movies' },
+    { hash: 'c3c3c3', name: 'Sintel.2010.2160p.UHD.BluRay.x265-DEMO', state: 'pausedDL', progress: 0.15, dlspeed: 0, upspeed: 0, eta: 8640000, size: 12884901888, amount_left: 10952166605, completed: 1932735283, num_seeds: 0, num_leechs: 0, category: 'movies', tags: '', ratio: 0, added_on: now - 7200, completion_on: 0, save_path: '/downloads/movies' },
+  ];
+  let dlLimit = 0; let upLimit = 0; let altSpeed = 0;
+
+  // Auth: API key (Bearer) OR a SID cookie from /auth/login. Login is exempt.
+  app.use((req, res, next) => {
+    recordCf('qbittorrent', req);
+    if (req.path === '/api/v2/auth/login') return next();
+    const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+    const cookie = req.headers['cookie'] || '';
+    if (bearer === 'MOCK_API_KEY' || /SID=mocksid/.test(cookie)) return next();
+    return res.status(403).send('Forbidden');
+  });
+  app.get('/__debug', (req, res) => res.json({ cf: cfSeen.qbittorrent || null }));
+
+  app.post('/api/v2/auth/login', (req, res) => {
+    const { username, password } = req.body || {};
+    if (username === 'admin' && password === 'adminadmin') {
+      res.setHeader('Set-Cookie', 'SID=mocksid; HttpOnly; path=/');
+      return res.send('Ok.');
+    }
+    return res.send('Fails.');
+  });
+  app.post('/api/v2/auth/logout', (req, res) => res.send(''));
+  app.get('/api/v2/app/version', (req, res) => res.type('text/plain').send('v5.2.0'));
+  app.get('/api/v2/app/webapiVersion', (req, res) => res.type('text/plain').send('2.14.1'));
+
+  app.get('/api/v2/transfer/info', (req, res) => res.json({
+    dl_info_speed: torrents.reduce((a, t) => a + (t.state === 'downloading' ? t.dlspeed : 0), 0),
+    up_info_speed: torrents.reduce((a, t) => a + t.upspeed, 0),
+    dl_info_data: 68152111900, up_info_data: 10747904000,
+    dl_rate_limit: dlLimit, up_rate_limit: upLimit,
+    dht_nodes: 322, connection_status: 'connected', use_alt_speed_limits: !!altSpeed,
+  }));
+  app.get('/api/v2/transfer/speedLimitsMode', (req, res) => res.type('text/plain').send(String(altSpeed)));
+  app.post('/api/v2/transfer/toggleSpeedLimitsMode', (req, res) => { altSpeed = altSpeed ? 0 : 1; res.send(''); });
+  app.get('/api/v2/transfer/downloadLimit', (req, res) => res.type('text/plain').send(String(dlLimit)));
+  app.get('/api/v2/transfer/uploadLimit', (req, res) => res.type('text/plain').send(String(upLimit)));
+  app.post('/api/v2/transfer/setDownloadLimit', (req, res) => { dlLimit = Number(req.body.limit) || 0; res.send(''); });
+  app.post('/api/v2/transfer/setUploadLimit', (req, res) => { upLimit = Number(req.body.limit) || 0; res.send(''); });
+
+  app.get('/api/v2/torrents/info', (req, res) => {
+    const filter = req.query.filter;
+    let list = torrents;
+    if (filter === 'downloading') list = list.filter((t) => /DL$|downloading|stalledDL|metaDL/i.test(t.state) && t.progress < 1);
+    else if (filter === 'completed') list = list.filter((t) => t.progress >= 1);
+    else if (filter === 'paused') list = list.filter((t) => /paused/i.test(t.state));
+    res.json(list);
+  });
+  const applyHashes = (req, fn) => {
+    const hashes = String((req.body && req.body.hashes) || req.query.hashes || '');
+    const set = hashes === 'all' ? torrents.map((t) => t.hash) : hashes.split('|');
+    for (const t of torrents) if (set.includes(t.hash)) fn(t);
+  };
+  app.post('/api/v2/torrents/pause', (req, res) => { applyHashes(req, (t) => { t.state = t.progress >= 1 ? 'pausedUP' : 'pausedDL'; t.dlspeed = 0; t.upspeed = 0; }); res.send(''); });
+  app.post('/api/v2/torrents/resume', (req, res) => { applyHashes(req, (t) => { t.state = t.progress >= 1 ? 'uploading' : 'downloading'; if (t.progress < 1) t.dlspeed = 8000000; }); res.send(''); });
+  app.post('/api/v2/torrents/delete', (req, res) => { const hashes = String((req.body && req.body.hashes) || ''); const set = hashes === 'all' ? torrents.map((t) => t.hash) : hashes.split('|'); torrents = torrents.filter((t) => !set.includes(t.hash)); res.send(''); });
+  app.post('/api/v2/torrents/recheck', (req, res) => res.send(''));
+  return app;
+}
+
 export function startMockServices() {
   const defs = [
     ['sonarr', makeSonarr(), MOCK_PORTS.sonarr],
@@ -575,6 +646,7 @@ export function startMockServices() {
     ['sabnzbd', makeSab(), MOCK_PORTS.sabnzbd],
     ['tautulli', makeTautulli(), MOCK_PORTS.tautulli],
     ['bazarr', makeBazarr(), MOCK_PORTS.bazarr],
+    ['qbittorrent', makeQbittorrent(), MOCK_PORTS.qbittorrent],
   ];
   const servers = [];
   for (const [name, app, port] of defs) {

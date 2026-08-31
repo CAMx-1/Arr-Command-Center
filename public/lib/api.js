@@ -46,6 +46,15 @@ export const api = {
     return parse(await fetch(`/api/proxy/${service}/${clean}`, opts));
   },
 
+  // Proxied POST with an application/x-www-form-urlencoded body (qBittorrent).
+  async proxyForm(service, path, params = {}) {
+    const clean = path.replace(/^\/+/, '');
+    const body = new URLSearchParams(params).toString();
+    return parse(await fetch(`/api/proxy/${service}/${clean}`, {
+      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body,
+    }));
+  },
+
   // ---- Sonarr / Radarr (v3) helpers ----
   arr(service) {
     return {
@@ -81,6 +90,14 @@ export const api = {
       post: (p, body) => this.proxy(service, `api/${p}`, { method: 'POST', body }),
       patch: (p, body) => this.proxy(service, `api/${p}`, { method: 'PATCH', body }),
       del: (p) => this.proxy(service, `api/${p}`, { method: 'DELETE' }),
+    };
+  },
+
+  // ---- qBittorrent helper (WebUI API v2; POSTs are form-encoded) ----
+  qbit(service) {
+    return {
+      get: (p) => this.proxy(service, `api/v2/${p}`),
+      post: (p, params) => this.proxyForm(service, `api/v2/${p}`, params),
     };
   },
 

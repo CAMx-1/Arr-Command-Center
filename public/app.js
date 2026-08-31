@@ -11,6 +11,7 @@ import { renderSabnzbd } from './views/sabnzbd.js';
 import { renderTautulli } from './views/tautulli.js';
 import { renderProwlarr } from './views/prowlarr.js';
 import { renderBazarr } from './views/bazarr.js';
+import { renderQbittorrent } from './views/qbittorrent.js';
 import { renderPlex } from './views/plex.js';
 import { renderEmbed } from './views/embed.js';
 import { renderSettings } from './views/settings.js';
@@ -26,6 +27,7 @@ export const SERVICE_META = {
   tautulli: { logo: '/icons/tautulli.svg', emoji: '', renderer: renderTautulli },
   prowlarr: { logo: '/icons/prowlarr.png', emoji: '', renderer: renderProwlarr },
   bazarr: { logo: '/icons/bazarr.svg', emoji: '', renderer: renderBazarr },
+  qbittorrent: { logo: '/icons/qbittorrent.svg', emoji: '⬇', renderer: renderQbittorrent },
   plex: { logo: '/icons/plex.svg', emoji: '▶', renderer: renderPlex },
 };
 

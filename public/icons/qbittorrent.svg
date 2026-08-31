@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <circle cx="256" cy="256" r="240" fill="#3772d8"/>
+  <circle cx="256" cy="256" r="240" fill="none" stroke="#2a5bb5" stroke-width="10"/>
+  <!-- stylized "q" + download arrow motif in white -->
+  <path d="M256 118c-58 0-104 46-104 104 0 52 38 96 88 103v39h32v-39c50-7 88-51 88-103 0-58-46-104-104-104zm0 40c35 0 64 29 64 64s-29 64-64 64-64-29-64-64 29-64 64-64z" fill="#ffffff" opacity="0.95"/>
+  <path d="M236 210h40v40h28l-48 52-48-52h28z" fill="#3772d8"/>
+</svg>

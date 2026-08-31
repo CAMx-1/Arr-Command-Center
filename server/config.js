@@ -27,7 +27,7 @@ export function loadDotEnv() {
   }
 }
 
-const SERVICE_TYPES = ['sonarr', 'radarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'plex'];
+const SERVICE_TYPES = ['sonarr', 'radarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'plex'];
 export const ALLOWED_SERVICE_TYPES = SERVICE_TYPES;
 export const CONFIG_PATH = path.join(ROOT, 'config.json');
 
@@ -57,8 +57,12 @@ function applyServiceEnv(key, svc) {
   const apiKey = process.env[envKey(key, 'API_KEY')];
   const cfId = process.env[envKey(key, 'CF_CLIENT_ID')];
   const cfSecret = process.env[envKey(key, 'CF_CLIENT_SECRET')];
+  const username = process.env[envKey(key, 'USERNAME')];
+  const password = process.env[envKey(key, 'PASSWORD')];
   if (base) svc.baseUrl = base;
   if (apiKey) svc.apiKey = apiKey;
+  if (username) svc.username = username;
+  if (password) svc.password = password;
   if (cfId || cfSecret) {
     svc.cloudflareAccess = svc.cloudflareAccess || {};
     if (cfId) svc.cloudflareAccess.clientId = cfId;
@@ -90,6 +94,7 @@ function buildMockConfig() {
       sabnzbd: mk('sabnzbd', 'SABnzbd', 'sabnzbd', MOCK_PORTS.sabnzbd),
       tautulli: mk('tautulli', 'Tautulli', 'tautulli', MOCK_PORTS.tautulli),
       bazarr: mk('bazarr', 'Bazarr', 'bazarr', MOCK_PORTS.bazarr),
+      qbittorrent: mk('qbittorrent', 'qBittorrent', 'qbittorrent', MOCK_PORTS.qbittorrent),
     },
   };
 }
@@ -148,7 +153,7 @@ export function publicConfig(cfg) {
       label: svc.label || key,
       type: svc.type,
       hasCloudflareAccess: !!(svc.cloudflareAccess && svc.cloudflareAccess.clientId),
-      configured: !!svc.baseUrl && !!svc.apiKey,
+      configured: !!svc.baseUrl && (!!svc.apiKey || (!!svc.username && !!svc.password)),
       // A sample service renders built-in demo data client-side (no backend).
       sample: !!svc.sample,
       // When embed is enabled, expose the browser-reachable URL so the UI can

@@ -9,13 +9,14 @@ const ACTIVITY_DEFS = [
   { id: 'failed', label: 'Failed Requests', local: true },
   { id: 'streams', label: 'Active Streams', type: 'tautulli' },
   { id: 'sab', label: 'Downloads', type: 'sabnzbd' },
+  { id: 'qbittorrent', label: 'Torrents', type: 'qbittorrent' },
   { id: 'sonarr', label: 'Sonarr Queue', type: 'sonarr' },
   { id: 'radarr', label: 'Radarr Queue', type: 'radarr' },
   { id: 'seerr-approval', label: 'Needs Approval', type: 'overseerr' },
   { id: 'seerr-requests', label: 'Recent Requests', type: 'overseerr' },
   { id: 'bazarr', label: 'Wanted Subtitles', type: 'bazarr' },
 ];
-const ACTIVITY_DEFAULTS = { failed: true, streams: true, sab: true, sonarr: true, radarr: true, 'seerr-approval': true, 'seerr-requests': false, bazarr: false };
+const ACTIVITY_DEFAULTS = { failed: true, streams: true, sab: true, sonarr: true, radarr: true, 'seerr-approval': true, 'seerr-requests': false, bazarr: false, qbittorrent: true };
 const REQ_STATUS = { 1: 'Pending', 2: 'Approved', 3: 'Declined' };
 
 function loadActivityPrefs() {
@@ -191,6 +192,14 @@ async function hydrateCardStats(svc, ctx) {
       const badges = await api.bazarr(svc.key).get('badges');
       const wanted = (badges.episodes || 0) + (badges.movies || 0);
       mount(el, stat(wanted, 'Wanted'), stat(badges.providers ?? 0, 'Throttled'));
+    } else if (svc.type === 'qbittorrent') {
+      const [info, torrents] = await Promise.all([
+        api.qbit(svc.key).get('transfer/info').catch(() => ({})),
+        api.qbit(svc.key).get('torrents/info').catch(() => []),
+      ]);
+      const active = (Array.isArray(torrents) ? torrents : []).filter((t) => (t.dlspeed || 0) > 0 || (t.upspeed || 0) > 0).length;
+      const dl = Number(info.dl_info_speed) || 0;
+      mount(el, stat(active, 'Active'), stat(dl > 0 ? `${fmtBytes(dl)}/s` : '0', 'Down'));
     } else {
       clear(el);
     }
@@ -284,6 +293,14 @@ async function fetchSource(def, svc, ctx) {
       for (const s of ((data.queue || {}).slots || [])) {
         rows.push(activityRow({ icon: '⬇', title: s.filename, sub: `Downloads · ${s.status} · ${s.percentage}% · ${s.sizeleft} left`, progress: Number(s.percentage),
           nav: { key: svc.key, tab: 'queue' } }));
+      }
+    } else if (def.id === 'qbittorrent') {
+      const meta = SERVICE_META.qbittorrent || {};
+      const torrents = await api.qbit(svc.key).get('torrents/info').catch(() => []);
+      for (const t of (Array.isArray(torrents) ? torrents : []).filter((x) => (x.progress || 0) < 1).slice(0, 20)) {
+        rows.push(activityRow({ icon: svcIcon(meta.logo, meta.emoji || '⬇', 22), title: t.name,
+          sub: `${svc.label} · ${t.state} · ${fmtBytes((t.size || 0) - (t.amount_left || 0))} / ${fmtBytes(t.size || 0)}`,
+          progress: (t.progress || 0) * 100, nav: { key: svc.key, tab: 'downloading' } }));
       }
     } else if (def.id === 'sonarr' || def.id === 'radarr') {
       const queue = await api.arr(svc.key).get('queue');

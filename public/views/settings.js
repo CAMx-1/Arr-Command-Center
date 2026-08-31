@@ -245,7 +245,7 @@ function settingRow(label, value) {
   );
 }
 
-const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'plex'];
+const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'plex'];
 
 function field(label, control, hint) {
   return h('label', { class: 'pw-field' },
@@ -262,9 +262,20 @@ function openServiceForm(root, ctx, existingKey, existing) {
   const typeSel = h('select', { class: 'input' }, ...SERVICE_TYPE_OPTIONS.map((t) => h('option', { value: t, selected: existing && existing.type === t ? 'selected' : null }, t)));
   const baseUrl = h('input', { class: 'input', placeholder: existing && existing.configured ? '•••• (leave blank to keep)' : 'https://sonarr.example.com' });
   const apiKey = h('input', { class: 'input', type: 'password', placeholder: existing && existing.configured ? '•••• (leave blank to keep)' : 'API key' });
+  const username = h('input', { class: 'input', placeholder: 'WebUI username' });
+  const password = h('input', { class: 'input', type: 'password', placeholder: existing && existing.type === 'qbittorrent' ? '•••• (leave blank to keep)' : 'WebUI password' });
   const cfId = h('input', { class: 'input', placeholder: existing && existing.hasCloudflareAccess ? '•••• (leave blank to keep)' : 'CF-Access-Client-Id (optional)' });
   const cfSecret = h('input', { class: 'input', type: 'password', placeholder: existing && existing.hasCloudflareAccess ? '•••• (leave blank to keep)' : 'CF-Access-Client-Secret (optional)' });
   const enabled = h('input', { type: 'checkbox', checked: (existing ? existing : { }) && (!existing || existing.enabled !== false) ? 'checked' : null });
+
+  // Username/password are only relevant to qBittorrent (and only as a fallback
+  // for versions before its API key support). Hide them for every other type.
+  const qbitCreds = h('div', { style: { display: typeSel.value === 'qbittorrent' ? '' : 'none' } },
+    field('Username', username),
+    field('Password', password),
+    h('div', { class: 'dim', style: { fontSize: '11px', marginTop: '-4px' } }, 'Only needed for qBittorrent versions without an API key — prefer the API key above.'),
+  );
+  typeSel.addEventListener('change', () => { qbitCreds.style.display = typeSel.value === 'qbittorrent' ? '' : 'none'; });
 
   const save = async () => {
     const key = (existingKey || keyInput.value || '').trim();
@@ -276,6 +287,8 @@ function openServiceForm(root, ctx, existingKey, existing) {
       baseUrl: baseUrl.value.trim(),
       apiKey: apiKey.value.trim(),
     };
+    if (username.value.trim()) service.username = username.value.trim();
+    if (password.value.trim()) service.password = password.value.trim();
     if (cfId.value.trim() || cfSecret.value.trim()) service.cloudflareAccess = { clientId: cfId.value.trim(), clientSecret: cfSecret.value.trim() };
     try {
       await ctx.api.saveService(key, service);
@@ -303,7 +316,8 @@ function openServiceForm(root, ctx, existingKey, existing) {
     field('Label', label),
     field('Type', typeSel),
     field('URL', baseUrl),
-    field('API key', apiKey),
+    field('API key', apiKey, 'qBittorrent ≥ v5.2.0: generate an API key in WebUI settings. Otherwise use username/password below.'),
+    qbitCreds,
     field('CF Access ID', cfId),
     field('CF Access secret', cfSecret),
     field('Enabled', h('span', { class: 'pw-toggle' }, enabled)),
