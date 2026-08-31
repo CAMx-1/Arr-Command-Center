@@ -299,7 +299,7 @@ function openServiceForm(root, ctx, existingKey, existing) {
   });
 
   const body = h('div', { class: 'pw-form' },
-    field('Key', keyInput, isNew ? 'Unique id used in the URL (#/<key>). Cannot change later.' : 'Fixed'),
+    field('Key', keyInput, isNew ? 'Unique id used in the URL (#/<key>). Run multiple instances of a type by giving each its own key, e.g. sonarr and sonarr-anime. Cannot change later.' : 'Fixed'),
     field('Label', label),
     field('Type', typeSel),
     field('URL', baseUrl),

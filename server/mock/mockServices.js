@@ -7,6 +7,7 @@ import express from 'express';
 
 export const MOCK_PORTS = {
   sonarr: 18989,
+  sonarrAnime: 18990,
   radarr: 17878,
   overseerr: 15055,
   sabnzbd: 18080,
@@ -35,7 +36,7 @@ function mockReleases(name) {
 }
 
 // ---------------- Sonarr ----------------
-function makeSonarr() {
+function makeSonarr(opts = {}) {
   const app = express();
   app.use(express.json());
   let series = [
@@ -44,6 +45,7 @@ function makeSonarr() {
     { id: 3, title: 'Foundation', year: 2021, tvdbId: 358711, status: 'continuing', monitored: false, seasonCount: 2, network: 'Apple TV+', overview: 'A band of exiles races to save humanity and rebuild civilization.', path: 'C:\\Media\\TV\\Foundation', rootFolderPath: 'C:\\Media\\TV', statistics: { episodeFileCount: 20, episodeCount: 20, percentOfEpisodes: 100, sizeOnDisk: 64424509440 }, images: [] },
     { id: 4, title: 'Severance', year: 2022, tvdbId: 371980, status: 'continuing', monitored: false, seasonCount: 2, network: 'Apple TV+', overview: 'Duplicate entry added on another drive.', path: 'C:\\Media\\TV2\\Severance', rootFolderPath: 'C:\\Media\\TV2', statistics: { episodeFileCount: 0, episodeCount: 19, percentOfEpisodes: 0, sizeOnDisk: 0 }, images: [] },
   ];
+  if (opts.series) series = opts.series.map((s) => ({ ...s }));
   let queue = [
     { id: 101, title: 'Severance S02E10', seriesId: 1, status: 'downloading', trackedDownloadState: 'downloading', size: 2147483648, sizeleft: 536870912, timeleft: '00:04:12', estimatedCompletionTime: new Date(Date.now() + 252000).toISOString(), downloadClient: 'SABnzbd', indexer: 'NZBgeek' },
   ];
@@ -54,7 +56,7 @@ function makeSonarr() {
     next();
   });
   app.get('/__debug', (req, res) => res.json({ cf: cfSeen.sonarr || null }));
-  app.get('/api/v3/system/status', (req, res) => res.json({ version: '4.0.10.2544', appName: 'Sonarr', instanceName: 'Sonarr (mock)' }));
+  app.get('/api/v3/system/status', (req, res) => res.json({ version: '4.0.10.2544', appName: 'Sonarr', instanceName: opts.instanceName || 'Sonarr (mock)' }));
   let rootFolders = [{ id: 1, path: 'C:\\Media\\TV', freeSpace: 0, accessible: false, unmappedFolders: [] }];
   app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
   app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 500000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
@@ -556,6 +558,11 @@ function makeBazarr() {
 export function startMockServices() {
   const defs = [
     ['sonarr', makeSonarr(), MOCK_PORTS.sonarr],
+    ['sonarr-anime', makeSonarr({ instanceName: 'Sonarr Anime (mock)', series: [
+      { id: 1, title: 'Frieren: Beyond Journey\u2019s End', year: 2023, tvdbId: 424536, status: 'continuing', monitored: true, seasonCount: 1, network: 'Nippon TV', overview: 'A mage reflects on her journey after the hero party disbands.', path: '/anime/Frieren', rootFolderPath: '/anime', statistics: { episodeFileCount: 28, episodeCount: 28, percentOfEpisodes: 100, sizeOnDisk: 21474836480 }, images: [] },
+      { id: 2, title: 'Attack on Titan', year: 2013, tvdbId: 267440, status: 'ended', monitored: true, seasonCount: 4, network: 'MBS', overview: 'Humanity fights for survival against man-eating titans.', path: '/anime/Attack on Titan', rootFolderPath: '/anime', statistics: { episodeFileCount: 85, episodeCount: 88, percentOfEpisodes: 96.6, sizeOnDisk: 96636764160 }, images: [] },
+      { id: 3, title: 'Jujutsu Kaisen', year: 2020, tvdbId: 377543, status: 'continuing', monitored: false, seasonCount: 2, network: 'MBS', overview: 'A student joins a secret organization of sorcerers.', path: '/anime/Jujutsu Kaisen', rootFolderPath: '/anime', statistics: { episodeFileCount: 47, episodeCount: 47, percentOfEpisodes: 100, sizeOnDisk: 53687091200 }, images: [] },
+    ] }), MOCK_PORTS.sonarrAnime],
     ['radarr', makeRadarr(), MOCK_PORTS.radarr],
     ['overseerr', makeOverseerr(), MOCK_PORTS.overseerr],
     ['sabnzbd', makeSab(), MOCK_PORTS.sabnzbd],

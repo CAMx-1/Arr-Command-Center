@@ -83,6 +83,7 @@ function buildMockConfig() {
     auth: { enabled: false },
     services: {
       sonarr: mk('sonarr', 'Sonarr', 'sonarr', MOCK_PORTS.sonarr),
+      'sonarr-anime': mk('sonarr-anime', 'Sonarr (Anime)', 'sonarr', MOCK_PORTS.sonarrAnime),
       radarr: mk('radarr', 'Radarr', 'radarr', MOCK_PORTS.radarr),
       overseerr: mk('overseerr', 'Overseerr', 'overseerr', MOCK_PORTS.overseerr),
       sabnzbd: mk('sabnzbd', 'SABnzbd', 'sabnzbd', MOCK_PORTS.sabnzbd),

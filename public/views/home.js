@@ -252,9 +252,10 @@ async function hydrateActivity(ctx, silent = false) {
   for (const def of ACTIVITY_DEFS) {
     if (!prefs[def.id]) continue;
     if (def.local) { tasks.push(Promise.resolve(failedRows(ctx))); continue; }
-    const svc = state.services.find((s) => s.type === def.type);
-    if (!svc) continue;
-    tasks.push(fetchSource(def, svc, ctx));
+    // Include every configured instance of the type (supports multiple
+    // Sonarr/Radarr instances, e.g. a separate Anime instance).
+    const svcs = state.services.filter((s) => s.type === def.type && s.configured !== false);
+    for (const svc of svcs) tasks.push(fetchSource(def, svc, ctx));
   }
 
   if (!tasks.length) {
