@@ -2,6 +2,7 @@ import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, pct, svcIcon, toast
 import { SERVICE_META } from '../app.js';
 import { listFailed, removeFailed } from '../lib/failedRequests.js';
 import { visibleServices } from '../lib/servicePrefs.js';
+import { honeycombRows, isWide } from '../lib/honeycomb.js';
 
 // ---- Activity source definitions ----
 const ACTIVITY_DEFS = [
@@ -36,8 +37,14 @@ export async function renderHome(root, ctx) {
   try { status = await api.status(); state.status = status; } catch { /* ignore */ }
 
   const shown = visibleServices(state.services);
-  const honeycomb = h('div', { class: 'honeycomb' },
-    ...honeycombRows(shown).map((rowItems) =>
+  const rows = honeycombRows(shown);
+  const wide = isWide(shown.length);
+  // When the two rows are equal length they don't nestle by centering alone, so
+  // flag it for CSS to offset alternate rows.
+  const evenSplit = wide && rows.length === 2 && rows[0].length === rows[1].length;
+  const hcClass = 'honeycomb' + (wide ? ' hc-wide' : '') + (evenSplit ? ' hc-wide-even' : '');
+  const honeycomb = h('div', { class: hcClass },
+    ...rows.map((rowItems) =>
       h('div', { class: 'hc-row' }, ...rowItems.map((svc) => hexCell(svc, status[svc.key], ctx)))));
 
   mount(root,
@@ -130,18 +137,6 @@ async function hydrateUpcoming(ctx) {
 export function refreshHome(ctx) {
   hydrateActivity(ctx, true);
   for (const svc of ctx.state.services) hydrateCardStats(svc, ctx);
-}
-
-// Chunk services into honeycomb rows, alternating 3 and 2 so rows nestle.
-function honeycombRows(items) {
-  const rows = [];
-  let i = 0, cap = 3;
-  while (i < items.length) {
-    rows.push(items.slice(i, i + cap));
-    i += cap;
-    cap = cap === 3 ? 2 : 3;
-  }
-  return rows;
 }
 
 function hexCell(svc, st, ctx) {

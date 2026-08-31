@@ -304,6 +304,12 @@ button { font-family: inherit; cursor: pointer; }
 .honeycomb { display: flex; flex-direction: column; align-items: center; padding: 10px 0 4px; }
 .hc-row { display: flex; justify-content: center; }
 .hc-row + .hc-row { margin-top: -50px; } /* overlap so rows interlock */
+/* Wide two-row honeycomb band (used when there are more than 6 services):
+   split into a top and bottom row so it grows sideways. When the two rows are
+   equal length, offset them by half a hex so they interlock (unequal rows
+   already nestle via centering, like the classic 3/2 layout). */
+.honeycomb.hc-wide-even .hc-row:nth-child(1) { transform: translateX(-46px); }
+.honeycomb.hc-wide-even .hc-row:nth-child(2) { transform: translateX(46px); }
 .hex-cell {
   --hex-w: 176px; --hex-h: 200px;
   position: relative; width: var(--hex-w); height: var(--hex-h);
@@ -338,6 +344,7 @@ button { font-family: inherit; cursor: pointer; }
   /* Wrap the honeycomb instead of overlapping/overflowing, size hexes for
      readability, and scale text down so it fits inside the hex. */
   .honeycomb .hc-row { flex-wrap: wrap; }
+  .honeycomb.hc-wide-even .hc-row { transform: none; }
   .hc-row + .hc-row { margin-top: 6px; }
   .hex-cell { --hex-w: 166px; --hex-h: 188px; margin: 6px; }
   .hex-inner { padding: 0 20px; gap: 4px; }
