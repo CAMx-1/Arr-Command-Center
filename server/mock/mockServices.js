@@ -9,6 +9,7 @@ export const MOCK_PORTS = {
   sonarr: 18989,
   sonarrAnime: 18990,
   radarr: 17878,
+  radarr4k: 17879,
   overseerr: 15055,
   sabnzbd: 18080,
   tautulli: 18181,
@@ -123,7 +124,7 @@ function makeSonarr(opts = {}) {
 }
 
 // ---------------- Radarr ----------------
-function makeRadarr() {
+function makeRadarr(opts = {}) {
   const app = express();
   app.use(express.json());
   let movies = [
@@ -133,6 +134,7 @@ function makeRadarr() {
     { id: 4, title: 'Dune: Part Two', year: 2024, tmdbId: 693134, status: 'released', monitored: false, hasFile: false, runtime: 166, overview: 'Duplicate entry added on another drive.', path: 'C:\\Media\\Movies2\\Dune Part Two (2024)', rootFolderPath: 'C:\\Media\\Movies2', sizeOnDisk: 0, studio: 'Legendary', images: [] },
     { id: 5, title: '1917', year: 2019, tmdbId: 530915, status: 'released', monitored: true, hasFile: true, runtime: 119, overview: 'Two soldiers race against time to deliver a message.', path: 'C:\\Media\\Movies\\1917 (2019)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 8589934592, studio: 'DreamWorks', images: [] },
   ];
+  if (opts.movies) movies = opts.movies.map((m) => ({ ...m }));
   let queue = [
     { id: 201, title: 'Furiosa 2024 2160p', movieId: 3, status: 'downloading', trackedDownloadState: 'downloading', size: 21474836480, sizeleft: 6442450944, timeleft: '00:11:38', downloadClient: 'SABnzbd', indexer: 'DrunkenSlug' },
   ];
@@ -143,7 +145,7 @@ function makeRadarr() {
     next();
   });
   app.get('/__debug', (req, res) => res.json({ cf: cfSeen.radarr || null }));
-  app.get('/api/v3/system/status', (req, res) => res.json({ version: '5.11.0.9244', appName: 'Radarr', instanceName: 'Radarr (mock)' }));
+  app.get('/api/v3/system/status', (req, res) => res.json({ version: '5.11.0.9244', appName: 'Radarr', instanceName: opts.instanceName || 'Radarr (mock)' }));
   let rootFolders = [
     { id: 1, path: 'C:\\Media\\Movies', freeSpace: 0, accessible: false, unmappedFolders: [] },
     { id: 2, path: 'C:\\Media\\Movies2', freeSpace: 0, accessible: false, unmappedFolders: [{ name: '1917.2019.PROPER.1080p.BluRay.x265', path: 'C:\\Media\\Movies2\\1917.2019.PROPER.1080p.BluRay.x265', relativePath: '1917.2019.PROPER.1080p.BluRay.x265' }] },
@@ -564,6 +566,11 @@ export function startMockServices() {
       { id: 3, title: 'Jujutsu Kaisen', year: 2020, tvdbId: 377543, status: 'continuing', monitored: false, seasonCount: 2, network: 'MBS', overview: 'A student joins a secret organization of sorcerers.', path: '/anime/Jujutsu Kaisen', rootFolderPath: '/anime', statistics: { episodeFileCount: 47, episodeCount: 47, percentOfEpisodes: 100, sizeOnDisk: 53687091200 }, images: [] },
     ] }), MOCK_PORTS.sonarrAnime],
     ['radarr', makeRadarr(), MOCK_PORTS.radarr],
+    ['radarr-4k', makeRadarr({ instanceName: 'Radarr 4K (mock)', movies: [
+      { id: 1, title: 'Blade Runner 2049', year: 2017, tmdbId: 335984, status: 'released', monitored: true, hasFile: true, runtime: 164, overview: 'A young blade runner uncovers a long-buried secret.', path: '/movies-4k/Blade Runner 2049 (2017)', rootFolderPath: '/movies-4k', sizeOnDisk: 64424509440, studio: 'Alcon', images: [] },
+      { id: 2, title: 'Interstellar', year: 2014, tmdbId: 157336, status: 'released', monitored: true, hasFile: true, runtime: 169, overview: 'Explorers travel through a wormhole in search of a new home.', path: '/movies-4k/Interstellar (2014)', rootFolderPath: '/movies-4k', sizeOnDisk: 75161927680, studio: 'Paramount', images: [] },
+      { id: 3, title: 'Top Gun: Maverick', year: 2022, tmdbId: 361743, status: 'released', monitored: false, hasFile: false, runtime: 130, overview: 'Maverick trains a detachment of Top Gun graduates.', path: '/movies-4k/Top Gun Maverick (2022)', rootFolderPath: '/movies-4k', sizeOnDisk: 0, studio: 'Paramount', images: [] },
+    ] }), MOCK_PORTS.radarr4k],
     ['overseerr', makeOverseerr(), MOCK_PORTS.overseerr],
     ['sabnzbd', makeSab(), MOCK_PORTS.sabnzbd],
     ['tautulli', makeTautulli(), MOCK_PORTS.tautulli],

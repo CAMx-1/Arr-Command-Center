@@ -85,6 +85,7 @@ function buildMockConfig() {
       sonarr: mk('sonarr', 'Sonarr', 'sonarr', MOCK_PORTS.sonarr),
       'sonarr-anime': mk('sonarr-anime', 'Sonarr (Anime)', 'sonarr', MOCK_PORTS.sonarrAnime),
       radarr: mk('radarr', 'Radarr', 'radarr', MOCK_PORTS.radarr),
+      'radarr-4k': mk('radarr-4k', 'Radarr (4K)', 'radarr', MOCK_PORTS.radarr4k),
       overseerr: mk('overseerr', 'Overseerr', 'overseerr', MOCK_PORTS.overseerr),
       sabnzbd: mk('sabnzbd', 'SABnzbd', 'sabnzbd', MOCK_PORTS.sabnzbd),
       tautulli: mk('tautulli', 'Tautulli', 'tautulli', MOCK_PORTS.tautulli),
