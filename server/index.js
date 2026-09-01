@@ -11,6 +11,8 @@ import { startMockServices } from './mock/mockServices.js';
 import { createPlexAuth } from './plexAuth.js';
 import * as store from './store.js';
 import * as plex from './plex.js';
+import * as push from './push.js';
+import { startPoller, pollOnce } from './poller.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -33,6 +35,9 @@ if (cfg.mock) {
 
 const app = express();
 app.disable('x-powered-by');
+
+// Initialize web push (loads or generates a persistent VAPID keypair).
+try { push.initPush(); } catch (e) { console.error('[push] init failed:', e.message); }
 
 const START_TS = Date.now();
 const requestLog = []; // recent /api/* requests (ring buffer) for diagnostics
@@ -157,6 +162,67 @@ app.delete('/api/links/:id', (req, res) => {
 // ---- Login log (recorded on Plex sign-in). ----
 app.get('/api/login-log', (req, res) => res.json(store.get('loginLog', [])));
 
+// ---- Web push (Safari/iOS + standards browsers). Behind the auth gate. ----
+// The public VAPID key is needed by the browser to create a subscription.
+app.get('/api/push/public-key', (req, res) => res.json({ publicKey: push.getPublicKey() }));
+
+// Store a PushSubscription captured by the client service worker.
+app.post('/api/push/subscribe', express.json({ limit: '16kb' }), (req, res) => {
+  try {
+    const sub = req.body && req.body.subscription ? req.body.subscription : req.body;
+    const result = push.addSubscription(sub, { user: req.plexUser || null, ua: req.headers['user-agent'] || '' });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Remove a subscription (on disable / permission revoke).
+app.post('/api/push/unsubscribe', express.json({ limit: '16kb' }), (req, res) => {
+  const endpoint = req.body && (req.body.endpoint || (req.body.subscription && req.body.subscription.endpoint));
+  if (!endpoint) return res.status(400).json({ error: 'endpoint is required' });
+  res.json({ ok: true, ...push.removeSubscription(endpoint) });
+});
+
+// Send a test notification to all stored subscriptions.
+app.post('/api/push/test', express.json({ limit: '4kb' }), async (req, res) => {
+  const { title, body } = req.body || {};
+  const payload = push.notification({
+    title: title || 'Arr Command Center',
+    body: body || 'Push notifications are working 🎉',
+    url: '/',
+    tag: 'test',
+  });
+  try {
+    const result = await push.sendToAll(payload);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// Push status (subscription count) for the settings UI.
+app.get('/api/push/status', (req, res) => res.json({ subscriptions: push.subscriptionCount() }));
+
+// Per-category notification preferences (which event types push to mobile).
+app.get('/api/push/prefs', (req, res) => res.json({ categories: push.CATEGORIES, prefs: push.getPrefs() }));
+app.post('/api/push/prefs', express.json({ limit: '4kb' }), (req, res) => {
+  const prefs = (req.body && req.body.prefs) || req.body || {};
+  res.json({ ok: true, prefs: push.setPrefs(prefs) });
+});
+
+// Manually trigger a poll now (also useful for testing). force=true pushes fresh
+// events even on the very first (baseline) run.
+app.post('/api/push/poll', express.json({ limit: '2kb' }), async (req, res) => {
+  try {
+    const force = !!(req.body && req.body.force) || req.query.force === 'true';
+    const result = await pollOnce(cfg, { force });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
 // ---- Plex API (watchlist / users / sessions), token used server-side only. ----
 app.get('/api/plex/watchlist', async (req, res) => { try { res.json(await plex.getWatchlist(cfg)); } catch (e) { res.status(502).json({ error: e.message }); } });
 app.get('/api/plex/users', async (req, res) => { try { res.json(await plex.getUsers(cfg)); } catch (e) { res.status(502).json({ error: e.message }); } });
@@ -253,6 +319,15 @@ app.use(express.static(PUBLIC_DIR, {
     if (/\.(html|css|js)$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'no-cache');
     }
+    if (/\.webmanifest$/i.test(filePath)) {
+      res.setHeader('Content-Type', 'application/manifest+json');
+    }
+    // The service worker must be re-checked on every load and is allowed to
+    // control the whole origin.
+    if (/[/\\]sw\.js$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Service-Worker-Allowed', '/');
+    }
   },
 }));
 // SPA fallback for any non-API route.
@@ -269,8 +344,16 @@ const server = app.listen(cfg.port, cfg.host, () => {
   else console.log('');
 });
 
+// Background poller for automatic push notifications. Disable with NOTIFY_DISABLE=1;
+// tune cadence with NOTIFY_POLL_SECONDS (default 60, min 15).
+let poller = null;
+if (!process.env.NOTIFY_DISABLE) {
+  poller = startPoller(cfg, { intervalSeconds: Number(process.env.NOTIFY_POLL_SECONDS) || 60 });
+}
+
 function shutdown() {
   console.log('\n[shutdown] closing servers...');
+  if (poller) poller.stop();
   server.close();
   for (const s of mockServers) s.close();
   process.exit(0);

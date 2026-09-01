@@ -259,6 +259,29 @@ async function pingQbit(svc, started) {
   }
 }
 
+// Server-side authed GET returning parsed JSON. Reuses the same auth (headers +
+// query apikey) and URL building as the browser proxy, so the background poller
+// can call service APIs directly. `path` is the sub-path incl. any query string,
+// e.g. 'api/v3/history?pageSize=25' or 'api/v1/request?filter=pending'.
+export async function serviceGet(svc, path, { timeout = 10000 } = {}) {
+  const [p, q] = String(path).split('?');
+  const target = buildTargetUrl(svc, p, q || '');
+  const { headers } = authFor(svc);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const upstream = await fetch(target, { headers: { accept: 'application/json', ...headers }, signal: controller.signal });
+    const text = await upstream.text();
+    let data; try { data = JSON.parse(text); } catch { data = text; }
+    if (!upstream.ok) {
+      const err = new Error(`HTTP ${upstream.status}`);
+      err.status = upstream.status; err.body = data;
+      throw err;
+    }
+    return data;
+  } finally { clearTimeout(timer); }
+}
+
 export async function pingService(svc) {
   const started = Date.now();
   if (svc.type === 'qbittorrent') return pingQbit(svc, started);

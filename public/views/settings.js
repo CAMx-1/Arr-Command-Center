@@ -3,6 +3,7 @@ import { SERVICE_META } from '../app.js';
 import { getTheme, getAccent, applyTheme, applyAccent, ACCENTS, ACCENT_NAMES } from '../lib/theme.js';
 import { globalMode, setGlobalMode } from '../lib/viewMode.js';
 import { isHidden, setHidden, orderServices, setOrder } from '../lib/servicePrefs.js';
+import * as push from '../lib/push.js';
 
 export async function renderSettings(root, ctx) {
   const { api, state } = ctx;
@@ -109,6 +110,8 @@ export async function renderSettings(root, ctx) {
     general,
     h('div', { class: 'section-title' }, 'Appearance'),
     appearanceCard(root, ctx),
+    h('div', { class: 'section-title' }, 'Notifications'),
+    h('div', { class: 'card', id: 'push-panel' }, h('div', { class: 'dim' }, 'Loading…')),
     h('div', { class: 'section-title' }, 'Services'),
     h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', margin: '-4px 0 12px' } },
       h('div', { class: 'dim', style: { fontSize: '13px', flex: '1' } }, 'Drag a service card to reorder it, and use Hide to remove one from the sidebar and Home (it stays configured and reachable directly).'),
@@ -127,6 +130,7 @@ export async function renderSettings(root, ctx) {
 
   hydrateDiagnostics(ctx);
   hydrateLinksAdmin(ctx);
+  hydrateNotifications(ctx);
   if (cfg.auth && cfg.auth.plexEnabled) hydrateLoginLog(ctx);
 }
 
@@ -243,6 +247,114 @@ function settingRow(label, value) {
     h('span', { class: 'dim' }, label),
     h('span', { class: 'right' }, value),
   );
+}
+
+// Renders the Web Push (mobile notifications) controls into #push-panel.
+async function hydrateNotifications(ctx) {
+  const panel = document.getElementById('push-panel');
+  if (!panel) return;
+
+  const render = async () => {
+    let st;
+    try { st = await push.getStatus(); }
+    catch { st = { supported: false }; }
+
+    const rows = [];
+
+    if (!st.supported) {
+      rows.push(h('p', { class: 'dim', style: { margin: 0, lineHeight: '1.6' } },
+        'This browser doesn’t support Web Push notifications. On iPhone/iPad, use Safari on iOS 16.4 or later.'));
+      mount(panel, ...rows);
+      return;
+    }
+
+    // iOS requires the app be installed to the Home Screen before push works.
+    if (st.ios && !st.standalone) {
+      rows.push(h('div', { class: 'setting-row' },
+        h('span', { class: 'dim' }, 'Status'),
+        h('span', { class: 'right' }, h('span', { class: 'pill warn' }, 'Add to Home Screen first')),
+      ));
+      rows.push(h('p', { class: 'dim', style: { margin: '8px 0 0', lineHeight: '1.6' } },
+        'On iOS, push notifications only work after you install this dashboard: tap the ',
+        h('strong', {}, 'Share'), ' button in Safari, choose ', h('strong', {}, '“Add to Home Screen”'),
+        ', then open the app from the new icon and return here to enable notifications.'));
+      mount(panel, ...rows);
+      return;
+    }
+
+    const subscribed = st.subscribed && st.permission === 'granted';
+    const statusPill = st.permission === 'denied'
+      ? h('span', { class: 'pill down' }, 'Blocked in browser settings')
+      : subscribed ? h('span', { class: 'pill ok' }, 'Enabled') : h('span', { class: 'pill muted' }, 'Off');
+
+    rows.push(settingRow('Push notifications', statusPill));
+
+    const btnWrap = h('div', { class: 'meta-line', style: { marginTop: '12px' } });
+
+    if (st.permission === 'denied') {
+      btnWrap.appendChild(h('span', { class: 'dim' }, 'Notifications are blocked. Re-enable them for this site in your browser/OS settings, then refresh.'));
+    } else if (subscribed) {
+      btnWrap.appendChild(h('button', {
+        class: 'btn sm', onclick: async (e) => {
+          const b = e.currentTarget; b.disabled = true; b.textContent = 'Disabling…';
+          try { await push.disable(); toast('Notifications disabled', 'success'); }
+          catch (err) { toast(err.message, 'error'); }
+          render();
+        },
+      }, 'Disable'));
+      btnWrap.appendChild(h('button', {
+        class: 'btn sm primary', onclick: async (e) => {
+          const b = e.currentTarget; b.disabled = true; b.textContent = 'Sending…';
+          try { const r = await push.sendTest(); toast(`Test sent to ${r.sent} device${r.sent === 1 ? '' : 's'}${r.pruned ? ` (${r.pruned} stale removed)` : ''}`, 'success'); }
+          catch (err) { toast(err.message, 'error'); }
+          b.disabled = false; b.textContent = 'Send test';
+        },
+      }, 'Send test'));
+    } else {
+      btnWrap.appendChild(h('button', {
+        class: 'btn sm primary', onclick: async (e) => {
+          const b = e.currentTarget; b.disabled = true; b.textContent = 'Enabling…';
+          try { await push.enable(); toast('Notifications enabled', 'success'); }
+          catch (err) { toast(err.message, 'error'); }
+          render();
+        },
+      }, 'Enable notifications'));
+    }
+    rows.push(btnWrap);
+
+    rows.push(h('p', { class: 'dim', style: { margin: '12px 0 0', lineHeight: '1.6' } },
+      'Get push alerts on this device for downloads and requests, even when the app is closed. ',
+      st.ios ? 'Delivered through Apple Push on iOS.' : 'Delivered through your browser’s push service.'));
+
+    // Per-category toggles: which notification types are sent to mobile.
+    const prefsWrap = h('div', { style: { marginTop: '16px' } },
+      h('div', { class: 'setting-row' }, h('span', { class: 'dim' }, 'Notify me about'), h('span', {})),
+      h('div', { class: 'dim', id: 'push-prefs-list', style: { fontSize: '13px' } }, 'Loading…'),
+    );
+    rows.push(prefsWrap);
+
+    mount(panel, ...rows);
+
+    // Load + render the category toggles (independent of subscription state so
+    // you can set preferences before enabling).
+    try {
+      const { categories, prefs } = await push.getPrefs();
+      const list = document.getElementById('push-prefs-list');
+      if (list) {
+        clear(list);
+        categories.forEach((c) => {
+          const cb = h('input', { type: 'checkbox', checked: prefs[c.id] !== false ? 'checked' : null });
+          cb.addEventListener('change', async () => {
+            try { await push.setPrefs({ [c.id]: cb.checked }); toast(`${c.label}: ${cb.checked ? 'on' : 'off'}`, 'success'); }
+            catch (e) { toast(e.message, 'error'); cb.checked = !cb.checked; }
+          });
+          list.appendChild(h('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0' } }, cb, c.label));
+        });
+      }
+    } catch { /* prefs unavailable */ }
+  };
+
+  render();
 }
 
 const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'indexer', 'plex'];

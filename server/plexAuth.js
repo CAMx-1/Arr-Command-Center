@@ -161,7 +161,7 @@ export function createPlexAuth(cfg, { root, publicDir }) {
   });
 
   // ---- Gate middleware ----
-  const ALLOW_UNAUTH = new Set(['/login.html', '/login.js', '/login.css', '/styles.css', '/favicon.ico', '/robots.txt']);
+  const ALLOW_UNAUTH = new Set(['/login.html', '/login.js', '/login.css', '/styles.css', '/favicon.ico', '/robots.txt', '/sw.js', '/manifest.webmanifest']);
   function middleware(req, res, next) {
     if (!enabled) return next();
     const p = req.path;
