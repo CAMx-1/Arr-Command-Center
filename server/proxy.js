@@ -42,8 +42,8 @@ function authFor(svc) {
   const query = {};
   const type = svc.type;
 
-  if (type === 'sabnzbd' || type === 'tautulli') {
-    // SABnzbd and Tautulli authenticate via ?apikey= query param.
+  if (type === 'sabnzbd' || type === 'tautulli' || type === 'indexer') {
+    // SABnzbd, Tautulli, and Usenet indexers authenticate via ?apikey= query param.
     if (svc.apiKey) query.apikey = svc.apiKey;
   } else if (type === 'bazarr') {
     // Bazarr authenticates via the X-API-KEY header (header names are
@@ -229,6 +229,7 @@ const HEALTH_PATH = {
   prowlarr: 'api/v1/system/status',
   bazarr: 'api/system/status',
   qbittorrent: 'api/v2/app/version',
+  indexer: 'api?t=caps&o=json',
 };
 
 // qBittorrent needs Bearer/cookie auth + Referer, so it has its own ping.

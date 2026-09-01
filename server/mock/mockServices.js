@@ -15,6 +15,7 @@ export const MOCK_PORTS = {
   tautulli: 18181,
   bazarr: 16767,
   qbittorrent: 18081,
+  indexer: 16060,
 };
 
 const cfSeen = {}; // service -> last seen CF headers
@@ -304,6 +305,12 @@ function makeSab() {
   app.all('/api', (req, res) => {
     const mode = req.query.mode;
     if (mode === 'version') return res.json({ version: '4.3.2' });
+    // Add an NZB by URL (used by the Indexer "Send to SABnzbd" action).
+    if (mode === 'addurl') {
+      const id = 'SABnzbd_nzo_' + Math.random().toString(36).slice(2, 8);
+      slots.unshift({ nzo_id: id, filename: req.query.nzbname || 'Indexer NZB', status: 'Queued', percentage: '0', mb: '700', mbleft: '700', timeleft: '0:00:00', cat: req.query.cat || '*', priority: 'Normal', sizeleft: '700 MB', size: '700 MB' });
+      return res.json({ status: true, nzo_ids: [id] });
+    }
     // Delete must be checked before the queue-list branch (SAB uses mode=queue&name=delete).
     if (mode === 'queue' && req.query.name === 'delete') { const id = req.query.value; slots = slots.filter(s => s.nzo_id !== id); return res.json({ status: true }); }
     if (mode === 'history' && req.query.name === 'delete') { const id = req.query.value; history = history.filter(s => s.nzo_id !== id); return res.json({ status: true }); }
@@ -628,6 +635,64 @@ function makeQbittorrent() {
   return app;
 }
 
+// ---------------- Usenet indexer (search; public indexers like NZBGeek) ----------------
+function makeIndexer() {
+  const app = express();
+  const port = MOCK_PORTS.indexer;
+  const getUrl = (id) => `http://127.0.0.1:${port}/api?t=get&id=${id}&apikey=MOCK_API_KEY`;
+  const day = 86400000;
+  // Demo catalogue spanning Audiobooks (30x0), Audio (30x0), and Books (70x0).
+  const catalogue = [
+    { id: 'ab1', title: 'Project Hail Mary - Andy Weir [Audiobook M4B]', cat: '3030', size: 891289600, grabs: 142, age: 2 },
+    { id: 'ab2', title: 'The Hobbit - J.R.R. Tolkien (Unabridged Audiobook)', cat: '3030', size: 650117120, grabs: 96, age: 9 },
+    { id: 'ab3', title: 'Dune - Frank Herbert [Audiobook 64kbps]', cat: '3030', size: 738197504, grabs: 210, age: 15 },
+    { id: 'eb1', title: 'Dune - Frank Herbert (Retail EPUB)', cat: '7020', size: 3145728, grabs: 320, age: 4 },
+    { id: 'eb2', title: 'The Martian - Andy Weir [EPUB + MOBI]', cat: '7020', size: 4194304, grabs: 180, age: 20 },
+    { id: 'cx1', title: 'Saga Vol. 1 (2012) (Digital) (comic)', cat: '7030', size: 47185920, grabs: 41, age: 30 },
+    { id: 'mg1', title: 'National Geographic - January 2024', cat: '7010', size: 62914560, grabs: 12, age: 6 },
+    { id: 'au1', title: 'Various Artists - Jazz Classics [MP3 320]', cat: '3010', size: 188743680, grabs: 27, age: 12 },
+    { id: 'au2', title: 'Ludwig van Beethoven - Symphony No. 9 [FLAC]', cat: '3040', size: 524288000, grabs: 9, age: 40 },
+  ];
+  const catMatch = (itemCat, reqCats) => {
+    if (!reqCats.length) return true;
+    const ic = Number(itemCat);
+    return reqCats.some((rc) => { const r = Number(rc); return r % 1000 === 0 ? Math.floor(ic / 1000) * 1000 === r : ic === r; });
+  };
+  const toItem = (it) => ({
+    title: it.title, guid: it.id, link: getUrl(it.id),
+    pubDate: new Date(Date.now() - it.age * day).toUTCString(),
+    enclosure: { '@attributes': { url: getUrl(it.id), length: String(it.size), type: 'application/x-nzb' } },
+    attr: [
+      { '@attributes': { name: 'category', value: it.cat } },
+      { '@attributes': { name: 'size', value: String(it.size) } },
+      { '@attributes': { name: 'grabs', value: String(it.grabs) } },
+    ],
+  });
+
+  app.use((req, res, next) => {
+    recordCf('indexer', req);
+    if (req.query.apikey !== 'MOCK_API_KEY') return res.status(401).json({ error: 'Missing or invalid API key' });
+    next();
+  });
+  app.get('/__debug', (req, res) => res.json({ cf: cfSeen.indexer || null }));
+  app.get('/api', (req, res) => {
+    const t = req.query.t;
+    if (t === 'caps') {
+      return res.json({ caps: { server: { '@attributes': { version: '1.0', title: 'Mock Indexer', strapline: 'Demo Usenet indexer' } } } });
+    }
+    if (['search', 'book', 'music', 'tvsearch', 'movie', ''].includes(t) || t === undefined) {
+      const q = String(req.query.q || '').toLowerCase();
+      const cats = String(req.query.cat || '').split(',').map((s) => s.trim()).filter(Boolean);
+      let list = catalogue.filter((it) => catMatch(it.cat, cats));
+      if (q) list = list.filter((it) => it.title.toLowerCase().includes(q));
+      return res.json({ channel: { response: { '@attributes': { offset: '0', total: String(list.length) } }, item: list.map(toItem) } });
+    }
+    if (t === 'get') return res.type('application/x-nzb').send('<?xml version="1.0"?><nzb></nzb>');
+    return res.json({ channel: { item: [] } });
+  });
+  return app;
+}
+
 export function startMockServices() {
   const defs = [
     ['sonarr', makeSonarr(), MOCK_PORTS.sonarr],
@@ -647,6 +712,7 @@ export function startMockServices() {
     ['tautulli', makeTautulli(), MOCK_PORTS.tautulli],
     ['bazarr', makeBazarr(), MOCK_PORTS.bazarr],
     ['qbittorrent', makeQbittorrent(), MOCK_PORTS.qbittorrent],
+    ['indexer', makeIndexer(), MOCK_PORTS.indexer],
   ];
   const servers = [];
   for (const [name, app, port] of defs) {

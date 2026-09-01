@@ -101,6 +101,12 @@ export const api = {
     };
   },
 
+  // ---- Usenet indexer helper (public indexers like NZBGeek; ?apikey= injected server-side) ----
+  indexer(service, params = {}) {
+    const qs = new URLSearchParams({ o: 'json', ...params });
+    return this.proxy(service, `api?${qs.toString()}`);
+  },
+
   // ---- SABnzbd helper (query-based API) ----
   sab(service, params = {}) {
     const qs = new URLSearchParams({ output: 'json', ...params });

@@ -27,7 +27,7 @@ export function loadDotEnv() {
   }
 }
 
-const SERVICE_TYPES = ['sonarr', 'radarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'plex'];
+const SERVICE_TYPES = ['sonarr', 'radarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'indexer', 'plex'];
 export const ALLOWED_SERVICE_TYPES = SERVICE_TYPES;
 export const CONFIG_PATH = path.join(ROOT, 'config.json');
 
@@ -95,6 +95,8 @@ function buildMockConfig() {
       tautulli: mk('tautulli', 'Tautulli', 'tautulli', MOCK_PORTS.tautulli),
       bazarr: mk('bazarr', 'Bazarr', 'bazarr', MOCK_PORTS.bazarr),
       qbittorrent: mk('qbittorrent', 'qBittorrent', 'qbittorrent', MOCK_PORTS.qbittorrent),
+      // Public Usenet indexer (e.g. NZBGeek) — Newznab-compatible API, no custom headers.
+      indexer: { label: 'Indexer', type: 'indexer', enabled: true, baseUrl: `http://127.0.0.1:${MOCK_PORTS.indexer}`, apiKey: 'MOCK_API_KEY' },
     },
   };
 }
