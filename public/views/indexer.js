@@ -43,12 +43,39 @@ function attrOf(item, name) {
   for (const x of arr) { const at = (x && x['@attributes']) || x || {}; if (at.name === name) return at.value; }
   return undefined;
 }
+// Extract a URL from a Newznab field that may be a string or an object
+// ({text}/{_}/{@attributes:{url|href|isPermaLink}}).
+function urlOf(v) {
+  if (!v) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'object') return v.text || v._ || (v['@attributes'] && (v['@attributes'].url || v['@attributes'].href)) || '';
+  return '';
+}
+// Pull a query param (first match) out of a URL string.
+function paramFromUrl(u, names) {
+  try { const q = new URL(u).searchParams; for (const n of names) { const v = q.get(n); if (v) return v; } } catch { /* not a URL */ }
+  return '';
+}
 function normalize(item) {
   const enc = item.enclosure && (item.enclosure['@attributes'] || item.enclosure);
   const url = (enc && enc.url) || item.link || '';
   const size = Number(attrOf(item, 'size') || (enc && enc.length) || item.size || 0);
   let cat = attrOf(item, 'category');
   if (cat == null) cat = Array.isArray(item.category) ? item.category[0] : item.category;
+
+  // Comments page + details/permalink page on the indexer.
+  const comments = urlOf(item.comments);
+  const guidStr = urlOf(item.guid);
+  let details = /^https?:\/\//i.test(guidStr) ? guidStr : '';
+  if (!details && comments) details = comments.replace(/#.*$/, '');
+  const description = typeof item.description === 'string' ? item.description.trim() : '';
+
+  // Release GUID used for the Newznab comments/details API (t=comments&guid=…).
+  // Prefer the explicit attr, else pull ?id=/?guid= from the nzb or permalink URL.
+  let id = attrOf(item, 'guid') || '';
+  if (!id) id = paramFromUrl(url, ['id', 'guid']);
+  if (!id && guidStr) id = paramFromUrl(guidStr, ['guid', 'id']) || (/^https?:\/\//i.test(guidStr) ? '' : guidStr);
+
   return {
     title: item.title || 'Untitled',
     url,
@@ -56,9 +83,18 @@ function normalize(item) {
     cat: cat != null ? String(cat) : '',
     grabs: Number(attrOf(item, 'grabs') || 0),
     pubDate: item.pubDate || item.pubdate || null,
+    id,
+    comments,
+    details,
+    description,
+    commentsCount: Number(attrOf(item, 'comments') || 0),
+    poster: attrOf(item, 'poster') || '',
+    group: attrOf(item, 'group') || '',
+    files: Number(attrOf(item, 'files') || 0),
   };
 }
-function parseItems(data) {
+
+export function parseItems(data) {
   const ch = data && data.channel;
   let items = ch && ch.item;
   if (!items) return [];
@@ -125,9 +161,43 @@ function resultRow(it, ctx) {
       ),
     ),
     h('div', { class: 'row-actions' },
+      (it.comments || it.details) ? h('button', { class: 'btn sm', title: 'Read comments on the indexer', onclick: () => openLink(it.comments || it.details) }, `💬${it.commentsCount ? ` ${it.commentsCount}` : ''}`) : null,
+      h('button', { class: 'btn sm', title: 'View details', onclick: () => openDetailsModal(it, ctx) }, 'Details'),
       h('button', { class: 'btn sm primary', title: 'Send to SABnzbd', disabled: it.url ? null : 'disabled', onclick: () => sendToSab(ctx, it) }, '＋ Send to SAB'),
     ),
   );
+}
+
+// Open an external indexer URL safely in a new tab.
+function openLink(url) {
+  if (url) window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+function detailRow(label, value) {
+  return h('div', { class: 'setting-row' }, h('span', { class: 'dim' }, label), h('span', { class: 'right' }, value));
+}
+
+// Details modal: full metadata for a result. Comments are read on the indexer's
+// own site (its API doesn't reliably scope comments to a single release), so we
+// link out to the release page rather than showing them inline.
+function openDetailsModal(it, ctx) {
+  const body = h('div', {},
+    detailRow('Category', catLabel(it.cat)),
+    detailRow('Size', fmtBytes(it.size)),
+    it.pubDate ? detailRow('Age', fmtRelative(it.pubDate)) : null,
+    detailRow('Grabs', String(it.grabs)),
+    it.commentsCount ? detailRow('Comments', String(it.commentsCount)) : null,
+    it.files ? detailRow('Files', String(it.files)) : null,
+    it.group ? detailRow('Group', it.group) : null,
+    it.poster ? detailRow('Poster', it.poster) : null,
+    it.description ? h('p', { class: 'dim', style: { margin: '14px 0 0', lineHeight: '1.6' } }, it.description) : null,
+  );
+  const footer = h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end', width: '100%' } },
+    (it.comments || it.details) ? h('button', { class: 'btn', title: 'Read comments on the indexer', onclick: () => openLink(it.comments || it.details) }, `💬 Comments${it.commentsCount ? ` (${it.commentsCount})` : ''}`) : null,
+    it.details ? h('button', { class: 'btn', title: 'Open the release page on the indexer', onclick: () => openLink(it.details) }, '↗ View on indexer') : null,
+    h('button', { class: 'btn primary', disabled: it.url ? null : 'disabled', onclick: () => { closeModal(); sendToSab(ctx, it); } }, '＋ Send to SAB'),
+  );
+  openModal({ title: it.title, body, footer, wide: true });
 }
 
 function sabInstances(ctx) {

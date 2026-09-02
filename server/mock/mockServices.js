@@ -661,27 +661,61 @@ function makeIndexer() {
     const ic = Number(itemCat);
     return reqCats.some((rc) => { const r = Number(rc); return r % 1000 === 0 ? Math.floor(ic / 1000) * 1000 === r : ic === r; });
   };
+  const detailsUrl = (id) => `http://127.0.0.1:${MOCK_PORTS.indexer}/details/${id}`;
   const toItem = (it) => ({
-    title: it.title, guid: it.id, link: getUrl(it.id),
+    title: it.title,
+    guid: detailsUrl(it.id),
+    link: getUrl(it.id),
+    comments: `${detailsUrl(it.id)}#comments`,
+    description: `${it.title} — posted to alt.binaries.mock. ${it.grabs} grabs, retention OK. Includes PAR2 recovery.`,
     pubDate: new Date(Date.now() - it.age * day).toUTCString(),
     enclosure: { '@attributes': { url: getUrl(it.id), length: String(it.size), type: 'application/x-nzb' } },
     attr: [
       { '@attributes': { name: 'category', value: it.cat } },
+      { '@attributes': { name: 'guid', value: it.id } },
       { '@attributes': { name: 'size', value: String(it.size) } },
       { '@attributes': { name: 'grabs', value: String(it.grabs) } },
+      { '@attributes': { name: 'comments', value: String(it.grabs % 5) } },
+      { '@attributes': { name: 'poster', value: 'ghost@usenet.mock' } },
+      { '@attributes': { name: 'group', value: 'alt.binaries.mock' } },
+      { '@attributes': { name: 'files', value: String(10 + (it.grabs % 30)) } },
+      { '@attributes': { name: 'usenetdate', value: new Date(Date.now() - it.age * day).toUTCString() } },
     ],
   });
 
   app.use((req, res, next) => {
     recordCf('indexer', req);
+    // The human-facing details/comments page uses a browser session, not the
+    // API key — leave it ungated so demo "View on indexer"/"Comments" links work.
+    if (req.path.startsWith('/details/')) return next();
     if (req.query.apikey !== 'MOCK_API_KEY') return res.status(401).json({ error: 'Missing or invalid API key' });
     next();
+  });
+  app.get('/details/:id', (req, res) => {
+    const it = catalogue.find((x) => x.id === req.params.id) || { title: 'Release', grabs: 0 };
+    res.type('html').send(`<!doctype html><meta charset="utf-8"><title>${it.title}</title>`
+      + `<body style="font-family:system-ui;background:#0f1117;color:#e5e7eb;padding:32px;max-width:720px;margin:auto">`
+      + `<h1>${it.title}</h1><p>Category ${it.cat || ''} · ${it.grabs} grabs</p>`
+      + `<h2 id="comments">Comments</h2><p>Demo indexer details page (mock).</p></body>`);
   });
   app.get('/__debug', (req, res) => res.json({ cf: cfSeen.indexer || null }));
   app.get('/api', (req, res) => {
     const t = req.query.t;
     if (t === 'caps') {
       return res.json({ caps: { server: { '@attributes': { version: '1.0', title: 'Mock Indexer', strapline: 'Demo Usenet indexer' } } } });
+    }
+    if (t === 'comments') {
+      const guid = String(req.query.guid || req.query.id || '');
+      const item = catalogue.find((x) => x.id === guid);
+      const n = item ? (item.grabs % 5) : 0;
+      const users = ['nzbfan', 'audiophile', 'bookworm', 'grabby', 'mockuser'];
+      const bodies = ['Perfect, thanks!', 'Great retention, downloaded fine.', 'Works with SABnzbd.', 'Nice quality rip.', 'PAR2 recovered a couple blocks — all good.'];
+      const items = Array.from({ length: n }, (_, i) => ({
+        title: users[i % users.length],
+        description: bodies[i % bodies.length],
+        pubDate: new Date(Date.now() - (i + 1) * 3600000).toUTCString(),
+      }));
+      return res.json({ channel: { item: items } });
     }
     if (['search', 'book', 'music', 'tvsearch', 'movie', ''].includes(t) || t === undefined) {
       const q = String(req.query.q || '').toLowerCase();
