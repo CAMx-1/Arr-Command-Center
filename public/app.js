@@ -6,6 +6,7 @@ import { setPendingFilter } from './lib/libraryFilter.js';
 import { renderHome, refreshHome } from './views/home.js';
 import { renderSonarr } from './views/sonarr.js';
 import { renderRadarr } from './views/radarr.js';
+import { renderLidarr, renderReadarr } from './views/musicbooks.js';
 import { renderOverseerr, openSeasonModal, openMovieRequestModal } from './views/overseerr.js';
 import { renderSabnzbd } from './views/sabnzbd.js';
 import { renderTautulli } from './views/tautulli.js';
@@ -24,6 +25,8 @@ import { initAppearance } from './lib/theme.js';
 export const SERVICE_META = {
   sonarr: { logo: '/icons/sonarr.svg', emoji: '', renderer: renderSonarr },
   radarr: { logo: '/icons/radarr.svg', emoji: '', renderer: renderRadarr },
+  lidarr: { logo: '/icons/lidarr.svg', emoji: '🎵', renderer: renderLidarr },
+  readarr: { logo: '/icons/readarr.svg', emoji: '📚', renderer: renderReadarr },
   overseerr: { logo: '/icons/overseerr.svg', emoji: '', renderer: renderOverseerr },
   sabnzbd: { logo: '/icons/sabnzbd.svg', emoji: '⬇', renderer: renderSabnzbd },
   tautulli: { logo: '/icons/tautulli.svg', emoji: '', renderer: renderTautulli },

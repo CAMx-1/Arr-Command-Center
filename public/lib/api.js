@@ -65,6 +65,20 @@ export const api = {
     };
   },
 
+  // ---- Lidarr / Readarr (v1) helpers — same shape, different API version ----
+  arrV1(service) {
+    return {
+      get: (p) => this.proxy(service, `api/v1/${p}`),
+      post: (p, body) => this.proxy(service, `api/v1/${p}`, { method: 'POST', body }),
+      put: (p, body) => this.proxy(service, `api/v1/${p}`, { method: 'PUT', body }),
+      del: (p, body) => this.proxy(service, `api/v1/${p}`, { method: 'DELETE', body }),
+    };
+  },
+  // Pick the right client for any *arr service by type.
+  arrByType(type, service) {
+    return (type === 'lidarr' || type === 'readarr') ? this.arrV1(service) : this.arr(service);
+  },
+
   // ---- Overseerr (v1) helpers ----
   seerr(service) {
     return {

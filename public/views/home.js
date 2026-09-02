@@ -176,6 +176,15 @@ async function hydrateCardStats(svc, ctx) {
       const count = Array.isArray(items) ? items.length : 0;
       const q = (queue && queue.records) ? queue.records.length : 0;
       mount(el, stat(count, svc.type === 'sonarr' ? 'Series' : 'Movies'), stat(q, 'Queue'));
+    } else if (svc.type === 'lidarr' || svc.type === 'readarr') {
+      const arr = api.arrV1(svc.key);
+      const [items, queue] = await Promise.all([
+        arr.get(svc.type === 'lidarr' ? 'artist' : 'author'),
+        arr.get('queue').catch(() => ({ records: [] })),
+      ]);
+      const count = Array.isArray(items) ? items.length : 0;
+      const q = (queue && queue.records) ? queue.records.length : 0;
+      mount(el, stat(count, svc.type === 'lidarr' ? 'Artists' : 'Authors'), stat(q, 'Queue'));
     } else if (svc.type === 'overseerr') {
       const counts = await api.seerr(svc.key).get('request/count');
       mount(el, stat(counts.pending ?? 0, 'Pending'), stat(counts.total ?? 0, 'Requests'));

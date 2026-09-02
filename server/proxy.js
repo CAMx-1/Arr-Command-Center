@@ -223,6 +223,8 @@ async function forward(svc, subPath, req, res) {
 const HEALTH_PATH = {
   sonarr: 'api/v3/system/status',
   radarr: 'api/v3/system/status',
+  lidarr: 'api/v1/system/status',
+  readarr: 'api/v1/system/status',
   overseerr: 'api/v1/status',
   sabnzbd: 'api?mode=version&output=json',
   tautulli: 'api/v2?cmd=status',
@@ -278,6 +280,26 @@ export async function serviceGet(svc, path, { timeout = 10000 } = {}) {
       err.status = upstream.status; err.body = data;
       throw err;
     }
+    return data;
+  } finally { clearTimeout(timer); }
+}
+
+// Server-side authed request (POST/PUT/DELETE) with optional JSON body. Used by
+// the automation module to trigger searches and remove queue items.
+export async function serviceRequest(svc, path, { method = 'POST', body, timeout = 15000 } = {}) {
+  const [p, q] = String(path).split('?');
+  const target = buildTargetUrl(svc, p, q || '');
+  const { headers } = authFor(svc);
+  const init = { method, headers: { accept: 'application/json', ...headers } };
+  if (body !== undefined) { init.headers['content-type'] = 'application/json'; init.body = JSON.stringify(body); }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  init.signal = controller.signal;
+  try {
+    const upstream = await fetch(target, init);
+    const text = await upstream.text();
+    let data; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+    if (!upstream.ok) { const err = new Error(`HTTP ${upstream.status}`); err.status = upstream.status; err.body = data; throw err; }
     return data;
   } finally { clearTimeout(timer); }
 }

@@ -1,9 +1,10 @@
-import { h, mount, clear, spinner, svcIcon, confirmModal, openModal, closeModal, toast } from '../lib/ui.js';
+import { h, mount, clear, spinner, svcIcon, confirmModal, openModal, closeModal, toast, tabs } from '../lib/ui.js';
 import { SERVICE_META } from '../app.js';
 import { getTheme, getAccent, applyTheme, applyAccent, ACCENTS, ACCENT_NAMES } from '../lib/theme.js';
 import { globalMode, setGlobalMode } from '../lib/viewMode.js';
 import { isHidden, setHidden, orderServices, setOrder } from '../lib/servicePrefs.js';
 import * as push from '../lib/push.js';
+import { renderQueueCleaner, renderHunting } from '../lib/automationUI.js';
 
 export async function renderSettings(root, ctx) {
   const { api, state } = ctx;
@@ -112,6 +113,8 @@ export async function renderSettings(root, ctx) {
     appearanceCard(root, ctx),
     h('div', { class: 'section-title' }, 'Notifications'),
     h('div', { class: 'card', id: 'push-panel' }, h('div', { class: 'dim' }, 'Loading…')),
+    h('div', { class: 'section-title' }, 'Automation'),
+    h('div', { class: 'card', id: 'automation-panel' }, h('div', { class: 'dim' }, 'Loading…')),
     h('div', { class: 'section-title' }, 'Services'),
     h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', margin: '-4px 0 12px' } },
       h('div', { class: 'dim', style: { fontSize: '13px', flex: '1' } }, 'Drag a service card to reorder it, and use Hide to remove one from the sidebar and Home (it stays configured and reachable directly).'),
@@ -131,6 +134,7 @@ export async function renderSettings(root, ctx) {
   hydrateDiagnostics(ctx);
   hydrateLinksAdmin(ctx);
   hydrateNotifications(ctx);
+  hydrateAutomation();
   if (cfg.auth && cfg.auth.plexEnabled) hydrateLoginLog(ctx);
 }
 
@@ -247,6 +251,19 @@ function settingRow(label, value) {
     h('span', { class: 'dim' }, label),
     h('span', { class: 'right' }, value),
   );
+}
+
+// Queue Cleaner + Hunting, split into tabs (elongated-hexagon inputs preserved
+// via .pw-form inside automationUI).
+function hydrateAutomation() {
+  const panel = document.getElementById('automation-panel');
+  if (!panel) return;
+  const body = h('div', {});
+  const bar = tabs(body, [
+    { id: 'cleaner', label: 'Queue Cleaner', render: (c) => renderQueueCleaner(c) },
+    { id: 'hunting', label: 'Hunting', render: (c) => renderHunting(c) },
+  ], 'tabs-automation');
+  mount(panel, bar, body);
 }
 
 // Renders the Web Push (mobile notifications) controls into #push-panel.
@@ -368,7 +385,7 @@ async function hydrateNotifications(ctx) {
   render();
 }
 
-const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'indexer', 'plex'];
+const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'lidarr', 'readarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'indexer', 'plex'];
 
 function field(label, control, hint) {
   return h('label', { class: 'pw-field' },

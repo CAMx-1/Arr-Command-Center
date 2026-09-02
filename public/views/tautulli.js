@@ -363,46 +363,53 @@ async function openHistoryDetail(tau, svcKey, r) {
 
 // ---------------- Statistics ----------------
 async function tabStats(root, tau, svcKey) {
-  mount(root, skeletonList());
-  try {
-    const cats = await tau.get('get_home_stats', { time_range: 30, stats_count: 5 });
-    if (!Array.isArray(cats) || !cats.length) return mount(root, empty('', 'No statistics available'));
-    const withRows = cats.filter((c) => (c.rows || []).length);
-    if (effectiveMode(svcKey) === 'list') {
-      mount(root,
-        h('div', { class: 'dim', style: { marginBottom: '12px' } }, 'Based on the last 30 days'),
-        h('div', { class: 'stat-cards' }, ...withRows.map((c) => statCategoryList(c))),
-      );
-      return;
-    }
-    // Sideways-scrolling flat-top honeycomb strip (wider hexes for more text room).
-    const W = 460, H = 398, GAP = 12;
-    const colStep = Math.round(0.75 * W) + GAP, yOff = Math.round(0.5 * H);
-    const cards = withRows.map((c, i) => {
-      const el = statCategory(c, svcKey);
-      el.style.left = `${i * colStep}px`;
-      el.style.top = `${(i % 2) * yOff}px`;
-      return el;
-    });
-    const stripW = (withRows.length - 1) * colStep + W + 8;
-    const stripH = H + (withRows.length > 1 ? yOff : 0) + 4;
-    const strip = h('div', { class: 'stat-strip', style: { width: `${stripW}px`, height: `${stripH}px` } }, ...cards);
-    const scroll = h('div', { class: 'stat-scroll' }, strip);
-    // Map vertical wheel to horizontal scroll (down → right, up → left).
-    scroll.addEventListener('wheel', (e) => {
-      if (scroll.scrollWidth <= scroll.clientWidth) return;
-      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-        scroll.scrollLeft += e.deltaY;
-        e.preventDefault();
+  let range = 30;
+  const content = h('div', {});
+  const seg = h('div', { class: 'view-toggle', style: { marginBottom: '12px' } },
+    ...[7, 30, 90].map((d) => {
+      const b = h('button', { class: `view-seg ${range === d ? 'active' : ''}`, dataset: { d: String(d) } }, `${d} days`);
+      b.addEventListener('click', () => { if (range === d) return; range = d; for (const x of seg.children) x.classList.toggle('active', Number(x.dataset.d) === d); load(); });
+      return b;
+    }),
+  );
+  const load = async () => {
+    mount(content, skeletonList());
+    try {
+      const cats = await tau.get('get_home_stats', { time_range: range, stats_count: 5 });
+      if (!Array.isArray(cats) || !cats.length) return mount(content, empty('', 'No statistics available'));
+      const withRows = cats.filter((c) => (c.rows || []).length);
+      const note = `Leaderboards for the last ${range} days`;
+      if (effectiveMode(svcKey) === 'list') {
+        mount(content,
+          h('div', { class: 'dim', style: { marginBottom: '12px' } }, note),
+          h('div', { class: 'stat-cards' }, ...withRows.map((c) => statCategoryList(c))),
+        );
+        return;
       }
-    }, { passive: false });
-    mount(root,
-      h('div', { class: 'dim', style: { marginBottom: '12px' } }, 'Based on the last 30 days · scroll to move sideways'),
-      scroll,
-    );
-  } catch (err) {
-    mount(root, empty('', 'Failed to load statistics', err.message));
-  }
+      // Sideways-scrolling flat-top honeycomb strip (wider hexes for more text room).
+      const W = 460, H = 398, GAP = 12;
+      const colStep = Math.round(0.75 * W) + GAP, yOff = Math.round(0.5 * H);
+      const cards = withRows.map((c, i) => {
+        const el = statCategory(c, svcKey);
+        el.style.left = `${i * colStep}px`;
+        el.style.top = `${(i % 2) * yOff}px`;
+        return el;
+      });
+      const stripW = (withRows.length - 1) * colStep + W + 8;
+      const stripH = H + (withRows.length > 1 ? yOff : 0) + 4;
+      const strip = h('div', { class: 'stat-strip', style: { width: `${stripW}px`, height: `${stripH}px` } }, ...cards);
+      const scroll = h('div', { class: 'stat-scroll' }, strip);
+      scroll.addEventListener('wheel', (e) => {
+        if (scroll.scrollWidth <= scroll.clientWidth) return;
+        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { scroll.scrollLeft += e.deltaY; e.preventDefault(); }
+      }, { passive: false });
+      mount(content, h('div', { class: 'dim', style: { marginBottom: '12px' } }, `${note} · scroll to move sideways`), scroll);
+    } catch (err) {
+      mount(content, empty('', 'Failed to load statistics', err.message));
+    }
+  };
+  mount(root, seg, content);
+  load();
 }
 
 function statRows(cat) {

@@ -13,6 +13,7 @@ import * as store from './store.js';
 import * as plex from './plex.js';
 import * as push from './push.js';
 import { startPoller, pollOnce } from './poller.js';
+import * as automation from './automation.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -228,6 +229,24 @@ app.post('/api/push/test', express.json({ limit: '4kb' }), async (req, res) => {
 // Push status (subscription count) for the settings UI.
 app.get('/api/push/status', (req, res) => res.json({ subscriptions: push.subscriptionCount(), subject: push.getSubject() }));
 
+// ---- Automation: Queue Cleaner + Hunting (cross-instance). Behind auth. ----
+app.get('/api/automation', (req, res) => res.json(automation.getStatus()));
+app.post('/api/automation/config', express.json({ limit: '8kb' }), (req, res) => {
+  res.json({ ok: true, config: automation.setConfig(req.body || {}) });
+});
+app.post('/api/automation/queue-cleaner/run', express.json({ limit: '2kb' }), async (req, res) => {
+  try {
+    const dryRun = req.body && req.body.dryRun != null ? !!req.body.dryRun : undefined;
+    res.json({ ok: true, result: await automation.runQueueCleanerOnce(cfg, { dryRun }) });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/automation/hunt/run', express.json({ limit: '2kb' }), async (req, res) => {
+  try {
+    const { mode, batchSize } = req.body || {};
+    res.json({ ok: true, result: await automation.runHuntOnce(cfg, { mode, batchSize }) });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
 // Per-category notification preferences (which event types push to mobile).
 app.get('/api/push/prefs', (req, res) => res.json({ categories: push.CATEGORIES, prefs: push.getPrefs() }));
 app.post('/api/push/prefs', express.json({ limit: '4kb' }), (req, res) => {
@@ -374,9 +393,19 @@ if (!process.env.NOTIFY_DISABLE) {
   poller = startPoller(cfg, { intervalSeconds: Number(process.env.NOTIFY_POLL_SECONDS) || 60 });
 }
 
+// Automation scheduler (Queue Cleaner + Hunting). Ticks every minute; each job
+// only runs when enabled and its configured interval has elapsed. Disable with
+// AUTOMATION_DISABLE=1.
+let automationTimer = null;
+if (!process.env.AUTOMATION_DISABLE) {
+  automationTimer = setInterval(() => { automation.tick(cfg).catch(() => {}); }, 60000);
+  if (automationTimer.unref) automationTimer.unref();
+}
+
 function shutdown() {
   console.log('\n[shutdown] closing servers...');
   if (poller) poller.stop();
+  if (automationTimer) clearInterval(automationTimer);
   server.close();
   for (const s of mockServers) s.close();
   process.exit(0);

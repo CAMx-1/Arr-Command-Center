@@ -10,6 +10,8 @@ export const MOCK_PORTS = {
   sonarrAnime: 18990,
   radarr: 17878,
   radarr4k: 17879,
+  lidarr: 18686,
+  readarr: 18787,
   overseerr: 15055,
   sabnzbd: 18080,
   tautulli: 18181,
@@ -367,11 +369,15 @@ function makeTautulli() {
       ] }));
     }
     if (cmd === 'get_home_stats') {
+      const days = Number(req.query.time_range) || 30;
+      const f = days <= 7 ? 0.3 : days >= 90 ? 2.4 : 1; // scale plays by window
+      const s = (n) => Math.max(1, Math.round(n * f));
       return res.json(wrap([
-        { stat_id: 'top_movies', stat_title: 'Most Watched Movies', rows: [{ title: 'Dune: Part Two', total_plays: 12 }, { title: 'Oppenheimer', total_plays: 9 }] },
-        { stat_id: 'top_tv', stat_title: 'Most Watched Shows', rows: [{ title: 'The Bear', total_plays: 22 }, { title: 'Severance', total_plays: 18 }] },
-        { stat_id: 'top_users', stat_title: 'Most Active Users', rows: [{ friendly_name: 'cameron', total_plays: 40 }, { friendly_name: 'guest', total_plays: 11 }] },
-        { stat_id: 'top_platforms', stat_title: 'Most Active Platforms', rows: [{ platform: 'Apple TV', total_plays: 25 }, { platform: 'Chrome', total_plays: 26 }] },
+        { stat_id: 'top_movies', stat_title: 'Most Watched Movies', rows: [{ title: 'Dune: Part Two', total_plays: s(12) }, { title: 'Oppenheimer', total_plays: s(9) }, { title: 'The Wild Robot', total_plays: s(6) }] },
+        { stat_id: 'top_tv', stat_title: 'Most Watched Shows', rows: [{ title: 'The Bear', total_plays: s(22) }, { title: 'Severance', total_plays: s(18) }, { title: 'Shogun', total_plays: s(14) }] },
+        { stat_id: 'top_users', stat_title: 'Most Active Users', rows: [{ friendly_name: 'cameron', total_plays: s(40) }, { friendly_name: 'guest', total_plays: s(11) }, { friendly_name: 'kids', total_plays: s(7) }] },
+        { stat_id: 'top_platforms', stat_title: 'Most Active Platforms', rows: [{ platform: 'Apple TV', total_plays: s(26) }, { platform: 'Chrome', total_plays: s(19) }, { platform: 'iOS', total_plays: s(9) }] },
+        { stat_id: 'top_libraries', stat_title: 'Most Active Libraries', rows: [{ section_name: 'TV Shows', total_plays: s(54) }, { section_name: 'Movies', total_plays: s(33) }] },
       ]));
     }
     return res.json(wrap({}));
@@ -730,6 +736,82 @@ function makeIndexer() {
   return app;
 }
 
+// ---------------- Lidarr (music, API v1) ----------------
+function makeLidarr(opts = {}) {
+  const app = express();
+  app.use(express.json());
+  const now = Date.now();
+  let artists = [
+    { id: 1, artistName: 'Radiohead', foreignArtistId: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', monitored: true, overview: 'English rock band formed in Abingdon.', path: '/music/Radiohead', rootFolderPath: '/music', added: new Date(now - 90 * 86400000).toISOString(), statistics: { albumCount: 9, trackFileCount: 120, trackCount: 130, percentOfTracks: 92.3, sizeOnDisk: 8589934592 }, images: [] },
+    { id: 2, artistName: 'Daft Punk', foreignArtistId: '056e4f3e-d505-4dad-8ec1-d04f521cbb56', monitored: true, overview: 'French electronic duo.', path: '/music/Daft Punk', rootFolderPath: '/music', added: new Date(now - 60 * 86400000).toISOString(), statistics: { albumCount: 4, trackFileCount: 48, trackCount: 52, percentOfTracks: 92.3, sizeOnDisk: 3221225472 }, images: [] },
+    { id: 3, artistName: 'Miles Davis', foreignArtistId: '561d854a-6a28-4aa7-8c99-323e6ce46c2a', monitored: false, overview: 'American jazz trumpeter.', path: '/music/Miles Davis', rootFolderPath: '/music', added: new Date(now - 30 * 86400000).toISOString(), statistics: { albumCount: 12, trackFileCount: 140, trackCount: 140, percentOfTracks: 100, sizeOnDisk: 6442450944 }, images: [] },
+  ];
+  let queue = [
+    { id: 301, title: 'Radiohead - OK Computer (1997) [FLAC]', artistId: 1, status: 'downloading', trackedDownloadState: 'downloading', trackedDownloadStatus: 'ok', size: 524288000, sizeleft: 104857600, timeleft: '00:03:00', estimatedCompletionTime: new Date(now + 180000).toISOString(), downloadClient: 'SABnzbd', indexer: 'NZBgeek', downloadId: 'lid-abc', protocol: 'usenet' },
+    { id: 302, title: 'Daft Punk - Random Access Memories (2013) [FLAC]', artistId: 2, status: 'warning', trackedDownloadState: 'downloading', trackedDownloadStatus: 'warning', size: 734003200, sizeleft: 734003200, timeleft: '00:00:00', downloadClient: 'SABnzbd', indexer: 'NZBgeek', downloadId: 'lid-def', protocol: 'usenet', errorMessage: 'The download is stalled with no connections', statusMessages: [{ title: 'Download stalled', messages: ['The download is stalled with no connections'] }] },
+  ];
+  app.use((req, res, next) => { recordCf('lidarr', req); if (req.headers['x-api-key'] !== 'MOCK_API_KEY') return res.status(401).json({ error: 'Unauthorized' }); next(); });
+  app.get('/__debug', (req, res) => res.json({ cf: cfSeen.lidarr || null }));
+  app.get('/api/v1/system/status', (req, res) => res.json({ version: '2.6.4.4402', appName: 'Lidarr', instanceName: opts.instanceName || 'Lidarr (mock)' }));
+  app.get('/api/v1/rootfolder', (req, res) => res.json([{ id: 1, path: '/music', freeSpace: 250000000000, accessible: true }]));
+  app.get('/api/v1/qualityprofile', (req, res) => res.json([{ id: 1, name: 'Lossless' }, { id: 2, name: 'Standard' }]));
+  app.get('/api/v1/metadataprofile', (req, res) => res.json([{ id: 1, name: 'Standard' }]));
+  app.get('/api/v1/artist', (req, res) => res.json(artists));
+  app.get('/api/v1/queue', (req, res) => res.json({ page: 1, pageSize: 20, totalRecords: queue.length, records: queue }));
+  app.delete('/api/v1/queue/:id', (req, res) => { queue = queue.filter((q) => q.id !== Number(req.params.id)); res.json({}); });
+  app.get('/api/v1/calendar', (req, res) => res.json([
+    { id: 401, artistId: 1, foreignAlbumId: 'x1', title: 'A Moon Shaped Pool (Reissue)', releaseDate: new Date(now + 2 * 86400000).toISOString(), monitored: true, artist: { artistName: 'Radiohead' } },
+    { id: 402, artistId: 2, foreignAlbumId: 'x2', title: 'Discovery (Anniversary)', releaseDate: new Date(now + 5 * 86400000).toISOString(), monitored: true, artist: { artistName: 'Daft Punk' } },
+  ]));
+  app.get('/api/v1/history', (req, res) => res.json({ page: 1, pageSize: 40, totalRecords: 2, records: [
+    { id: 1, eventType: 'trackFileImported', sourceTitle: 'Radiohead - In Rainbows [FLAC]', date: new Date(now - 3600000).toISOString(), artist: { artistName: 'Radiohead' } },
+    { id: 2, eventType: 'downloadFailed', sourceTitle: 'Daft Punk - Homework [FLAC]', date: new Date(now - 7200000).toISOString(), artist: { artistName: 'Daft Punk' } },
+  ] }));
+  app.get('/api/v1/wanted/missing', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 1, records: [
+    { id: 501, title: 'The Bends', releaseDate: '1995-03-13', monitored: true, artist: { artistName: 'Radiohead' } },
+  ] }));
+  app.get('/api/v1/wanted/cutoff', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 0, records: [] }));
+  app.post('/api/v1/command', (req, res) => res.status(201).json({ id: Math.floor(Math.random() * 1000), name: (req.body && req.body.name) || 'Command', status: 'queued' }));
+  app.get('/api/v1/health', (req, res) => res.json([]));
+  return app;
+}
+
+// ---------------- Readarr (books, API v1) ----------------
+function makeReadarr(opts = {}) {
+  const app = express();
+  app.use(express.json());
+  const now = Date.now();
+  let authors = [
+    { id: 1, authorName: 'Brandon Sanderson', foreignAuthorId: 'b1', monitored: true, overview: 'American fantasy author.', path: '/books/Brandon Sanderson', rootFolderPath: '/books', added: new Date(now - 120 * 86400000).toISOString(), statistics: { bookCount: 20, bookFileCount: 18, sizeOnDisk: 1073741824 }, images: [] },
+    { id: 2, authorName: 'Andy Weir', foreignAuthorId: 'b2', monitored: true, overview: 'American novelist.', path: '/books/Andy Weir', rootFolderPath: '/books', added: new Date(now - 45 * 86400000).toISOString(), statistics: { bookCount: 3, bookFileCount: 3, sizeOnDisk: 157286400 }, images: [] },
+  ];
+  let queue = [
+    { id: 601, title: 'Andy Weir - Project Hail Mary [EPUB]', authorId: 2, status: 'downloading', trackedDownloadState: 'downloading', trackedDownloadStatus: 'ok', size: 4194304, sizeleft: 1048576, timeleft: '00:00:30', estimatedCompletionTime: new Date(now + 30000).toISOString(), downloadClient: 'SABnzbd', indexer: 'NZBgeek', downloadId: 'rd-abc', protocol: 'usenet' },
+  ];
+  app.use((req, res, next) => { recordCf('readarr', req); if (req.headers['x-api-key'] !== 'MOCK_API_KEY') return res.status(401).json({ error: 'Unauthorized' }); next(); });
+  app.get('/__debug', (req, res) => res.json({ cf: cfSeen.readarr || null }));
+  app.get('/api/v1/system/status', (req, res) => res.json({ version: '0.4.7.2718', appName: 'Readarr', instanceName: opts.instanceName || 'Readarr (mock)' }));
+  app.get('/api/v1/rootfolder', (req, res) => res.json([{ id: 1, path: '/books', freeSpace: 120000000000, accessible: true }]));
+  app.get('/api/v1/qualityprofile', (req, res) => res.json([{ id: 1, name: 'eBook' }, { id: 2, name: 'Audiobook' }]));
+  app.get('/api/v1/metadataprofile', (req, res) => res.json([{ id: 1, name: 'Standard' }]));
+  app.get('/api/v1/author', (req, res) => res.json(authors));
+  app.get('/api/v1/queue', (req, res) => res.json({ page: 1, pageSize: 20, totalRecords: queue.length, records: queue }));
+  app.delete('/api/v1/queue/:id', (req, res) => { queue = queue.filter((q) => q.id !== Number(req.params.id)); res.json({}); });
+  app.get('/api/v1/calendar', (req, res) => res.json([
+    { id: 701, authorId: 1, title: 'Wind and Truth', releaseDate: new Date(now + 4 * 86400000).toISOString(), monitored: true, author: { authorName: 'Brandon Sanderson' } },
+  ]));
+  app.get('/api/v1/history', (req, res) => res.json({ page: 1, pageSize: 40, totalRecords: 1, records: [
+    { id: 1, eventType: 'bookFileImported', sourceTitle: 'Andy Weir - The Martian [EPUB]', date: new Date(now - 5400000).toISOString(), author: { authorName: 'Andy Weir' } },
+  ] }));
+  app.get('/api/v1/wanted/missing', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 1, records: [
+    { id: 801, title: 'Warbreaker', releaseDate: '2009-06-09', monitored: true, author: { authorName: 'Brandon Sanderson' } },
+  ] }));
+  app.get('/api/v1/wanted/cutoff', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 0, records: [] }));
+  app.post('/api/v1/command', (req, res) => res.status(201).json({ id: Math.floor(Math.random() * 1000), name: (req.body && req.body.name) || 'Command', status: 'queued' }));
+  app.get('/api/v1/health', (req, res) => res.json([]));
+  return app;
+}
+
 export function startMockServices() {
   const defs = [
     ['sonarr', makeSonarr(), MOCK_PORTS.sonarr],
@@ -744,6 +826,8 @@ export function startMockServices() {
       { id: 2, title: 'Interstellar', year: 2014, tmdbId: 157336, status: 'released', monitored: true, hasFile: true, runtime: 169, overview: 'Explorers travel through a wormhole in search of a new home.', path: '/movies-4k/Interstellar (2014)', rootFolderPath: '/movies-4k', sizeOnDisk: 75161927680, studio: 'Paramount', images: [] },
       { id: 3, title: 'Top Gun: Maverick', year: 2022, tmdbId: 361743, status: 'released', monitored: false, hasFile: false, runtime: 130, overview: 'Maverick trains a detachment of Top Gun graduates.', path: '/movies-4k/Top Gun Maverick (2022)', rootFolderPath: '/movies-4k', sizeOnDisk: 0, studio: 'Paramount', images: [] },
     ] }), MOCK_PORTS.radarr4k],
+    ['lidarr', makeLidarr(), MOCK_PORTS.lidarr],
+    ['readarr', makeReadarr(), MOCK_PORTS.readarr],
     ['overseerr', makeOverseerr(), MOCK_PORTS.overseerr],
     ['sabnzbd', makeSab(), MOCK_PORTS.sabnzbd],
     ['tautulli', makeTautulli(), MOCK_PORTS.tautulli],
