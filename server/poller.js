@@ -19,6 +19,9 @@ import { serviceGet } from './proxy.js';
 
 const SEEN_NS = 'pushSeen';
 const SEEN_CAP = 500;
+// Max notifications to send in a single poll; larger batches are treated as a
+// backlog and suppressed (marked seen without pushing) to avoid a blast.
+const MAX_PUSH_PER_POLL = 12;
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -92,7 +95,12 @@ export async function pollOnce(cfg, opts = {}) {
   const results = [];
   const doPush = opts.force || !firstRun;
 
-  if (doPush) {
+  // Guard against a notification blast: if a large batch appears at once (e.g. a
+  // service that was unreachable during the baseline suddenly returns its whole
+  // history), treat it as a backlog — mark everything seen but don't push.
+  const suppressedBacklog = doPush && fresh.length > MAX_PUSH_PER_POLL;
+
+  if (doPush && !suppressedBacklog) {
     for (const e of fresh) {
       if (!push.categoryEnabled(e.category)) { skipped += 1; continue; }
       try {
@@ -103,13 +111,15 @@ export async function pollOnce(cfg, opts = {}) {
         results.push({ id: e.id, error: err.message });
       }
     }
+  } else if (suppressedBacklog) {
+    console.warn(`[poller] ${fresh.length} new events at once — suppressing as backlog (threshold ${MAX_PUSH_PER_POLL})`);
   }
 
   // Mark every current event as seen (fresh ones included) so nothing repeats.
   const nextSeen = Array.from(new Set([...events.map((e) => e.id), ...seen])).slice(0, SEEN_CAP);
   store.set(SEEN_NS, nextSeen);
 
-  return { collected: events.length, fresh: fresh.length, pushed, skipped, firstRun, baseline: firstRun && !opts.force, results };
+  return { collected: events.length, fresh: fresh.length, pushed, skipped, firstRun, baseline: firstRun && !opts.force, suppressedBacklog, results };
 }
 
 // Start the periodic loop. Returns a handle with stop().

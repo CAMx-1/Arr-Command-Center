@@ -116,6 +116,31 @@ export function getPublicKey() {
 
 // ---- Subscription storage -------------------------------------------------
 // A subscription is the browser PushSubscription JSON: { endpoint, keys:{p256dh,auth} }.
+
+// SSRF guard: a real browser push endpoint is always HTTPS on a known push
+// service. Restricting to these hosts stops an authenticated client from
+// registering an internal/loopback/metadata endpoint that the server would then
+// POST to (via /api/push/test or the poller). Extra hosts (e.g. a self-hosted
+// push service) can be allowed via PUSH_ALLOWED_HOSTS (comma-separated).
+const PUSH_HOST_SUFFIXES = [
+  'fcm.googleapis.com',            // Chrome/Edge/Brave/Opera
+  'android.googleapis.com',        // legacy GCM
+  '.push.apple.com',               // Safari / iOS (web.push.apple.com)
+  '.push.services.mozilla.com',    // Firefox (updates.push.services.mozilla.com)
+  '.notify.windows.com',           // Windows / legacy WNS
+];
+export function endpointAllowed(endpoint) {
+  let url;
+  try { url = new URL(endpoint); } catch { return false; }
+  if (url.protocol !== 'https:') return false;
+  if (url.username || url.password) return false;
+  const host = url.hostname.toLowerCase();
+  const extra = (process.env.PUSH_ALLOWED_HOSTS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  return [...PUSH_HOST_SUFFIXES, ...extra].some((sfx) => (
+    sfx.startsWith('.') ? host.endsWith(sfx) : (host === sfx || host.endsWith('.' + sfx))
+  ));
+}
+
 function loadSubs() {
   const s = store.get(SUBS_NS, []);
   return Array.isArray(s) ? s : [];
@@ -129,6 +154,9 @@ export function subscriptionCount() { return loadSubs().length; }
 export function addSubscription(sub, meta = {}) {
   if (!sub || !sub.endpoint || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) {
     throw new Error('Invalid push subscription');
+  }
+  if (!endpointAllowed(sub.endpoint)) {
+    throw new Error('Push endpoint host is not an allowed push service');
   }
   const subs = loadSubs();
   const record = {

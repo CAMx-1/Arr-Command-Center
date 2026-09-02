@@ -22,13 +22,15 @@ const STATE = {
   stalledDL: { label: 'Stalled', cls: 'muted' }, metaDL: { label: 'Metadata', cls: 'muted' },
   uploading: { label: 'Seeding', cls: 'ok' }, forcedUP: { label: 'Seeding', cls: 'ok' }, stalledUP: { label: 'Seeding', cls: 'ok' },
   pausedDL: { label: 'Paused', cls: 'warn' }, pausedUP: { label: 'Paused', cls: 'warn' },
+  stoppedDL: { label: 'Stopped', cls: 'warn' }, stoppedUP: { label: 'Stopped', cls: 'warn' },
   queuedDL: { label: 'Queued', cls: 'muted' }, queuedUP: { label: 'Queued', cls: 'muted' },
   checkingDL: { label: 'Checking', cls: 'muted' }, checkingUP: { label: 'Checking', cls: 'muted' }, checkingResumeData: { label: 'Checking', cls: 'muted' },
   moving: { label: 'Moving', cls: 'muted' }, allocating: { label: 'Allocating', cls: 'muted' },
   error: { label: 'Error', cls: 'down' }, missingFiles: { label: 'Missing files', cls: 'down' },
 };
 function stateInfo(s) { return STATE[s] || { label: s || 'Unknown', cls: 'muted' }; }
-function isPaused(s) { return /paused/i.test(s || ''); }
+// qBittorrent 5.0 renamed paused* -> stopped*; treat both as "not running".
+function isPaused(s) { return /paused|stopped/i.test(s || ''); }
 
 export async function renderQbittorrent(root, ctx) {
   const svc = ctx.service;
@@ -110,8 +112,8 @@ function globalControls(qb, ctx, info) {
     catch (e) { toast(e.message, 'error'); }
   };
   return [
-    h('button', { class: 'btn', onclick: () => act('torrents/resume', { hashes: 'all' }, 'Resumed all') }, 'Resume all'),
-    h('button', { class: 'btn', onclick: () => act('torrents/pause', { hashes: 'all' }, 'Paused all') }, 'Pause all'),
+    h('button', { class: 'btn', onclick: () => act('torrents/start', { hashes: 'all' }, 'Resumed all') }, 'Resume all'),
+    h('button', { class: 'btn', onclick: () => act('torrents/stop', { hashes: 'all' }, 'Paused all') }, 'Pause all'),
     h('button', { class: 'btn', onclick: () => openSpeedModal(qb, ctx, info) }, 'Speed limits'),
   ];
 }
@@ -155,7 +157,7 @@ function torrentRow(t, qb, ctx) {
     ),
     h('div', { class: 'row-actions' },
       h('button', { class: 'btn sm', title: paused ? 'Resume' : 'Pause', onclick: async () => {
-        try { await qb.post(paused ? 'torrents/resume' : 'torrents/pause', { hashes: t.hash }); toast(paused ? 'Resumed' : 'Paused', 'success'); ctx.reload(); }
+        try { await qb.post(paused ? 'torrents/start' : 'torrents/stop', { hashes: t.hash }); toast(paused ? 'Resumed' : 'Paused', 'success'); ctx.reload(); }
         catch (e) { toast(e.message, 'error'); }
       } }, paused ? '▶' : '⏸'),
       h('button', { class: 'btn sm danger', title: 'Delete', onclick: () => openDeleteModal(t, qb, ctx) }, '✕'),
@@ -170,7 +172,7 @@ function torrentHex(t, qb, ctx) {
   const actions = h('div', { class: 'row-actions' },
     h('button', { class: 'btn sm', title: paused ? 'Resume' : 'Pause', onclick: async (e) => {
       e.stopPropagation();
-      try { await qb.post(paused ? 'torrents/resume' : 'torrents/pause', { hashes: t.hash }); toast(paused ? 'Resumed' : 'Paused', 'success'); ctx.reload(); }
+      try { await qb.post(paused ? 'torrents/start' : 'torrents/stop', { hashes: t.hash }); toast(paused ? 'Resumed' : 'Paused', 'success'); ctx.reload(); }
       catch (err) { toast(err.message, 'error'); }
     } }, paused ? '▶' : '⏸'),
     h('button', { class: 'btn sm danger', title: 'Delete', onclick: (e) => { e.stopPropagation(); openDeleteModal(t, qb, ctx); } }, '✕'),

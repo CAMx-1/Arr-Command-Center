@@ -13,13 +13,29 @@ let cache = null;
 function load() {
   if (cache) return cache;
   try { cache = JSON.parse(fs.readFileSync(FILE, 'utf8')); }
-  catch { cache = {}; }
+  catch (e) {
+    // If the file exists but is unreadable/corrupt, preserve it (back it up)
+    // instead of silently overwriting all data (VAPID keys, push subs, token)
+    // with an empty store on the next write.
+    try {
+      if (e.code !== 'ENOENT' && fs.existsSync(FILE) && fs.statSync(FILE).size > 0) {
+        const bak = `${FILE}.corrupt-${Date.now()}`;
+        fs.renameSync(FILE, bak);
+        console.error(`[store] ${FILE} was corrupt; backed up to ${bak}`);
+      }
+    } catch { /* best effort */ }
+    cache = {};
+  }
   return cache;
 }
 function persist() {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(FILE, JSON.stringify(cache, null, 2));
+    // Atomic write: write to a temp file then rename, so a crash mid-write can't
+    // truncate/corrupt the store.
+    const tmp = `${FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(cache, null, 2));
+    fs.renameSync(tmp, FILE);
   } catch (e) { console.error('[store] write failed:', e.message); }
 }
 

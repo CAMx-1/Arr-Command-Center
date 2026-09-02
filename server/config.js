@@ -145,6 +145,17 @@ export function loadConfig() {
   return cfg;
 }
 
+// True when the app would expose the secret-injecting proxy on a non-loopback
+// interface with NO authentication and no explicit opt-in. Used to fail closed.
+// Escape hatches (for instances already protected by an external layer such as
+// Cloudflare Access / an authenticated tunnel): cfg.allowInsecure or
+// ALLOW_INSECURE=true. Demo (mock) mode is always allowed.
+export function isInsecureExposure(cfg, anyAuth) {
+  const localOnly = cfg.host === '127.0.0.1' || cfg.host === 'localhost' || cfg.host === '::1';
+  const allowInsecure = !!cfg.mock || !!cfg.allowInsecure || process.env.ALLOW_INSECURE === 'true';
+  return !localOnly && !anyAuth && !allowInsecure;
+}
+
 // Public-safe view of the config for the frontend (no secrets).
 export function publicConfig(cfg) {
   const services = {};

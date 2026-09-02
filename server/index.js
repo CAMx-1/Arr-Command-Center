@@ -5,7 +5,7 @@ import express from 'express';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, publicConfig, ALLOWED_SERVICE_TYPES, saveServiceToDisk, removeServiceFromDisk } from './config.js';
+import { loadConfig, publicConfig, ALLOWED_SERVICE_TYPES, saveServiceToDisk, removeServiceFromDisk, isInsecureExposure } from './config.js';
 import { createProxyRouter, pingService } from './proxy.js';
 import { startMockServices } from './mock/mockServices.js';
 import { createPlexAuth } from './plexAuth.js';
@@ -17,6 +17,12 @@ import { startPoller, pollOnce } from './poller.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
+
+// Only http/https URLs may be stored as links or service base URLs — blocks
+// javascript:/data:/file: (stored XSS / local file SSRF).
+function isHttpUrl(u) {
+  try { const p = new URL(u).protocol; return p === 'http:' || p === 'https:'; } catch { return false; }
+}
 
 let cfg;
 try {
@@ -89,11 +95,22 @@ app.use('/api/auth', plexAuth.router);
 app.use(plexAuth.middleware);
 if (plexAuth.enabled) console.log('[startup] Plex authentication is ENABLED.');
 
-// Warn if exposed on a non-local interface without any authentication.
+// Fail closed: refuse to expose the secret-injecting proxy on a public
+// interface with no authentication (unless explicitly opted in).
 const anyAuth = !!(cfg.auth && cfg.auth.enabled) || plexAuth.enabled;
 const localOnly = cfg.host === '127.0.0.1' || cfg.host === 'localhost' || cfg.host === '::1';
+if (isInsecureExposure(cfg, anyAuth)) {
+  console.error(
+    `\n[startup] REFUSING TO START: binding ${cfg.host} with NO authentication would expose the proxy — which injects your service API keys and Cloudflare Access tokens — to anyone who can reach this port.\n\n` +
+    `Fix one of the following:\n` +
+    `  • Enable auth:   set auth.plex.enabled (Sign in with Plex) or auth.enabled (basic auth) in config.json\n` +
+    `  • Bind locally:  set "host": "127.0.0.1" (recommended when a reverse proxy runs on the same host)\n` +
+    `  • Already protected externally (Cloudflare Access / authenticated tunnel)? Opt in explicitly with ALLOW_INSECURE=true (or "allowInsecure": true in config.json)\n`
+  );
+  process.exit(1);
+}
 if (!localOnly && !anyAuth) {
-  console.warn(`[startup] WARNING: listening on ${cfg.host} with NO authentication. The proxy exposes your service API keys and Cloudflare Access tokens to anyone who can reach this port. Enable auth.plex (or auth.enabled), or set host to 127.0.0.1.`);
+  console.warn(`[startup] WARNING: no built-in authentication; serving on ${cfg.host} because an insecure-exposure opt-in is set. Ensure an external auth layer (Cloudflare Access / authenticated tunnel) protects this port.`);
 }
 
 // Public (secret-free) config for the frontend.
@@ -143,6 +160,8 @@ app.get('/api/links', (req, res) => res.json(store.get('links', [])));
 app.post('/api/links', express.json({ limit: '16kb' }), (req, res) => {
   const { label, url, icon, category, embed } = req.body || {};
   if (!label || !url) return res.status(400).json({ error: 'label and url are required' });
+  if (!isHttpUrl(url)) return res.status(400).json({ error: 'url must be an http(s) URL' });
+  if (icon && !(isHttpUrl(icon) || String(icon).startsWith('/'))) return res.status(400).json({ error: 'icon must be an http(s) URL or a local path' });
   const link = {
     id: randomUUID(),
     label: String(label).slice(0, 60),
@@ -243,10 +262,8 @@ app.get('/api/plex/image', async (req, res) => {
   if (!u || !token) return res.status(404).end();
   let target;
   try { target = new URL(u); } catch { return res.status(400).end(); }
-  const host = target.hostname;
   const serverUrl = plex.plexServerUrl(cfg) || '';
-  const allowed = host === 'metadata.provider.plex.tv' || host === 'discover.provider.plex.tv' || /(^|\.)plex\.tv$/.test(host) || /(^|\.)plex\.direct$/.test(host) || (serverUrl && u.startsWith(serverUrl));
-  if (!allowed) return res.status(400).end();
+  if (!plex.isAllowedImageUrl(u, serverUrl)) return res.status(400).end();
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
@@ -279,6 +296,7 @@ app.post('/api/config/service', express.json({ limit: '32kb' }), (req, res) => {
     enabled: service.enabled !== false,
   };
   const baseUrl = service.baseUrl ? String(service.baseUrl).slice(0, 300) : prev.baseUrl;
+  if (service.baseUrl && !isHttpUrl(service.baseUrl)) return res.status(400).json({ error: 'baseUrl must be an http(s) URL' });
   const apiKey = service.apiKey ? String(service.apiKey).slice(0, 300) : prev.apiKey;
   if (baseUrl) clean.baseUrl = baseUrl;
   if (apiKey) clean.apiKey = apiKey;

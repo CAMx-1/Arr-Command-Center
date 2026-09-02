@@ -40,6 +40,31 @@ async function pj(url, token, cid) {
 
 export function hasToken(cfg) { return !!plexToken(cfg); }
 
+// Decide whether an image URL may be proxied with the Plex token. Prevents SSRF /
+// token exfiltration: we parse the URL, reject any embedded credentials
+// (userinfo like http://host@evil.com), and require either a Plex-owned host or
+// an exact origin match (protocol+host+port) with the configured server — NOT a
+// string prefix, which `http://server@evil.com` or `http://server.evil.com` beat.
+export function isAllowedImageUrl(u, serverUrl) {
+  let target;
+  try { target = new URL(u); } catch { return false; }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') return false;
+  if (target.username || target.password) return false; // no userinfo tricks
+  const host = target.hostname;
+  const plexOwned = host === 'metadata.provider.plex.tv'
+    || host === 'discover.provider.plex.tv'
+    || /(^|\.)plex\.tv$/.test(host)
+    || /(^|\.)plex\.direct$/.test(host);
+  if (plexOwned) return true;
+  if (serverUrl) {
+    try {
+      const s = new URL(serverUrl);
+      if (target.protocol === s.protocol && target.hostname === s.hostname && target.port === s.port) return true;
+    } catch { /* invalid configured serverUrl */ }
+  }
+  return false;
+}
+
 // Parse a Plex library "duplicate" Metadata item into { title, year, type,
 // section, parts:[{file,size}] }. Exported for testing. A Plex duplicate has
 // more than one Media/Part (the same movie/episode present as multiple files).

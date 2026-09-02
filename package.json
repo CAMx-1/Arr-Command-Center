@@ -13,7 +13,7 @@
     "node": ">=23"
   },
   "dependencies": {
-    "express": "4.19.2",
+    "express": "^4.22.2",
     "web-push": "^3.6.7"
   },
   "license": "MIT"

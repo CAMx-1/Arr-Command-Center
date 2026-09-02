@@ -630,6 +630,9 @@ function makeQbittorrent() {
   };
   app.post('/api/v2/torrents/pause', (req, res) => { applyHashes(req, (t) => { t.state = t.progress >= 1 ? 'pausedUP' : 'pausedDL'; t.dlspeed = 0; t.upspeed = 0; }); res.send(''); });
   app.post('/api/v2/torrents/resume', (req, res) => { applyHashes(req, (t) => { t.state = t.progress >= 1 ? 'uploading' : 'downloading'; if (t.progress < 1) t.dlspeed = 8000000; }); res.send(''); });
+  // qBittorrent 5.0 renamed pause/resume -> stop/start and paused* -> stopped*.
+  app.post('/api/v2/torrents/stop', (req, res) => { applyHashes(req, (t) => { t.state = t.progress >= 1 ? 'stoppedUP' : 'stoppedDL'; t.dlspeed = 0; t.upspeed = 0; }); res.send(''); });
+  app.post('/api/v2/torrents/start', (req, res) => { applyHashes(req, (t) => { t.state = t.progress >= 1 ? 'uploading' : 'downloading'; if (t.progress < 1) t.dlspeed = 8000000; }); res.send(''); });
   app.post('/api/v2/torrents/delete', (req, res) => { const hashes = String((req.body && req.body.hashes) || ''); const set = hashes === 'all' ? torrents.map((t) => t.hash) : hashes.split('|'); torrents = torrents.filter((t) => !set.includes(t.hash)); res.send(''); });
   app.post('/api/v2/torrents/recheck', (req, res) => res.send(''));
   return app;
