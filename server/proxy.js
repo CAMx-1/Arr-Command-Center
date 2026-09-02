@@ -6,7 +6,7 @@
 import express from 'express';
 
 function trimSlash(u) {
-  return u.replace(/\/+$/, '');
+  return String(u || '').replace(/\/+$/, '');
 }
 
 // Returns { headers, query } auth additions for a given service type.
@@ -306,6 +306,7 @@ export async function serviceRequest(svc, path, { method = 'POST', body, timeout
 
 export async function pingService(svc) {
   const started = Date.now();
+  if (!svc || !svc.baseUrl) return { ok: false, status: 0, ms: 0, error: 'No base URL configured' };
   if (svc.type === 'qbittorrent') return pingQbit(svc, started);
   try {
     const path = HEALTH_PATH[svc.type] || '';

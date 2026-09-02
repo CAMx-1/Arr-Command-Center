@@ -1,6 +1,7 @@
 import { api } from './lib/api.js';
 import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, debounce, spinner, empty, poster, fmtBytes, copyable } from './lib/ui.js';
 import { orderServices, isHidden } from './lib/servicePrefs.js';
+import { splitHive, flyoutLayout } from './lib/hiveLayout.js';
 import { cachedGet } from './lib/cache.js';
 import { setPendingFilter } from './lib/libraryFilter.js';
 import { renderHome, refreshHome } from './views/home.js';
@@ -45,6 +46,11 @@ const state = {
 
 let homeCtx = null;
 let notifOpen = false;
+// Sidebar overflow: when nav cells exceed HIVE_CAP, extra hexes move into a
+// collapsible flyout that extends right of the rail. `hiveExpanded` persists the
+// open/closed state across rebuilds (status polls, route changes).
+let hiveExpanded = false;
+const HIVE_CAP = 10;
 let notifications = [];
 let errorLog = [];
 
@@ -154,21 +160,51 @@ function buildHive() {
     }) });
   }
 
-  // Single centered column of flat-top hexagons, stacked touching so they fill
-  // the sidebar top-to-bottom like a honeycomb strip.
+  // Flat-top hexagons stacked in a centered column. When there are more than
+  // HIVE_CAP cells, keep the rail short (Settings/Log out pinned to the bottom)
+  // and move the overflow into a collapsible flyout that extends out to the
+  // right — so the nav never needs a scrollbar.
   const W = 100, H = 88, step = 88, oy = 10;
+  const mkCell = (c) => h('button', {
+    class: `hive-cell hive-${c.kind} ${c.active ? 'active' : ''}`, title: c.title,
+    onclick: (e) => {
+      if (c.kind === 'more') { e.stopPropagation(); hiveExpanded = !hiveExpanded; buildHive(); return; }
+      closeSidebarMobile(); hiveExpanded = false; c.onClick();
+    },
+  },
+    c.dot !== undefined ? h('span', { class: `hive-dot ${c.dot || ''}` }) : null,
+    h('span', { class: 'hive-icon' }, c.icon || h('span', { class: 'hive-glyph' }, c.glyph)),
+  );
+
+  const bottomCount = (state.config.auth && state.config.auth.plexEnabled) ? 2 : 1; // Settings [+ Log out]
+  const split = isMobile ? { overflow: false } : splitHive(cells.length, { cap: HIVE_CAP, bottomCount });
+
+  let railCells = cells;
+  let flyCells = [];
+  if (split.overflow) {
+    const bottom = cells.slice(cells.length - bottomCount);
+    const rest = cells.slice(0, cells.length - bottomCount);
+    const railMid = rest.slice(0, split.railMidCount);
+    flyCells = rest.slice(split.railMidCount);
+    const moreCell = {
+      kind: 'more', active: hiveExpanded,
+      title: hiveExpanded ? 'Collapse' : `Show ${flyCells.length} more`,
+      glyph: hiveExpanded ? '‹' : `+${flyCells.length}`,
+      onClick: () => {},
+    };
+    railCells = [...railMid, moreCell, ...bottom];
+  } else {
+    hiveExpanded = false;
+  }
+
   let maxBottom = 0;
-  const nodes = cells.map((c, i) => {
+  const nodes = railCells.map((c, i) => {
+    const el = mkCell(c);
     const y = oy + i * step;
     maxBottom = y + H;
-    return h('button', {
-      class: `hive-cell hive-${c.kind} ${c.active ? 'active' : ''}`, title: c.title,
-      style: { left: `calc(50% - ${W / 2}px)`, top: `${y}px` },
-      onclick: () => { closeSidebarMobile(); c.onClick(); },
-    },
-      c.dot !== undefined ? h('span', { class: `hive-dot ${c.dot || ''}` }) : null,
-      h('span', { class: 'hive-icon' }, c.icon || h('span', { class: 'hive-glyph' }, c.glyph)),
-    );
+    el.style.left = `calc(50% - ${W / 2}px)`;
+    el.style.top = `${y}px`;
+    return el;
   });
   mount(els.hive, ...nodes);
   if (state.config.mock) {
@@ -176,6 +212,28 @@ function buildHive() {
     maxBottom += 30;
   }
   els.hive.style.height = `${maxBottom + oy}px`;
+
+  // ----- Overflow flyout -----
+  const oldFly = document.getElementById('hive-flyout');
+  if (oldFly) oldFly.remove();
+  if (split.overflow && flyCells.length) {
+    const layout = flyoutLayout(flyCells.length, { W, H, oy, cols: flyCells.length > 4 ? 2 : 1 });
+    const flyInner = h('div', { class: 'hive-flyout-inner', style: { width: `${layout.width}px`, height: `${layout.height}px` } },
+      ...flyCells.map((c, i) => { const el = mkCell(c); const p = layout.positions[i]; el.style.left = `${p.x}px`; el.style.top = `${p.y}px`; return el; }),
+    );
+    const fly = h('div', { id: 'hive-flyout', class: 'hive-flyout', style: { width: `${layout.width}px` } }, flyInner);
+    document.getElementById('app').appendChild(fly);
+    // Anchor to the right of the sidebar, vertically near the More toggle.
+    const moreBtn = els.hive.querySelectorAll('.hive-cell')[split.moreIndex];
+    const sb = els.sidebar.getBoundingClientRect();
+    const r = moreBtn ? moreBtn.getBoundingClientRect() : sb;
+    fly.style.left = `${Math.round(sb.right + 8)}px`;
+    const desiredTop = (moreBtn ? r.top : sb.top) - oy;
+    const maxTop = Math.max(8, window.innerHeight - layout.height - 8);
+    fly.style.top = `${Math.round(Math.min(Math.max(8, desiredTop), maxTop))}px`;
+    if (hiveExpanded) requestAnimationFrame(() => fly.classList.add('open'));
+  }
+
   // Rebuild the background now that the nav buttons exist, so it aligns to them.
   buildHiveBackground();
 }
@@ -569,6 +627,14 @@ async function init() {
   // Close the notifications panel on outside click.
   document.addEventListener('click', (e) => {
     if (notifOpen && !document.getElementById('notif-wrap').contains(e.target)) toggleNotif(false);
+  });
+  // Collapse the nav overflow flyout on outside click (rail + flyout clicks are
+  // handled by their own buttons).
+  document.addEventListener('click', (e) => {
+    if (!hiveExpanded) return;
+    const fly = document.getElementById('hive-flyout');
+    if (els.sidebar.contains(e.target) || (fly && fly.contains(e.target))) return;
+    hiveExpanded = false; buildHive();
   });
   // Persist error toasts into the notifications bell (action center).
   window.addEventListener('app-error', (e) => {

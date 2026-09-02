@@ -627,6 +627,18 @@ html[data-theme="dark"] .shx-face { background: linear-gradient(160deg, var(--su
 .hive-dot.down { background: #fb7185; box-shadow: 0 0 8px rgba(251, 113, 133, 0.8); }
 .hive-demo { position: absolute; left: 0; right: 0; text-align: center; color: #fff; font-size: 10px; font-weight: 800; letter-spacing: 0.1em; opacity: 0.85; }
 
+/* Overflow flyout: extra nav hexes extend out to the right of the rail when the
+   nav exceeds the cap, instead of the sidebar growing a scrollbar. */
+.hive-flyout {
+  position: fixed; z-index: 55; width: 100px;
+  opacity: 0; visibility: hidden; transform: translateX(-14px);
+  transition: opacity 0.22s var(--ease), transform 0.22s var(--ease), visibility 0.22s var(--ease);
+}
+.hive-flyout.open { opacity: 1; visibility: visible; transform: none; }
+.hive-flyout-inner { position: relative; width: 100px; filter: drop-shadow(0 10px 26px rgba(0, 0, 0, 0.45)); }
+.hive-cell.hive-more { background: linear-gradient(160deg, #7c7af0, #6d54c8); }
+.hive-more .hive-glyph { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+
 /* ---------- Responsive ---------- */
 @media (max-width: 900px) {
   .grid.cols-4 { grid-template-columns: repeat(2, 1fr); }

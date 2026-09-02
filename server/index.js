@@ -123,7 +123,7 @@ app.get('/api/status', async (req, res) => {
   const results = await Promise.all(entries.map(async ([key, svc]) => {
     if (svc.sample) return [key, { label: svc.label || key, type: svc.type, ok: true, status: 200, ms: 0, version: 'sample' }];
     if (svc.type === 'plex') { const ok = plex.hasToken(cfg); return [key, { label: svc.label || key, type: 'plex', ok, status: ok ? 200 : 0, ms: 0, error: ok ? undefined : 'Sign in with Plex to enable' }]; }
-    const health = await pingService(svc);
+    const health = await pingService(svc).catch((e) => ({ ok: false, status: 0, ms: 0, error: (e && e.message) || 'ping failed' }));
     return [key, { label: svc.label || key, type: svc.type, ...health }];
   }));
   res.json(Object.fromEntries(results));
@@ -135,7 +135,7 @@ app.get('/api/status/:service', async (req, res) => {
   if (!svc || svc.enabled === false) return res.status(404).json({ error: 'Unknown service' });
   if (svc.sample) return res.json({ label: svc.label || req.params.service, type: svc.type, ok: true, status: 200, ms: 0, version: 'sample' });
   if (svc.type === 'plex') { const ok = plex.hasToken(cfg); return res.json({ label: svc.label || req.params.service, type: 'plex', ok, status: ok ? 200 : 0, ms: 0, error: ok ? undefined : 'Sign in with Plex to enable' }); }
-  res.json({ label: svc.label || req.params.service, type: svc.type, ...(await pingService(svc)) });
+  res.json({ label: svc.label || req.params.service, type: svc.type, ...(await pingService(svc).catch((e) => ({ ok: false, status: 0, ms: 0, error: (e && e.message) || 'ping failed' }))) });
 });
 
 // Diagnostics: server info + recent request log (behind auth).
@@ -412,3 +412,11 @@ function shutdown() {
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+
+// Safety net: never let a stray async rejection take down the whole server.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', (reason && reason.message) || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', (err && err.stack) || err);
+});
