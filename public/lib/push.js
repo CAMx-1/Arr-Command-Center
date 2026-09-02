@@ -45,10 +45,78 @@ async function getRegistration() {
   return (await navigator.serviceWorker.getRegistration()) || registerServiceWorker();
 }
 
+// Push requires a secure context (HTTPS, or localhost). This is the usual reason
+// it "doesn't work" on iPhone when the dashboard is opened over http://<LAN-IP>.
+export function isSecure() {
+  return typeof window !== 'undefined' && window.isSecureContext === true;
+}
+
+async function getServerKey() {
+  const resp = await fetch('/api/push/public-key');
+  if (!resp.ok) throw new Error('Could not fetch the server push key');
+  const { publicKey } = await resp.json();
+  if (!publicKey) throw new Error('Server has no VAPID public key');
+  return publicKey;
+}
+
+// Does an existing subscription's applicationServerKey match the server's current
+// VAPID key? If the server key ever changes, old subscriptions silently fail
+// (HTTP 403), so we must detect this and re-subscribe.
+function keyMatches(sub, publicKey) {
+  try {
+    const cur = sub.options && sub.options.applicationServerKey;
+    if (!cur) return true; // can't determine — assume ok
+    const a = new Uint8Array(cur);
+    const b = urlBase64ToUint8Array(publicKey);
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+    return true;
+  } catch { return true; }
+}
+
+async function subscribeFresh(reg, publicKey) {
+  return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
+}
+
+async function postSubscription(sub) {
+  const save = await fetch('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subscription: sub.toJSON() }),
+  });
+  if (!save.ok) {
+    const e = await save.json().catch(() => ({}));
+    const detail = save.status === 401 ? ' (not signed in — sign in inside the installed app)' : '';
+    throw new Error((e.error || 'Failed to store subscription on the server') + ` [HTTP ${save.status}]` + detail);
+  }
+  return save.json().catch(() => ({}));
+}
+
+// Self-heal: if the user already granted permission, make sure the server has
+// this browser's CURRENT subscription. Browsers can rotate a subscription and
+// the server copy can drift/expire; calling this on load keeps them in sync so
+// notifications don't silently stop after "working once". Never prompts.
+export async function sync() {
+  if (!isSupported() || !isSecure()) return { subscribed: false, reason: 'unsupported' };
+  if (Notification.permission !== 'granted') return { subscribed: false, reason: 'not-granted' };
+  try {
+    const reg = (await navigator.serviceWorker.getRegistration()) || (await registerServiceWorker());
+    await navigator.serviceWorker.ready;
+    const publicKey = await getServerKey();
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && !keyMatches(sub, publicKey)) { try { await sub.unsubscribe(); } catch { /* ignore */ } sub = null; }
+    if (!sub) sub = await subscribeFresh(reg, publicKey);
+    await postSubscription(sub);
+    return { subscribed: true };
+  } catch (e) {
+    return { subscribed: false, error: e.message };
+  }
+}
+
 // Current push status, for rendering the settings toggle.
 export async function getStatus() {
   const supported = isSupported();
-  const base = { supported, standalone: isStandalone(), ios: isIOS(), permission: supported ? Notification.permission : 'unsupported', subscribed: false };
+  const base = { supported, secure: isSecure(), standalone: isStandalone(), ios: isIOS(), permission: supported ? Notification.permission : 'unsupported', subscribed: false };
   if (!supported) return base;
   try {
     const reg = await navigator.serviceWorker.getRegistration();
@@ -63,6 +131,7 @@ export async function getStatus() {
 // Enable push: register SW, request permission, subscribe, and persist server-side.
 export async function enable() {
   if (!isSupported()) throw new Error('Push notifications are not supported in this browser');
+  if (!isSecure()) throw new Error('Push notifications require a secure connection (HTTPS). Open this dashboard over https:// and try again.');
   if (isIOS() && !isStandalone()) {
     throw new Error('On iOS, add this site to your Home Screen first, then open it from there to enable notifications.');
   }
@@ -73,28 +142,15 @@ export async function enable() {
   const reg = await getRegistration();
   await navigator.serviceWorker.ready;
 
-  const resp = await fetch('/api/push/public-key');
-  if (!resp.ok) throw new Error('Could not fetch the server push key');
-  const { publicKey } = await resp.json();
-  if (!publicKey) throw new Error('Server has no VAPID public key');
+  const publicKey = await getServerKey();
 
   let sub = await reg.pushManager.getSubscription();
-  if (!sub) {
-    sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(publicKey),
-    });
-  }
+  // If the existing subscription was made with a different VAPID key, it will
+  // never deliver — drop it and make a fresh one.
+  if (sub && !keyMatches(sub, publicKey)) { try { await sub.unsubscribe(); } catch { /* ignore */ } sub = null; }
+  if (!sub) sub = await subscribeFresh(reg, publicKey);
 
-  const save = await fetch('/api/push/subscribe', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ subscription: sub.toJSON() }),
-  });
-  if (!save.ok) {
-    const e = await save.json().catch(() => ({}));
-    throw new Error(e.error || 'Failed to store subscription on the server');
-  }
+  await postSubscription(sub);
   return true;
 }
 

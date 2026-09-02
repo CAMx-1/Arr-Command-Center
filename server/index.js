@@ -169,6 +169,11 @@ app.get('/api/push/public-key', (req, res) => res.json({ publicKey: push.getPubl
 // Store a PushSubscription captured by the client service worker.
 app.post('/api/push/subscribe', express.json({ limit: '16kb' }), (req, res) => {
   try {
+    // Capture the real public origin so the VAPID contact subject is a valid
+    // https URL (Apple's push service rejects invalid/.local subjects).
+    const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || req.protocol || 'https';
+    const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+    if (host) push.setSubject(`${proto}://${host}`);
     const sub = req.body && req.body.subscription ? req.body.subscription : req.body;
     const result = push.addSubscription(sub, { user: req.plexUser || null, ua: req.headers['user-agent'] || '' });
     res.json({ ok: true, ...result });
@@ -202,7 +207,7 @@ app.post('/api/push/test', express.json({ limit: '4kb' }), async (req, res) => {
 });
 
 // Push status (subscription count) for the settings UI.
-app.get('/api/push/status', (req, res) => res.json({ subscriptions: push.subscriptionCount() }));
+app.get('/api/push/status', (req, res) => res.json({ subscriptions: push.subscriptionCount(), subject: push.getSubject() }));
 
 // Per-category notification preferences (which event types push to mobile).
 app.get('/api/push/prefs', (req, res) => res.json({ categories: push.CATEGORIES, prefs: push.getPrefs() }));

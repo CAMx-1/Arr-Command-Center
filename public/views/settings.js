@@ -262,8 +262,11 @@ async function hydrateNotifications(ctx) {
     const rows = [];
 
     if (!st.supported) {
+      const insecure = st.secure === false;
       rows.push(h('p', { class: 'dim', style: { margin: 0, lineHeight: '1.6' } },
-        'This browser doesn’t support Web Push notifications. On iPhone/iPad, use Safari on iOS 16.4 or later.'));
+        insecure
+          ? 'Push notifications require a secure connection (HTTPS). This dashboard is currently loaded over an insecure connection, so the browser disables the Push API. Access it over https:// (this is also why it doesn’t work on iPhone over a local IP address).'
+          : 'This browser doesn’t support Web Push notifications. On iPhone/iPad, use Safari on iOS 16.4 or later.'));
       mount(panel, ...rows);
       return;
     }
@@ -294,6 +297,10 @@ async function hydrateNotifications(ctx) {
     if (st.permission === 'denied') {
       btnWrap.appendChild(h('span', { class: 'dim' }, 'Notifications are blocked. Re-enable them for this site in your browser/OS settings, then refresh.'));
     } else if (subscribed) {
+      // Self-heal: re-register this browser's current subscription with the
+      // server so a rotated/expired endpoint (the usual "worked once then
+      // stopped" cause) is repaired without the user doing anything.
+      push.sync().catch(() => {});
       btnWrap.appendChild(h('button', {
         class: 'btn sm', onclick: async (e) => {
           const b = e.currentTarget; b.disabled = true; b.textContent = 'Disabling…';
@@ -305,8 +312,12 @@ async function hydrateNotifications(ctx) {
       btnWrap.appendChild(h('button', {
         class: 'btn sm primary', onclick: async (e) => {
           const b = e.currentTarget; b.disabled = true; b.textContent = 'Sending…';
-          try { const r = await push.sendTest(); toast(`Test sent to ${r.sent} device${r.sent === 1 ? '' : 's'}${r.pruned ? ` (${r.pruned} stale removed)` : ''}`, 'success'); }
-          catch (err) { toast(err.message, 'error'); }
+          try {
+            await push.sync(); // make sure the server has this device before testing
+            const r = await push.sendTest();
+            if (r.sent > 0) toast(`Test sent to ${r.sent} device${r.sent === 1 ? '' : 's'}${r.pruned ? ` (${r.pruned} stale removed)` : ''}`, 'success');
+            else toast('No devices are registered on the server. Try Disable then Enable to re-register this device.', 'error');
+          } catch (err) { toast(err.message, 'error'); }
           b.disabled = false; b.textContent = 'Send test';
         },
       }, 'Send test'));

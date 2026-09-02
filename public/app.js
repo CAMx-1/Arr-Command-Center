@@ -18,6 +18,7 @@ import { renderEmbed } from './views/embed.js';
 import { renderSettings } from './views/settings.js';
 import { openDetailModal } from './views/detail.js';
 import { fetchNotifications, getLastSeen, markSeen, notifKind } from './lib/notifications.js';
+import * as push from './lib/push.js';
 import { initAppearance } from './lib/theme.js';
 
 export const SERVICE_META = {
@@ -547,6 +548,16 @@ async function init() {
   // Notifications: initial load + poll every 30s.
   refreshNotifications();
   setInterval(refreshNotifications, 30000);
+
+  // Web push: register the service worker and self-heal the subscription so the
+  // server always has this browser's current endpoint (fixes push silently
+  // stopping after it "worked once"). No-ops if unsupported/insecure/not granted.
+  try {
+    if (push.isSupported() && push.isSecure()) {
+      await push.registerServiceWorker().catch(() => {});
+      push.sync().catch(() => {});
+    }
+  } catch { /* ignore */ }
 
   // Global controls
   document.getElementById('menu-toggle').addEventListener('click', () => setSidebar(!els.sidebar.classList.contains('open')));

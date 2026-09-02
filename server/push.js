@@ -50,11 +50,26 @@ export function categoryEnabled(category) {
 
 let ready = false;
 let publicKey = null;
+let vapidKeys = null;
+let currentSubject = null;
 
-// A contact URI (mailto: or https:) is required by the VAPID spec. Overridable
-// via env for real deployments.
+const SUBJECT_NS = 'vapidSubject';
+
+// The VAPID "sub" (contact) claim MUST be a valid https: URL or mailto: address.
+// Apple's push service (web.push.apple.com) REJECTS malformed/invalid subjects
+// with 403 BadJwtToken — notably a non-routable ".local" mailto — even though
+// FCM (Chrome) accepts almost anything. So we prefer, in order:
+//   1) VAPID_SUBJECT env override,
+//   2) a subject captured from the real request origin (e.g. https://host),
+//   3) a valid https fallback.
+function isValidSubject(s) {
+  return typeof s === 'string' && /^(https:\/\/[^\s]+|mailto:[^\s@]+@[^\s@]+\.[^\s@]+)$/.test(s);
+}
 function subject() {
-  return process.env.VAPID_SUBJECT || 'mailto:admin@arr-command-center.local';
+  if (process.env.VAPID_SUBJECT && isValidSubject(process.env.VAPID_SUBJECT)) return process.env.VAPID_SUBJECT;
+  const saved = store.get(SUBJECT_NS, null);
+  if (isValidSubject(saved)) return saved;
+  return 'https://localhost';
 }
 
 // Load an existing VAPID keypair or generate + persist a new one.
@@ -70,10 +85,28 @@ export function initPush() {
     store.set(VAPID_NS, keys);
     console.log('[push] generated a new VAPID keypair (persisted to data/store.json)');
   }
-  webpush.setVapidDetails(subject(), keys.publicKey, keys.privateKey);
+  vapidKeys = keys;
+  currentSubject = subject();
+  webpush.setVapidDetails(currentSubject, keys.publicKey, keys.privateKey);
   publicKey = keys.publicKey;
   ready = true;
+  console.log(`[push] VAPID contact subject: ${currentSubject}`);
   return { publicKey };
+}
+
+export function getSubject() { return currentSubject; }
+
+// Update the VAPID subject at runtime (e.g. captured from the request origin so
+// Apple gets a real https URL). No-ops if unchanged, invalid, or env-overridden.
+export function setSubject(url) {
+  if (!ready) initPush();
+  if (process.env.VAPID_SUBJECT) return currentSubject; // explicit override wins
+  if (!isValidSubject(url) || url === currentSubject) return currentSubject;
+  currentSubject = url;
+  store.set(SUBJECT_NS, url);
+  webpush.setVapidDetails(url, vapidKeys.publicKey, vapidKeys.privateKey);
+  console.log(`[push] VAPID contact subject updated to: ${url}`);
+  return url;
 }
 
 export function getPublicKey() {
