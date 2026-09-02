@@ -52,6 +52,12 @@ Access, and secrets never touch the browser.
 
 *Drag to reorder services, hide them from the sidebar, edit connections, and manage appearance — all secrets stay server-side.*
 
+### Push notifications (iOS / Safari)
+
+<img src="docs/push-notifications.jpg" alt="Web push notification on iPhone" width="320" />
+
+*Native Web Push on iPhone (add to Home Screen), plus desktop browsers — a background poller sends alerts for completed downloads, failures, and requests needing approval, with per-category toggles.*
+
 ---
 
 ## Why a backend proxy?
