@@ -261,21 +261,27 @@ async function hydrateActivity(ctx, silent = false) {
   if (!silent) mount(panel, h('div', { class: 'dim' }, 'Loading activity…'));
 
   const prefs = loadActivityPrefs();
-  const tasks = [];
+  const groups = [];
   for (const def of ACTIVITY_DEFS) {
     if (!prefs[def.id]) continue;
-    if (def.local) { tasks.push(Promise.resolve(failedRows(ctx))); continue; }
+    if (def.local) { groups.push({ id: def.id, p: Promise.resolve(failedRows(ctx)) }); continue; }
     // Include every configured instance of the type (supports multiple
     // Sonarr/Radarr instances, e.g. a separate Anime instance).
     const svcs = state.services.filter((s) => s.type === def.type && s.configured !== false);
-    for (const svc of svcs) tasks.push(fetchSource(def, svc, ctx));
+    for (const svc of svcs) groups.push({ id: def.id, p: fetchSource(def, svc, ctx) });
   }
 
-  if (!tasks.length) {
+  if (!groups.length) {
     return mount(panel, h('div', { class: 'empty' }, h('div', { class: 'empty-icon' }, ''), 'No activity sources selected', 'Use the toggles above to choose what appears here'));
   }
 
-  const rows = (await Promise.all(tasks)).flat();
+  const results = await Promise.all(groups.map((g) => g.p));
+  // Pending approvals jump to the top when present (so you don't have to scroll
+  // to find them); everything else keeps its configured order.
+  const approvals = [];
+  const other = [];
+  groups.forEach((g, i) => { const r = results[i] || []; (g.id === 'seerr-approval' ? approvals : other).push(...r); });
+  const rows = [...approvals, ...other];
   if (!rows.length) {
     mount(panel, h('div', { class: 'empty' }, h('div', { class: 'empty-icon' }, ''), 'Nothing to show right now'));
   } else {
