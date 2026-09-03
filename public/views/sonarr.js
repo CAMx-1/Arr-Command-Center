@@ -7,7 +7,7 @@ import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, invalidate } from '../lib/cache.js';
 import { libraryFilter, consumePendingFilter } from '../lib/libraryFilter.js';
-import { tagEditor, arrCommandBar, loadTags } from '../lib/arrActions.js';
+import { tagEditor, arrCommandBar, loadTags, openManualImport } from '../lib/arrActions.js';
 
 export async function renderSonarr(root, ctx) {
   const svc = ctx.service;
@@ -237,6 +237,7 @@ function queueRow(r, arr, ctx) {
       h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })),
     ),
     h('div', { class: 'row-actions' },
+      h('button', { class: 'btn sm', title: 'Manually import completed files', onclick: () => openManualImport(arr, 'series', { downloadId: r.downloadId, title: r.title }) }, '⇩ Import'),
       h('button', { class: 'btn sm danger', onclick: async () => {
         try { await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=false`); toast('Removed from queue', 'success'); ctx.reload(); }
         catch (e) { toast(e.message, 'error'); }

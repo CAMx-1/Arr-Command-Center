@@ -219,5 +219,26 @@ export function tabs(body, tabsDef, storageKey) {
   requestAnimationFrame(moveIndicator);
   setTimeout(moveIndicator, 60);
   window.addEventListener('resize', moveIndicator);
+
+  // Horizontal swipe to change tabs (touch). Ignores mostly-vertical drags and
+  // swipes that begin inside a horizontally-scrollable element or a form field.
+  let sx = 0; let sy = 0; let swiping = false;
+  body.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { swiping = false; return; }
+    const el = e.target;
+    if (el && el.closest && el.closest('.stat-scroll, .bchart-plot, .stat-strip, input, textarea, select, .modal-overlay')) { swiping = false; return; }
+    const t = e.touches[0]; sx = t.clientX; sy = t.clientY; swiping = true;
+  }, { passive: true });
+  body.addEventListener('touchend', (e) => {
+    if (!swiping) return; swiping = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - sx; const dy = t.clientY - sy;
+    if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.8) return; // require a clear horizontal swipe
+    const idx = tabsDef.findIndex((x) => x.id === activeId);
+    const next = dx < 0 ? idx + 1 : idx - 1;
+    if (next < 0 || next >= tabsDef.length) return;
+    select(tabsDef[next].id);
+  }, { passive: true });
+
   return bar;
 }

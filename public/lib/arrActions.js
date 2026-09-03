@@ -1,4 +1,4 @@
-import { h, mount, clear, toast, spinner, empty, openModal, closeModal } from './ui.js';
+import { h, mount, clear, toast, spinner, empty, openModal, closeModal, fmtBytes } from './ui.js';
 
 // Shared Sonarr/Radarr actions used by both edit modals.
 //   kind: 'series' (Sonarr) | 'movie' (Radarr)
@@ -97,4 +97,67 @@ export function openRenamePreview(client, kind, id) {
 export async function loadTags(client) {
   try { const t = await client.get('tag'); return Array.isArray(t) ? t : []; }
   catch { return []; }
+}
+
+// ---- Manual / interactive import ------------------------------------------
+// Fixes stuck downloads: fetch the completed files the *arr couldn't auto-import,
+// let the user pick, then trigger a ManualImport command with the guessed
+// series/movie + quality metadata. `kind`: 'series' | 'movie'.
+export function openManualImport(client, kind, opts = {}) {
+  const body = h('div', {}, h('div', { style: { padding: '20px' } }, spinner()));
+  openModal({ title: `Manual import${opts.title ? ` · ${opts.title}` : ''}`, body, wide: true });
+  (async () => {
+    const query = opts.downloadId
+      ? `manualimport?downloadId=${encodeURIComponent(opts.downloadId)}&filterExistingFiles=true`
+      : (opts.folder ? `manualimport?folder=${encodeURIComponent(opts.folder)}&filterExistingFiles=true` : 'manualimport');
+    let items;
+    try { items = await client.get(query); } catch (e) { mount(body, empty('⚠️', 'Failed to load', e.message)); return; }
+    items = Array.isArray(items) ? items : [];
+    if (!items.length) { mount(body, empty('📁', 'Nothing to import', 'No completed files were found for this download yet.')); return; }
+
+    const idOf = (it, idx) => (it.id != null ? it.id : idx);
+    const chosen = new Set(items.map((it, idx) => [it, idx]).filter(([it]) => (kind === 'series' ? it.series : it.movie) && !(it.rejections || []).length).map(([it, idx]) => idOf(it, idx)));
+
+    const rows = items.map((it, idx) => {
+      const id = idOf(it, idx);
+      const mapped = kind === 'series' ? it.series : it.movie;
+      const qn = it.quality && it.quality.quality && it.quality.quality.name;
+      const rej = it.rejections || [];
+      const cb = h('input', { type: 'checkbox', checked: chosen.has(id) ? 'checked' : null, disabled: mapped ? null : 'disabled' });
+      cb.addEventListener('change', () => { if (cb.checked) chosen.add(id); else chosen.delete(id); });
+      const eps = (it.episodes || []).map((e) => `S${String(e.seasonNumber ?? it.seasonNumber ?? 0).padStart(2, '0')}E${String(e.episodeNumber).padStart(2, '0')}`).join(', ');
+      return h('label', { class: 'row', style: { alignItems: 'flex-start', cursor: 'pointer' } },
+        h('span', { style: { marginRight: '10px', paddingTop: '3px' } }, cb),
+        h('div', { class: 'row-main' },
+          h('div', { class: 'row-title', style: { fontSize: '13px', wordBreak: 'break-all' } }, it.name || it.relativePath || it.path),
+          h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+            mapped ? h('span', { class: 'pill ok' }, `${mapped.title || 'Matched'}${kind === 'series' && eps ? ` · ${eps}` : ''}`) : h('span', { class: 'pill down' }, 'Unmatched'),
+            qn ? h('span', { class: 'pill info' }, qn) : null,
+            it.size ? h('span', {}, fmtBytes(it.size)) : null,
+          ),
+          rej.length ? h('div', { style: { color: 'var(--red)', marginTop: '4px', fontSize: '12px' } }, rej.map((r) => r.reason).join(' · ')) : null,
+        ),
+      );
+    });
+
+    const importBtn = h('button', { class: 'btn primary' }, 'Import selected');
+    importBtn.onclick = async () => {
+      const files = items.map((it, idx) => ({ it, id: idOf(it, idx) })).filter(({ id }) => chosen.has(id)).map(({ it }) => {
+        const base = { path: it.path, quality: it.quality, languages: it.languages, releaseGroup: it.releaseGroup, indexerFlags: it.indexerFlags || 0 };
+        return kind === 'series'
+          ? { ...base, seriesId: it.series.id, episodeIds: (it.episodes || []).map((e) => e.id) }
+          : { ...base, movieId: it.movie.id };
+      });
+      if (!files.length) { toast('Select at least one matched file', 'error'); return; }
+      importBtn.disabled = true; importBtn.textContent = 'Importing…';
+      try { await client.post('command', { name: 'ManualImport', importMode: 'auto', files }); toast(`Importing ${files.length} file(s)`, 'success'); closeModal(); }
+      catch (e) { toast(e.message, 'error'); importBtn.disabled = false; importBtn.textContent = 'Import selected'; }
+    };
+
+    mount(body,
+      h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '10px' } },
+        h('div', { class: 'dim' }, `${items.length} file(s) found — pick what to import`), importBtn),
+      h('div', { class: 'list' }, ...rows),
+    );
+  })();
 }

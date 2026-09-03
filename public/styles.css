@@ -657,6 +657,55 @@ html[data-theme="dark"] .shx-face { background: linear-gradient(160deg, var(--su
 .bchart-val { font-size: 11px; color: var(--text); margin-bottom: 4px; font-weight: 700; }
 .bchart-xlabel { font-size: 11.5px; color: var(--text-dim); margin-top: 6px; white-space: nowrap; max-width: 70px; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 
+/* ---------- Mobile hex bottom navigation ---------- */
+.bottom-nav { display: none; }
+.bn-row { position: relative; margin: 2px auto 0; }
+.bn-hex { position: absolute; width: 68px; height: 60px; border: none; padding: 0; cursor: pointer;
+  clip-path: polygon(50% 0, 100% 26%, 100% 100%, 0 100%, 0 26%);
+  background: linear-gradient(160deg, #6f6cf2, #9b45e6);
+  display: flex; align-items: center; justify-content: center;
+  transition: filter 0.2s var(--ease), background 0.18s var(--ease); }
+.bn-hex:active { filter: brightness(1.15); }
+.bn-hex.active { background: linear-gradient(160deg, #a78bfa, #c084fc); z-index: 2; }
+.bn-hex .hive-icon { z-index: 1; display: flex; margin-top: 6px; }
+.bn-hex .svc-logo, .bn-hex .hive-logo { width: 30px; height: 30px; object-fit: contain; }
+.bn-empty { background: linear-gradient(160deg, rgba(111, 108, 242, 0.22), rgba(155, 69, 230, 0.22)); pointer-events: none; }
+.bn-home { height: 74px; background: linear-gradient(160deg, #7c78f5, #a24fe0); z-index: 3; }
+.bn-home .hive-icon { margin-top: 10px; }
+.bn-home .hive-logo { width: 40px; height: 40px; }
+.bn-grip { border: none; background: none; padding: 6px 24px 4px; cursor: pointer; align-self: center; }
+.bn-grip-bar { display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--border-strong); }
+
+@media (max-width: 720px) {
+  .bottom-nav { display: flex; flex-direction: column; align-items: center;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    padding: 0 8px; background: none; pointer-events: none; }
+  .bottom-nav .bn-row, .bottom-nav .bn-grip { pointer-events: auto; }
+}
+
+/* All-services bottom sheet (opened via swipe-up / grip) */
+.allsvc-backdrop { position: fixed; inset: 0; z-index: 65; background: rgba(15, 17, 23, 0.55); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); opacity: 0; visibility: hidden; transition: opacity 0.25s var(--ease), visibility 0.25s var(--ease); }
+.allsvc-backdrop.show { opacity: 1; visibility: visible; }
+.allsvc-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 66; background: var(--surface);
+  border-top-left-radius: 20px; border-top-right-radius: 20px; box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.45);
+  transform: translateY(105%); transition: transform 0.28s var(--ease);
+  padding: 8px 16px calc(24px + env(safe-area-inset-bottom)); max-height: 74vh; overflow-y: auto; }
+.allsvc-sheet.show { transform: none; }
+.allsvc-grip { width: 42px; height: 4px; border-radius: 2px; background: var(--border-strong); margin: 6px auto 12px; }
+.allsvc-grid { display: flex; flex-wrap: wrap; gap: 16px 12px; justify-content: center; padding-bottom: 8px; }
+.allsvc-item { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 76px; background: none; border: none; cursor: pointer; padding: 0; }
+.allsvc-item .bn-hex { position: static; width: 60px; height: 54px; transform: none; }
+.allsvc-item .bn-hex:active { transform: scale(0.94); }
+.allsvc-item .bn-hex .svc-logo, .allsvc-item .bn-hex .hive-logo { width: 28px; height: 28px; }
+.allsvc-label { font-size: 11px; color: var(--text-dim); text-align: center; max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Pull-to-refresh indicator ---------- */
+.ptr { position: fixed; top: calc(env(safe-area-inset-top) + 4px); left: 50%; transform: translate(-50%, -64px); width: 34px; height: 34px; border-radius: 50%; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); display: flex; align-items: center; justify-content: center; z-index: 70; opacity: 0; transition: transform 0.16s var(--ease), opacity 0.16s var(--ease); pointer-events: none; }
+.ptr .ptr-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent); transition: transform 0.15s var(--ease); }
+.ptr.ready .ptr-spin { transform: rotate(180deg); }
+.ptr.spinning .ptr-spin { animation: ptrspin 0.7s linear infinite; }
+@keyframes ptrspin { to { transform: rotate(360deg); } }
+
 /* ---------- Responsive ---------- */
 @media (max-width: 900px) {
   .grid.cols-4 { grid-template-columns: repeat(2, 1fr); }
@@ -678,7 +727,7 @@ html[data-theme="dark"] .shx-face { background: linear-gradient(160deg, var(--su
   .topbar-right { gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
   #topbar-actions { gap: 6px; }
   .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; }
-  #view { padding: 12px 14px calc(72px + env(safe-area-inset-bottom)); }
+  #view { padding: 12px 14px calc(128px + env(safe-area-inset-bottom)); }
   .row { padding: 14px 26px; }
   .modal-overlay { padding: 10px; }
   .modal { max-height: 90vh; }

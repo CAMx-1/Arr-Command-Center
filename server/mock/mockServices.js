@@ -124,6 +124,10 @@ function makeSonarr(opts = {}) {
     { episodeFileId: 501, seriesId: Number(req.query.seriesId) || 1, existingPath: 'Season 02/severance.s02e10.1080p.web.mkv', newPath: 'Season 02/Severance - S02E10 - Cold Harbor [WEBDL-1080p].mkv' },
   ]));
   app.put('/api/v3/episode/monitor', (req, res) => res.json({ updated: ((req.body && req.body.episodeIds) || []).length, monitored: !!(req.body && req.body.monitored) }));
+  app.get('/api/v3/manualimport', (req, res) => res.json([
+    { id: 1, path: '/downloads/complete/Severance.S02E10.1080p.WEB.mkv', name: 'Severance.S02E10.1080p.WEB-DL', size: 2147483648, quality: { quality: { id: 6, name: 'WEBDL-1080p' }, revision: { version: 1 } }, languages: [{ id: 1, name: 'English' }], series: { id: 1, title: 'Severance' }, seasonNumber: 2, episodes: [{ id: 1, episodeNumber: 10, seasonNumber: 2, title: 'Cold Harbor' }], releaseGroup: 'NTb', rejections: [] },
+    { id: 2, path: '/downloads/complete/sample.mkv', name: 'sample.mkv', size: 26214400, quality: { quality: { id: 0, name: 'Unknown' } }, languages: [{ id: 1, name: 'English' }], series: null, episodes: [], rejections: [{ reason: 'Sample file', type: 'permanent' }] },
+  ]));
   app.get('/api/v3/wanted/missing', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 2, records: [
     { id: 7001, seriesId: 1, seasonNumber: 2, episodeNumber: 10, title: 'Cold Harbor', airDateUtc: new Date(Date.now() - 86400000).toISOString(), series: { title: 'Severance' } },
     { id: 7002, seriesId: 2, seasonNumber: 3, episodeNumber: 5, title: 'Children', airDateUtc: new Date(Date.now() - 2 * 86400000).toISOString(), series: { title: 'The Bear' } },
@@ -212,6 +216,9 @@ function makeRadarr(opts = {}) {
   app.post('/api/v3/tag', (req, res) => { const t = { id: (tags.reduce((mx, x) => Math.max(mx, x.id), 0) || 0) + 1, label: String((req.body && req.body.label) || 'tag') }; tags.push(t); res.status(201).json(t); });
   app.get('/api/v3/rename', (req, res) => res.json([
     { movieFileId: 601, movieId: Number(req.query.movieId) || 1, existingPath: 'furiosa.2024.2160p.mkv', newPath: 'Furiosa A Mad Max Saga (2024) [Bluray-2160p].mkv' },
+  ]));
+  app.get('/api/v3/manualimport', (req, res) => res.json([
+    { id: 1, path: '/downloads/complete/Furiosa.2024.2160p.BluRay.mkv', name: 'Furiosa.2024.2160p.BluRay', size: 32212254720, quality: { quality: { id: 19, name: 'Bluray-2160p' }, revision: { version: 1 } }, languages: [{ id: 1, name: 'English' }], movie: { id: 1, title: 'Furiosa' }, releaseGroup: 'GROUP', rejections: [] },
   ]));
   app.get('/api/v3/wanted/missing', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 1, records: [
     { id: 8001, title: 'Furiosa', year: 2024, digitalRelease: new Date(Date.now() - 3 * 86400000).toISOString() },

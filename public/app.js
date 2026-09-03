@@ -80,6 +80,7 @@ async function navigate() {
   updateTopbarTools(route);
   els.actions && clear(els.actions);
   closeSidebarMobile();
+  closeAllServices();
 
   // Restart the view entrance animation.
   els.view.dataset.route = route;
@@ -236,6 +237,119 @@ function buildHive() {
 
   // Rebuild the background now that the nav buttons exist, so it aligns to them.
   buildHiveBackground();
+  buildBottomNav();
+}
+
+// ---------- Mobile hex bottom navigation ----------
+// A raised center Home hex with two quick-pick service hexes on each side;
+// swipe up (or tap the grip) opens a sheet with every service.
+function buildBottomNav() {
+  const el = document.getElementById('bottom-nav');
+  if (!el) return;
+  const route = currentRoute();
+  const base = [...state.services].sort((a, b) => (a.type === 'overseerr' ? 0 : 1) - (b.type === 'overseerr' ? 0 : 1));
+  const nav = orderServices(base).filter((s) => !isHidden(s.key));
+  const quick = nav.slice(0, 4);
+  const svcHex = (svc) => {
+    const meta = SERVICE_META[svc.type] || {};
+    const st = state.status[svc.key];
+    return h('button', { class: `bn-hex ${route === svc.key ? 'active' : ''}`, title: svc.label, onclick: () => { location.hash = `#/${svc.key}`; } },
+      st ? h('span', { class: `hive-dot ${st.ok ? 'ok' : 'down'}` }) : null,
+      h('span', { class: 'hive-icon' }, svcIcon(meta.logo, meta.emoji || '', 24)),
+    );
+  };
+  const home = h('button', { class: `bn-hex bn-home ${route === 'home' ? 'active' : ''}`, title: 'Home', onclick: () => { location.hash = '#/home'; } },
+    h('span', { class: 'hive-icon' }, hiveImg('/icons/home-icon.png')));
+  const left = quick.slice(0, 2).map(svcHex);
+  const right = quick.slice(2, 4).map(svcHex);
+  while (left.length < 2) left.push(h('span', { class: 'bn-hex bn-empty' }));
+  while (right.length < 2) right.push(h('span', { class: 'bn-hex bn-empty' }));
+  // Single row of flat-bottom hexes anchored to the very bottom edge; they share
+  // vertical sides so they tile edge-to-edge. Home is taller so it pops up while
+  // its bottom stays flush with the rest.
+  const nodes = [left[0], left[1], home, right[0], right[1]];
+  const W = 68; const HOME_H = 74; const dx = W;
+  const row = h('div', { class: 'bn-row', style: { width: `${5 * W}px`, height: `${HOME_H}px` } });
+  nodes.forEach((n, i) => { n.style.left = `${i * dx}px`; n.style.bottom = '0'; row.appendChild(n); });
+  const grip = h('button', { class: 'bn-grip', title: 'All services', 'aria-label': 'All services', onclick: openAllServices }, h('span', { class: 'bn-grip-bar' }));
+  mount(el, grip, row);
+  // Swipe up anywhere on the bar to reveal all services.
+  let sy = 0; let sactive = false;
+  el.ontouchstart = (e) => { if (e.touches.length !== 1) { sactive = false; return; } sy = e.touches[0].clientY; sactive = true; };
+  el.ontouchend = (e) => { if (!sactive) return; sactive = false; if (e.changedTouches[0].clientY - sy < -40) openAllServices(); };
+}
+
+function closeAllServices() {
+  const sheet = document.getElementById('allsvc-sheet');
+  const bd = document.getElementById('allsvc-backdrop');
+  if (sheet) sheet.classList.remove('show');
+  if (bd) bd.classList.remove('show');
+}
+
+function openAllServices() {
+  const route = currentRoute();
+  const app = document.getElementById('app');
+  let bd = document.getElementById('allsvc-backdrop');
+  if (!bd) { bd = h('div', { id: 'allsvc-backdrop', class: 'allsvc-backdrop', onclick: closeAllServices }); app.appendChild(bd); }
+  let sheet = document.getElementById('allsvc-sheet');
+  if (!sheet) { sheet = h('div', { id: 'allsvc-sheet', class: 'allsvc-sheet' }); app.appendChild(sheet); }
+  const base = [...state.services].sort((a, b) => (a.type === 'overseerr' ? 0 : 1) - (b.type === 'overseerr' ? 0 : 1));
+  const nav = orderServices(base).filter((s) => !isHidden(s.key));
+  const item = (label, active, icon, onClick, dot) => h('button', { class: 'allsvc-item', onclick: () => { closeAllServices(); onClick(); } },
+    h('span', { class: `bn-hex ${active ? 'active' : ''}` }, dot ? h('span', { class: `hive-dot ${dot}` }) : null, h('span', { class: 'hive-icon' }, icon)),
+    h('span', { class: 'allsvc-label' }, label));
+  const items = [
+    item('Home', route === 'home', hiveImg('/icons/home-icon.png'), () => { location.hash = '#/home'; }),
+    ...nav.map((svc) => { const meta = SERVICE_META[svc.type] || {}; const st = state.status[svc.key]; return item(svc.label, route === svc.key, svcIcon(meta.logo, meta.emoji || '', 24), () => { location.hash = `#/${svc.key}`; }, st ? (st.ok ? 'ok' : 'down') : ''); }),
+    item('Settings', route === 'settings', hiveImg('/icons/command-center.svg'), () => { location.hash = '#/settings'; }),
+  ];
+  mount(sheet, h('div', { class: 'allsvc-grip' }), h('div', { class: 'section-title', style: { marginTop: '2px' } }, 'All services'), h('div', { class: 'allsvc-grid' }, ...items));
+  // Swipe the sheet down (from its top) to dismiss.
+  let sy = 0; let sd = false;
+  sheet.ontouchstart = (e) => { if (sheet.scrollTop > 0) { sd = false; return; } sy = e.touches[0].clientY; sd = true; };
+  sheet.ontouchend = (e) => { if (!sd) return; sd = false; if (e.changedTouches[0].clientY - sy > 60) closeAllServices(); };
+  requestAnimationFrame(() => { bd.classList.add('show'); sheet.classList.add('show'); });
+}
+
+// ---------- Pull to refresh (touch) ----------
+function initPullToRefresh() {
+  if (!('ontouchstart' in window)) return;
+  const ind = h('div', { id: 'ptr', class: 'ptr' }, h('span', { class: 'ptr-spin' }));
+  document.getElementById('app').appendChild(ind);
+  let startY = 0; let pulling = false; let dist = 0;
+  const TRIGGER = 72; const MAXPULL = 100;
+  const atTop = () => (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
+  const bd = () => document.getElementById('allsvc-backdrop');
+  const blocked = () => document.getElementById('modal-root').hasChildNodes()
+    || (bd() && bd().classList.contains('show'))
+    || els.sidebar.classList.contains('open');
+  const reset = () => { ind.style.transform = 'translate(-50%, -64px)'; ind.style.opacity = '0'; ind.classList.remove('ready'); };
+  window.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || !atTop() || blocked()) { pulling = false; return; }
+    startY = e.touches[0].clientY; dist = 0; pulling = true;
+  }, { passive: true });
+  window.addEventListener('touchmove', (e) => {
+    if (!pulling) return;
+    dist = e.touches[0].clientY - startY;
+    if (dist <= 0 || !atTop()) { pulling = false; reset(); return; }
+    const y = Math.min(dist * 0.5, MAXPULL) - 64;
+    ind.style.transform = `translate(-50%, ${y}px)`;
+    ind.style.opacity = String(Math.min(1, dist / 90));
+    ind.classList.toggle('ready', dist >= TRIGGER);
+    if (dist > 6 && e.cancelable) e.preventDefault();
+  }, { passive: false });
+  const finish = async () => {
+    if (!pulling) return; pulling = false;
+    if (dist >= TRIGGER) {
+      ind.classList.remove('ready'); ind.classList.add('spinning');
+      ind.style.opacity = '1'; ind.style.transform = 'translate(-50%, 12px)';
+      try { await navigate(); } catch { /* ignore */ }
+      ind.classList.remove('spinning');
+    }
+    reset();
+  };
+  window.addEventListener('touchend', finish, { passive: true });
+  window.addEventListener('touchcancel', finish, { passive: true });
 }
 
 function setSidebar(open) {
@@ -609,6 +723,9 @@ async function init() {
   // Notifications: initial load + poll every 30s.
   refreshNotifications();
   setInterval(refreshNotifications, 30000);
+
+  // Mobile: pull down at the top of any view to refresh.
+  initPullToRefresh();
 
   // Web push: register the service worker and self-heal the subscription so the
   // server always has this browser's current endpoint (fixes push silently
