@@ -1,4 +1,4 @@
-import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, debounce } from '../lib/ui.js';
+import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, debounce, autoRefresh } from '../lib/ui.js';
 import { openDetailModal, openArrFileInfo } from './detail.js';
 import { openReleaseSearch } from './releaseSearch.js';
 import { bulkLibrary } from './bulk.js';
@@ -7,6 +7,7 @@ import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, invalidate } from '../lib/cache.js';
 import { libraryFilter, consumePendingFilter } from '../lib/libraryFilter.js';
+import { tagEditor, arrCommandBar, loadTags } from '../lib/arrActions.js';
 
 export async function renderSonarr(root, ctx) {
   const svc = ctx.service;
@@ -184,15 +185,41 @@ function calRow(e) {
 }
 
 async function tabQueue(root, arr, ctx) {
-  mount(root, skeletonList());
-  try {
-    const queue = await arr.get('queue?pageSize=50');
-    const records = queue.records || [];
-    if (!records.length) return mount(root, empty('', 'Queue is empty', 'Nothing downloading right now'));
-    mount(root, h('div', { class: 'list' }, ...records.map((r) => queueRow(r, arr, ctx))));
-  } catch (err) {
-    mount(root, empty('', 'Failed to load queue', err.message));
+  const wrap = h('div', {});
+  mount(root, wrap);
+  const load = async (silent) => {
+    if (!silent) mount(wrap, skeletonList());
+    try {
+      const queue = await arr.get('queue?pageSize=50');
+      const records = queue.records || [];
+      if (!records.length) { mount(wrap, empty('', 'Queue is empty', 'Nothing downloading right now')); return; }
+      const banner = queueAttentionBanner(records, ctx);
+      mount(wrap, banner || null, h('div', { class: 'list' }, ...records.map((r) => queueRow(r, arr, ctx))));
+    } catch (err) {
+      if (!silent) mount(wrap, empty('', 'Failed to load queue', err.message));
+    }
+  };
+  await load(false);
+  autoRefresh(wrap, 5000, () => load(true));
+}
+
+// Surface stalled/failed downloads as a banner (and emit to the notifications
+// action-center) so problems are visible without digging.
+let _emittedQueueIssues = new Set();
+function queueAttentionBanner(records, ctx) {
+  const bad = records.filter((r) => /warning|stalled|failed|error/i.test(`${r.status} ${r.trackedDownloadStatus} ${(r.statusMessages || []).map((m) => m.title).join(' ')} ${r.errorMessage || ''}`));
+  if (!bad.length) return null;
+  for (const r of bad) {
+    const key = `${ctx.service.key}:${r.downloadId || r.id}`;
+    if (!_emittedQueueIssues.has(key)) {
+      _emittedQueueIssues.add(key);
+      try { window.dispatchEvent(new CustomEvent('app-error', { detail: { message: `${ctx.service.label}: “${r.title}” ${r.errorMessage || 'download needs attention'}`, at: Date.now() } })); } catch { /* ignore */ }
+    }
   }
+  return h('div', { class: 'attention-banner' },
+    h('span', { class: 'pill down' }, `${bad.length} need${bad.length === 1 ? 's' : ''} attention`),
+    h('span', { class: 'dim' }, bad.slice(0, 3).map((r) => r.title).join(' · ') + (bad.length > 3 ? '…' : '')),
+  );
 }
 
 function queueRow(r, arr, ctx) {
@@ -253,10 +280,25 @@ function seasonBlock(sn, eps, fileById, arr, series, reload) {
   eps.sort((a, b) => a.episodeNumber - b.episodeNumber);
   const withFile = eps.filter((e) => e.hasFile).length;
   const totalSize = eps.reduce((s, e) => s + ((e.episodeFileId && fileById[e.episodeFileId] && fileById[e.episodeFileId].size) || 0), 0);
+  const seasonObj = (series.seasons || []).find((x) => x.seasonNumber === sn);
+  const toggleSeason = async (e) => {
+    const btn = e.currentTarget;
+    if (!seasonObj) { toast('Season metadata unavailable', 'error'); return; }
+    const next = !seasonObj.monitored;
+    btn.disabled = true;
+    try {
+      const updated = { ...series, seasons: (series.seasons || []).map((x) => (x.seasonNumber === sn ? { ...x, monitored: next } : x)) };
+      await arr.put(`series/${series.id}`, updated);
+      series.seasons = updated.seasons; seasonObj.monitored = next;
+      toast(`Season ${sn === 0 ? 'Specials' : sn} ${next ? 'monitored' : 'unmonitored'}`, 'success');
+      reload();
+    } catch (err) { toast(err.message, 'error'); btn.disabled = false; }
+  };
   const header = h('div', { class: 'season-head' },
     h('div', { class: 'season-title' }, sn === 0 ? 'Specials' : `Season ${sn}`),
     h('span', { class: 'dim' }, `${withFile}/${eps.length} · ${fmtBytes(totalSize)}`),
-    h('button', { class: 'btn sm', style: { marginLeft: 'auto' }, title: 'Search season', onclick: async () => {
+    h('button', { class: `btn sm ${seasonObj && seasonObj.monitored ? 'primary' : ''}`, style: { marginLeft: 'auto' }, title: 'Toggle season monitoring', onclick: toggleSeason }, seasonObj && seasonObj.monitored ? 'Monitored' : 'Unmonitored'),
+    h('button', { class: 'btn sm', title: 'Search season', onclick: async () => {
       try { await arr.post('command', { name: 'SeasonSearch', seriesId: series.id, seasonNumber: sn }); toast(`Searching Season ${sn}`, 'success'); }
       catch (e) { toast(e.message, 'error'); }
     } }, 'Search'),
@@ -370,12 +412,16 @@ function field(label, control) {
 async function openEditSeries(arr, ctx, s) {
   let profiles = [];
   try { profiles = await cachedGet(`arr:${ctx.service.key}:qualityprofile`, () => arr.get('qualityprofile'), 600000); } catch { /* defaults */ }
+  const allTags = await loadTags(arr);
+  const tagIds = [...(s.tags || [])];
+  const tagsEl = tagEditor(allTags, tagIds, arr);
+  const cmdBar = arrCommandBar(arr, 'series', s.id);
   const monitorChk = h('input', { type: 'checkbox', checked: s.monitored ? 'checked' : null });
   const profileSel = h('select', { class: 'input' }, ...profiles.map((p) => h('option', { value: p.id, selected: p.id === s.qualityProfileId ? 'selected' : null }, p.name)));
   const deleteFilesChk = h('input', { type: 'checkbox' });
 
   const save = async () => {
-    const payload = { ...s, monitored: monitorChk.checked, qualityProfileId: Number(profileSel.value) || s.qualityProfileId };
+    const payload = { ...s, monitored: monitorChk.checked, qualityProfileId: Number(profileSel.value) || s.qualityProfileId, tags: tagIds };
     try {
       await arr.put(`series/${s.id}`, payload);
       invalidate(`arr:${ctx.service.key}:series`);
@@ -398,6 +444,8 @@ async function openEditSeries(arr, ctx, s) {
     title: `Edit “${s.title}”`,
     body: h('div', { class: 'grid', style: { gap: '14px' } },
       field('Quality Profile', profileSel),
+      field('Tags', tagsEl),
+      field('Maintenance', cmdBar),
       h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, monitorChk, 'Monitored'),
       h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, deleteFilesChk, 'Also delete files on disk (when removing)'),
     ),

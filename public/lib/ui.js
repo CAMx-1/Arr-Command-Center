@@ -158,6 +158,16 @@ export function debounce(fn, ms = 350) {
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
 
+// Re-run `fn` every `ms` while `sentinel` stays attached to the DOM; auto-stops
+// when it's removed (tab switch or navigation clears the view). Returns the id.
+export function autoRefresh(sentinel, ms, fn) {
+  const id = setInterval(() => {
+    if (!sentinel || !sentinel.isConnected) { clearInterval(id); return; }
+    Promise.resolve(fn()).catch(() => {});
+  }, ms);
+  return id;
+}
+
 // Service icon: renders a logo <img> with graceful fallback to an emoji if the
 // image fails to load.
 export function svcIcon(src, emoji = '', size = 22) {

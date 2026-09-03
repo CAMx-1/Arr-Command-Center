@@ -1,4 +1,4 @@
-import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, debounce } from '../lib/ui.js';
+import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, debounce, autoRefresh } from '../lib/ui.js';
 import { openDetailModal, openArrFileInfo } from './detail.js';
 import { openReleaseSearch } from './releaseSearch.js';
 import { bulkLibrary } from './bulk.js';
@@ -7,6 +7,7 @@ import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, invalidate } from '../lib/cache.js';
 import { libraryFilter, consumePendingFilter } from '../lib/libraryFilter.js';
+import { tagEditor, arrCommandBar, loadTags } from '../lib/arrActions.js';
 
 export async function renderRadarr(root, ctx) {
   const svc = ctx.service;
@@ -178,15 +179,38 @@ function movieRow(m, arr, ctx) {
 }
 
 async function tabQueue(root, arr, ctx) {
-  mount(root, skeletonList());
-  try {
-    const queue = await arr.get('queue?pageSize=50');
-    const records = queue.records || [];
-    if (!records.length) return mount(root, empty('', 'Queue is empty', 'Nothing downloading right now'));
-    mount(root, h('div', { class: 'list' }, ...records.map((r) => queueRow(r, arr, ctx))));
-  } catch (err) {
-    mount(root, empty('', 'Failed to load queue', err.message));
+  const wrap = h('div', {});
+  mount(root, wrap);
+  const load = async (silent) => {
+    if (!silent) mount(wrap, skeletonList());
+    try {
+      const queue = await arr.get('queue?pageSize=50');
+      const records = queue.records || [];
+      if (!records.length) { mount(wrap, empty('', 'Queue is empty', 'Nothing downloading right now')); return; }
+      mount(wrap, queueAttentionBanner(records, ctx) || null, h('div', { class: 'list' }, ...records.map((r) => queueRow(r, arr, ctx))));
+    } catch (err) {
+      if (!silent) mount(wrap, empty('', 'Failed to load queue', err.message));
+    }
+  };
+  await load(false);
+  autoRefresh(wrap, 5000, () => load(true));
+}
+
+const _emittedQueueIssues = new Set();
+function queueAttentionBanner(records, ctx) {
+  const bad = records.filter((r) => /warning|stalled|failed|error/i.test(`${r.status} ${r.trackedDownloadStatus} ${(r.statusMessages || []).map((m) => m.title).join(' ')} ${r.errorMessage || ''}`));
+  if (!bad.length) return null;
+  for (const r of bad) {
+    const key = `${ctx.service.key}:${r.downloadId || r.id}`;
+    if (!_emittedQueueIssues.has(key)) {
+      _emittedQueueIssues.add(key);
+      try { window.dispatchEvent(new CustomEvent('app-error', { detail: { message: `${ctx.service.label}: “${r.title}” ${r.errorMessage || 'download needs attention'}`, at: Date.now() } })); } catch { /* ignore */ }
+    }
   }
+  return h('div', { class: 'attention-banner' },
+    h('span', { class: 'pill down' }, `${bad.length} need${bad.length === 1 ? 's' : ''} attention`),
+    h('span', { class: 'dim' }, bad.slice(0, 3).map((r) => r.title).join(' · ') + (bad.length > 3 ? '…' : '')),
+  );
 }
 
 function queueRow(r, arr, ctx) {
@@ -294,12 +318,16 @@ function field(label, control) {
 async function openEditMovie(arr, ctx, m) {
   let profiles = [];
   try { profiles = await cachedGet(`arr:${ctx.service.key}:qualityprofile`, () => arr.get('qualityprofile'), 600000); } catch { /* defaults */ }
+  const allTags = await loadTags(arr);
+  const tagIds = [...(m.tags || [])];
+  const tagsEl = tagEditor(allTags, tagIds, arr);
+  const cmdBar = arrCommandBar(arr, 'movie', m.id);
   const monitorChk = h('input', { type: 'checkbox', checked: m.monitored ? 'checked' : null });
   const profileSel = h('select', { class: 'input' }, ...profiles.map((p) => h('option', { value: p.id, selected: p.id === m.qualityProfileId ? 'selected' : null }, p.name)));
   const deleteFilesChk = h('input', { type: 'checkbox' });
 
   const save = async () => {
-    const payload = { ...m, monitored: monitorChk.checked, qualityProfileId: Number(profileSel.value) || m.qualityProfileId };
+    const payload = { ...m, monitored: monitorChk.checked, qualityProfileId: Number(profileSel.value) || m.qualityProfileId, tags: tagIds };
     try {
       await arr.put(`movie/${m.id}`, payload);
       invalidate(`arr:${ctx.service.key}:movie`);
@@ -322,6 +350,8 @@ async function openEditMovie(arr, ctx, m) {
     title: `Edit “${m.title}”`,
     body: h('div', { class: 'grid', style: { gap: '14px' } },
       field('Quality Profile', profileSel),
+      field('Tags', tagsEl),
+      field('Maintenance', cmdBar),
       h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, monitorChk, 'Monitored'),
       h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, deleteFilesChk, 'Also delete files on disk (when removing)'),
     ),

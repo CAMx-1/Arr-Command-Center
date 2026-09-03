@@ -1,4 +1,4 @@
-import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, pct, poster, openModal, closeModal } from '../lib/ui.js';
+import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, pct, poster, openModal, closeModal, autoRefresh } from '../lib/ui.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 
@@ -16,25 +16,31 @@ export async function renderSabnzbd(root, ctx) {
 }
 
 async function tabQueue(root, sab, ctx) {
-  mount(root, skeletonList());
-  try {
-    const data = await sab({ mode: 'queue' });
-    const q = data.queue || {};
-    ctx.setActions(viewToggle(ctx.service.key, ctx.reload), ...queueControls(q, sab, ctx));
-    const header = statsHeader(q);
-    const slots = q.slots || [];
-    if (!slots.length) {
-      mount(root, header, h('div', { class: 'section-title' }, 'Downloads'), empty('', 'Queue is empty', 'Nothing downloading right now'));
-      return;
+  const wrap = h('div', {});
+  mount(root, wrap);
+  const load = async (silent) => {
+    if (!silent) mount(wrap, skeletonList());
+    try {
+      const data = await sab({ mode: 'queue' });
+      const q = data.queue || {};
+      if (!silent) ctx.setActions(viewToggle(ctx.service.key, ctx.reload), ...queueControls(q, sab, ctx));
+      const header = statsHeader(q);
+      const slots = q.slots || [];
+      if (!slots.length) {
+        mount(wrap, header, h('div', { class: 'section-title' }, 'Downloads'), empty('', 'Queue is empty', 'Nothing downloading right now'));
+        return;
+      }
+      const hex = effectiveMode(ctx.service.key) === 'hex';
+      const els = slots.map((s) => (hex ? slotHex : slotRow)(s, sab, ctx));
+      const list = hex ? hive(els, root.clientWidth) : h('div', { class: 'list' }, ...els);
+      mount(wrap, header, h('div', { class: 'section-title' }, 'Downloads'), list);
+      lazyPosters(slots, els, buildDownloadPosters(ctx));
+    } catch (err) {
+      if (!silent) mount(wrap, empty('', 'Failed to load queue', err.message, { label: 'Retry', onClick: () => load(false) }));
     }
-    const hex = effectiveMode(ctx.service.key) === 'hex';
-    const els = slots.map((s) => (hex ? slotHex : slotRow)(s, sab, ctx));
-    const list = hex ? hive(els, root.clientWidth) : h('div', { class: 'list' }, ...els);
-    mount(root, header, h('div', { class: 'section-title' }, 'Downloads'), list);
-    lazyPosters(slots, els, buildDownloadPosters(ctx));
-  } catch (err) {
-    mount(root, empty('', 'Failed to load queue', err.message, { label: 'Retry', onClick: () => tabQueue(root, sab, ctx) }));
-  }
+  };
+  await load(false);
+  autoRefresh(wrap, 5000, () => load(true));
 }
 
 // Fill in posters after the list has rendered (they're not needed to show it).

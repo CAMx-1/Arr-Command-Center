@@ -1,6 +1,7 @@
-import { h, mount, tabs, spinner, skeletonList, empty, pct, poster, toast, timeEl, openModal, closeModal } from '../lib/ui.js';
+import { h, mount, tabs, spinner, skeletonList, empty, pct, poster, toast, timeEl, openModal, closeModal, autoRefresh } from '../lib/ui.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { hive, posterHexCard } from '../lib/hive.js';
+import { barChart } from '../lib/charts.js';
 
 export async function renderTautulli(root, ctx) {
   const svc = ctx.service;
@@ -12,8 +13,44 @@ export async function renderTautulli(root, ctx) {
     { id: 'streams', label: 'Active Streams', render: (c) => tabStreams(c, tau, svc.key) },
     { id: 'history', label: 'History', render: (c) => tabHistory(c, tau, svc.key) },
     { id: 'stats', label: 'Statistics', render: (c) => tabStats(c, tau, svc.key) },
+    { id: 'graphs', label: 'Graphs', render: (c) => tabGraphs(c, tau, svc.key) },
   ], `tabs-${svc.key}`);
   mount(root, bar, body);
+}
+
+// ---------------- Graphs (plays by date / dow / hour / platform / user) ----------------
+async function tabGraphs(root, tau, svcKey) {
+  let range = 30;
+  const content = h('div', {});
+  const seg = h('div', { class: 'view-toggle', style: { marginBottom: '12px' } },
+    ...[7, 30, 90].map((d) => {
+      const b = h('button', { class: `view-seg ${range === d ? 'active' : ''}`, dataset: { d: String(d) } }, `${d} days`);
+      b.addEventListener('click', () => { if (range === d) return; range = d; for (const x of seg.children) x.classList.toggle('active', Number(x.dataset.d) === d); load(); });
+      return b;
+    }),
+  );
+  const card = (title, data) => h('div', { class: 'card', style: { marginBottom: '16px' } }, h('h3', { style: { marginTop: 0 } }, title), data ? barChart(data) : h('div', { class: 'dim' }, 'No data'));
+  const load = async () => {
+    mount(content, skeletonList(2));
+    try {
+      const [byDate, byDow, byHour, byPlat, byUser] = await Promise.all([
+        tau.get('get_plays_by_date', { time_range: range }).catch(() => null),
+        tau.get('get_plays_by_dayofweek', { time_range: range }).catch(() => null),
+        tau.get('get_plays_by_hourofday', { time_range: range }).catch(() => null),
+        tau.get('get_plays_by_top_10_platforms', { time_range: range }).catch(() => null),
+        tau.get('get_plays_by_top_10_users', { time_range: range }).catch(() => null),
+      ]);
+      mount(content,
+        card('Daily plays', byDate),
+        card('By day of week', byDow),
+        card('By hour of day', byHour),
+        card('Top platforms', byPlat),
+        card('Top users', byUser),
+      );
+    } catch (e) { mount(content, empty('', 'Failed to load graphs', e.message)); }
+  };
+  mount(root, seg, content);
+  load();
 }
 
 // Build a poster URL that streams through our proxy (auth + CF headers injected).
@@ -31,25 +68,30 @@ function fmtBandwidth(kbps) {
 
 // ---------------- Active Streams ----------------
 async function tabStreams(root, tau, svcKey) {
-  mount(root, skeletonList());
-  try {
-    const data = await tau.get('get_activity');
-    const sessions = data.sessions || [];
-    const header = h('div', { class: 'honeycomb' }, h('div', { class: 'hc-row' },
-      statCard('Streams', data.stream_count || sessions.length),
-      statCard('Direct Play', data.stream_count_direct_play ?? '—'),
-      statCard('Bandwidth', fmtBandwidth(data.total_bandwidth)),
-    ));
-    if (!sessions.length) {
-      return mount(root, header, empty('', 'No active streams', 'Nobody is watching right now'));
+  const wrap = h('div', {});
+  mount(root, wrap);
+  const load = async (silent) => {
+    if (!silent) mount(wrap, skeletonList());
+    try {
+      const data = await tau.get('get_activity');
+      const sessions = data.sessions || [];
+      const header = h('div', { class: 'honeycomb' }, h('div', { class: 'hc-row' },
+        statCard('Streams', data.stream_count || sessions.length),
+        statCard('Direct Play', data.stream_count_direct_play ?? '—'),
+        statCard('Bandwidth', fmtBandwidth(data.total_bandwidth)),
+      ));
+      if (!sessions.length) { mount(wrap, header, empty('', 'No active streams', 'Nobody is watching right now')); return; }
+      const reload = () => load(false);
+      const nowPlaying = effectiveMode(svcKey) === 'list'
+        ? h('div', { class: 'list' }, ...sessions.map((s) => streamListRow(s, tau, svcKey, reload)))
+        : streamHive(sessions.map((s) => streamHex(s, tau, svcKey, reload)), root.clientWidth);
+      mount(wrap, header, h('div', { class: 'section-title' }, 'Now Playing'), nowPlaying);
+    } catch (err) {
+      if (!silent) mount(wrap, empty('', 'Failed to load activity', err.message, { label: 'Retry', onClick: () => load(false) }));
     }
-    const nowPlaying = effectiveMode(svcKey) === 'list'
-      ? h('div', { class: 'list' }, ...sessions.map((s) => streamListRow(s, tau, svcKey, () => tabStreams(root, tau, svcKey))))
-      : streamHive(sessions.map((s) => streamHex(s, tau, svcKey, () => tabStreams(root, tau, svcKey))), root.clientWidth);
-    mount(root, header, h('div', { class: 'section-title' }, 'Now Playing'), nowPlaying);
-  } catch (err) {
-    mount(root, empty('', 'Failed to load activity', err.message, { label: 'Retry', onClick: () => tabStreams(root, tau, svcKey) }));
-  }
+  };
+  await load(false);
+  autoRefresh(wrap, 5000, () => load(true));
 }
 
 function statCard(label, value) {

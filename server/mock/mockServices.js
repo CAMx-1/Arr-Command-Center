@@ -117,6 +117,13 @@ function makeSonarr(opts = {}) {
     res.json(series[idx]);
   });
   app.delete('/api/v3/series/:id', (req, res) => { series = series.filter((s) => s.id !== Number(req.params.id)); res.json({}); });
+  let tags = [{ id: 1, label: 'anime' }, { id: 2, label: 'kids' }];
+  app.get('/api/v3/tag', (req, res) => res.json(tags));
+  app.post('/api/v3/tag', (req, res) => { const t = { id: (tags.reduce((mx, x) => Math.max(mx, x.id), 0) || 0) + 1, label: String((req.body && req.body.label) || 'tag') }; tags.push(t); res.status(201).json(t); });
+  app.get('/api/v3/rename', (req, res) => res.json([
+    { episodeFileId: 501, seriesId: Number(req.query.seriesId) || 1, existingPath: 'Season 02/severance.s02e10.1080p.web.mkv', newPath: 'Season 02/Severance - S02E10 - Cold Harbor [WEBDL-1080p].mkv' },
+  ]));
+  app.put('/api/v3/episode/monitor', (req, res) => res.json({ updated: ((req.body && req.body.episodeIds) || []).length, monitored: !!(req.body && req.body.monitored) }));
   app.get('/api/v3/wanted/missing', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 2, records: [
     { id: 7001, seriesId: 1, seasonNumber: 2, episodeNumber: 10, title: 'Cold Harbor', airDateUtc: new Date(Date.now() - 86400000).toISOString(), series: { title: 'Severance' } },
     { id: 7002, seriesId: 2, seasonNumber: 3, episodeNumber: 5, title: 'Children', airDateUtc: new Date(Date.now() - 2 * 86400000).toISOString(), series: { title: 'The Bear' } },
@@ -200,6 +207,12 @@ function makeRadarr(opts = {}) {
     res.json(movies[idx]);
   });
   app.delete('/api/v3/movie/:id', (req, res) => { movies = movies.filter((m) => m.id !== Number(req.params.id)); res.json({}); });
+  let tags = [{ id: 1, label: '4k' }, { id: 2, label: 'kids' }];
+  app.get('/api/v3/tag', (req, res) => res.json(tags));
+  app.post('/api/v3/tag', (req, res) => { const t = { id: (tags.reduce((mx, x) => Math.max(mx, x.id), 0) || 0) + 1, label: String((req.body && req.body.label) || 'tag') }; tags.push(t); res.status(201).json(t); });
+  app.get('/api/v3/rename', (req, res) => res.json([
+    { movieFileId: 601, movieId: Number(req.query.movieId) || 1, existingPath: 'furiosa.2024.2160p.mkv', newPath: 'Furiosa A Mad Max Saga (2024) [Bluray-2160p].mkv' },
+  ]));
   app.get('/api/v3/wanted/missing', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 1, records: [
     { id: 8001, title: 'Furiosa', year: 2024, digitalRelease: new Date(Date.now() - 3 * 86400000).toISOString() },
   ] }));
@@ -224,6 +237,16 @@ function makeOverseerr() {
   });
   app.get('/__debug', (req, res) => res.json({ cf: cfSeen.overseerr || null }));
   app.get('/api/v1/status', (req, res) => res.json({ version: '1.33.2', commitTag: 'mock', updateAvailable: false }));
+  let issues = [
+    { id: 1, issueType: 1, status: 1, problemSeason: 2, problemEpisode: 10, createdAt: new Date(Date.now() - 3600000).toISOString(), media: { mediaType: 'tv', tmdbId: 95396, title: 'Severance' }, createdBy: { displayName: 'cameron' }, comments: [{ id: 1, message: 'Audio desyncs about 20 minutes in.', user: { displayName: 'cameron' }, createdAt: new Date(Date.now() - 3600000).toISOString() }] },
+    { id: 2, issueType: 3, status: 1, createdAt: new Date(Date.now() - 7200000).toISOString(), media: { mediaType: 'movie', tmdbId: 533535, title: 'Deadpool & Wolverine' }, createdBy: { displayName: 'guest' }, comments: [] },
+    { id: 3, issueType: 2, status: 2, createdAt: new Date(Date.now() - 172800000).toISOString(), media: { mediaType: 'movie', tmdbId: 786892, title: 'Furiosa' }, createdBy: { displayName: 'cameron' }, comments: [{ id: 1, message: 'Fixed after re-grab.', user: { displayName: 'admin' }, createdAt: new Date(Date.now() - 90000000).toISOString() }] },
+  ];
+  app.get('/api/v1/issue', (req, res) => { let r = issues; if (req.query.filter === 'open') r = issues.filter((i) => i.status === 1); res.json({ pageInfo: { pages: 1, pageSize: 50, results: r.length, page: 1 }, results: r }); });
+  app.get('/api/v1/issue/:id', (req, res) => { const i = issues.find((x) => x.id === Number(req.params.id)); if (!i) return res.status(404).json({ error: 'not found' }); res.json(i); });
+  app.post('/api/v1/issue/:id/comment', (req, res) => { const i = issues.find((x) => x.id === Number(req.params.id)); if (!i) return res.status(404).json({ error: 'not found' }); const c = { id: (i.comments.reduce((m, x) => Math.max(m, x.id), 0) || 0) + 1, message: String((req.body && req.body.message) || ''), user: { displayName: 'you' }, createdAt: new Date().toISOString() }; i.comments.push(c); res.status(200).json(c); });
+  app.post('/api/v1/issue/:id/resolved', (req, res) => { const i = issues.find((x) => x.id === Number(req.params.id)); if (i) i.status = 2; res.json(i || {}); });
+  app.post('/api/v1/issue/:id/reopen', (req, res) => { const i = issues.find((x) => x.id === Number(req.params.id)); if (i) i.status = 1; res.json(i || {}); });
   const mockCast = [
     { id: 1, name: 'Jane Doe', character: 'Lead Role', profilePath: null, order: 0 },
     { id: 2, name: 'John Smith', character: 'Supporting Role', profilePath: null, order: 1 },
@@ -380,6 +403,16 @@ function makeTautulli() {
         { stat_id: 'top_libraries', stat_title: 'Most Active Libraries', rows: [{ section_name: 'TV Shows', total_plays: s(54) }, { section_name: 'Movies', total_plays: s(33) }] },
       ]));
     }
+    if (cmd === 'get_plays_by_date') {
+      const days = Math.min(120, Number(req.query.time_range) || 30);
+      const cats = []; const tv = []; const mv = [];
+      for (let i = days - 1; i >= 0; i--) { const d = new Date(Date.now() - i * 86400000); cats.push(`${d.getMonth() + 1}/${d.getDate()}`); tv.push(Math.floor(2 + Math.random() * 8)); mv.push(Math.floor(Math.random() * 5)); }
+      return res.json(wrap({ categories: cats, series: [{ name: 'TV', data: tv }, { name: 'Movies', data: mv }, { name: 'Total', data: tv.map((v, i) => v + mv[i]) }] }));
+    }
+    if (cmd === 'get_plays_by_dayofweek') return res.json(wrap({ categories: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], series: [{ name: 'TV', data: [12, 9, 14, 11, 20, 26, 22] }, { name: 'Movies', data: [3, 2, 4, 3, 7, 11, 9] }] }));
+    if (cmd === 'get_plays_by_hourofday') { const cats = Array.from({ length: 24 }, (_, hh) => String(hh)); const data = cats.map((_, hh) => (hh >= 18 && hh <= 23 ? Math.floor(8 + Math.random() * 10) : (hh >= 8 && hh < 12 ? Math.floor(3 + Math.random() * 4) : Math.floor(Math.random() * 3)))); return res.json(wrap({ categories: cats, series: [{ name: 'Plays', data }] })); }
+    if (cmd === 'get_plays_by_top_10_platforms') return res.json(wrap({ categories: ['Apple TV', 'Chrome', 'iOS', 'Android', 'Roku'], series: [{ name: 'Plays', data: [42, 31, 19, 12, 7] }] }));
+    if (cmd === 'get_plays_by_top_10_users') return res.json(wrap({ categories: ['cameron', 'guest', 'kids', 'partner'], series: [{ name: 'Plays', data: [58, 22, 14, 9] }] }));
     return res.json(wrap({}));
   });
   return app;

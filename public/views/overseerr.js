@@ -55,6 +55,7 @@ export async function renderOverseerr(root, ctx) {
   const bar = tabs(body, [
     { id: 'pending', label: 'Pending', render: (c) => tabRequests(c, seerr, ctx, 'pending') },
     { id: 'all', label: 'All Requests', render: (c) => tabRequests(c, seerr, ctx, 'all') },
+    { id: 'issues', label: 'Issues', render: (c) => tabIssues(c, seerr, ctx) },
     { id: 'recent', label: 'Recently Added', render: (c) => tabRecentlyAdded(c, seerr, ctx) },
     { id: 'discover', label: 'Discover', render: (c) => tabDiscover(c, seerr, ctx) },
   ], `tabs-${svc.key}`);
@@ -208,6 +209,80 @@ async function act(seerr, ctx, id, action) {
     toast(`Request ${action}d`, 'success');
     ctx.reload();
   } catch (e) { toast(e.message, 'error'); }
+}
+
+const ISSUE_TYPE = { 1: 'Video', 2: 'Audio', 3: 'Subtitle', 4: 'Other' };
+function issueTitle(is) { const m = is.media || {}; return m.title || m.name || `#${m.tmdbId || is.id}`; }
+
+async function tabIssues(root, seerr, ctx) {
+  mount(root, skeletonList());
+  try {
+    const data = await seerr.get('issue?take=50&skip=0&sort=added&filter=all');
+    const results = data.results || [];
+    if (!results.length) return mount(root, empty('🐞', 'No issues', 'No reported media issues.'));
+    mount(root, h('div', { class: 'list' }, ...results.map((is) => issueRow(is, seerr, ctx))));
+  } catch (e) {
+    mount(root, empty('⚠️', 'Failed to load issues', e.message, { label: 'Retry', onClick: () => tabIssues(root, seerr, ctx) }));
+  }
+}
+
+function issueRow(is, seerr, ctx) {
+  const open = is.status === 1;
+  return h('div', { class: 'row', style: { cursor: 'pointer' }, onclick: () => openIssueModal(seerr, ctx, is) },
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title' }, issueTitle(is)),
+      h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+        h('span', { class: `pill ${open ? 'warn' : 'ok'}` }, open ? 'Open' : 'Resolved'),
+        h('span', { class: 'pill muted' }, ISSUE_TYPE[is.issueType] || 'Issue'),
+        is.problemSeason ? h('span', {}, `S${is.problemSeason}${is.problemEpisode ? `E${is.problemEpisode}` : ''}`) : null,
+        h('span', { class: 'dim' }, `${(is.comments || []).length} comment${(is.comments || []).length === 1 ? '' : 's'}`),
+        (is.createdBy && (is.createdBy.displayName || is.createdBy.username)) ? h('span', { class: 'dim' }, `by ${is.createdBy.displayName || is.createdBy.username}`) : null,
+      ),
+    ),
+    h('div', { class: 'row-actions' }, h('span', { class: 'dim' }, is.createdAt ? fmtRelative(is.createdAt) : '')),
+  );
+}
+
+function issueComment(c) {
+  return h('div', { class: 'row' }, h('div', { class: 'row-main' },
+    h('div', { class: 'meta-line' },
+      h('span', { style: { fontWeight: '700' } }, (c.user && (c.user.displayName || c.user.username)) || 'user'),
+      c.createdAt ? h('span', { class: 'dim' }, fmtRelative(c.createdAt)) : null,
+    ),
+    h('div', { style: { marginTop: '4px', lineHeight: '1.5', whiteSpace: 'pre-wrap' } }, c.message || ''),
+  ));
+}
+
+async function openIssueModal(seerr, ctx, brief) {
+  const body = h('div', {}, h('div', { style: { padding: '18px' } }, spinner()));
+  openModal({ title: `Issue · ${issueTitle(brief)}`, body, wide: true });
+  let issue = brief;
+  try { issue = await seerr.get(`issue/${brief.id}`); } catch { /* use brief */ }
+  const open = issue.status === 1;
+  const commentsBox = h('div', { class: 'list' }, ...((issue.comments || []).length ? (issue.comments || []).map(issueComment) : [h('div', { class: 'dim', style: { padding: '8px 0' } }, 'No comments yet.')]));
+  const ta = h('textarea', { class: 'input', rows: '3', placeholder: 'Add a comment…', style: { width: '100%', resize: 'vertical' } });
+  const addComment = async () => {
+    const message = ta.value.trim(); if (!message) return;
+    try { await seerr.post(`issue/${issue.id}/comment`, { message }); ta.value = ''; const fresh = await seerr.get(`issue/${issue.id}`); mount(commentsBox, ...((fresh.comments || []).map(issueComment))); toast('Comment added', 'success'); }
+    catch (e) { toast(e.message, 'error'); }
+  };
+  const resolveBtn = h('button', { class: `btn ${open ? 'primary' : ''}` }, open ? 'Mark resolved' : 'Reopen');
+  resolveBtn.onclick = async () => {
+    try { await seerr.post(`issue/${issue.id}/${open ? 'resolved' : 'reopen'}`); toast(open ? 'Resolved' : 'Reopened', 'success'); closeModal(); ctx.reload(); }
+    catch (e) { toast(e.message, 'error'); }
+  };
+  mount(body,
+    h('div', { class: 'meta-line', style: { marginBottom: '10px' } },
+      h('span', { class: `pill ${open ? 'warn' : 'ok'}` }, open ? 'Open' : 'Resolved'),
+      h('span', { class: 'pill muted' }, ISSUE_TYPE[issue.issueType] || 'Issue'),
+      (issue.createdBy && (issue.createdBy.displayName || issue.createdBy.username)) ? h('span', { class: 'dim' }, `opened by ${issue.createdBy.displayName || issue.createdBy.username}`) : null,
+    ),
+    h('div', { class: 'section-title' }, 'Comments'),
+    commentsBox,
+    h('div', { style: { marginTop: '10px' } }, ta,
+      h('div', { class: 'meta-line', style: { marginTop: '8px', justifyContent: 'flex-end' } }, resolveBtn, h('button', { class: 'btn primary', onclick: addComment }, 'Comment')),
+    ),
+  );
 }
 
 async function tabDiscover(root, seerr, ctx) {
