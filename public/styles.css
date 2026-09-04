@@ -694,7 +694,9 @@ html[data-theme="dark"] .shx-face { background: linear-gradient(160deg, var(--su
 .allsvc-grip { width: 42px; height: 4px; border-radius: 2px; background: var(--border-strong); margin: 6px auto 12px; }
 .allsvc-grid { display: flex; flex-wrap: wrap; gap: 16px 12px; justify-content: center; padding-bottom: 8px; }
 .allsvc-item { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 76px; background: none; border: none; cursor: pointer; padding: 0; }
-.allsvc-item .bn-hex { position: static; width: 60px; height: 54px; transform: none; }
+.allsvc-item .bn-hex { position: static; width: 60px; height: 54px; transform: none;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
+.allsvc-item .bn-hex .hive-icon { margin-top: 0; }
 .allsvc-item .bn-hex:active { transform: scale(0.94); }
 .allsvc-item .bn-hex .svc-logo, .allsvc-item .bn-hex .hive-logo { width: 28px; height: 28px; }
 .allsvc-label { font-size: 11px; color: var(--text-dim); text-align: center; max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -716,7 +718,7 @@ html[data-theme="dark"] .shx-face { background: linear-gradient(160deg, var(--su
   #sidebar { transform: translateX(-100%); z-index: 45; box-shadow: 0 0 40px rgba(0, 0, 0, 0.5); }
   #sidebar.open { transform: translateX(0); }
   #main { margin-left: 0; }
-  .menu-toggle { display: block; }
+  .menu-toggle { display: none; } /* mobile uses the bottom hex nav instead */
   #app.collapsed { --sidebar-w: 98px; }
   #hive { transform: scale(0.86); transform-origin: top center; }
   body { overflow-x: hidden; }
