@@ -23,6 +23,7 @@ import { openDetailModal } from './views/detail.js';
 import { fetchNotifications, getLastSeen, markSeen, notifKind } from './lib/notifications.js';
 import * as push from './lib/push.js';
 import { initAppearance } from './lib/theme.js';
+import { mergeState, classifyNavigation, targetScrollFor, createScrollStore } from './lib/scrollHistory.js';
 
 export const SERVICE_META = {
   sonarr: { logo: '/icons/sonarr.svg', emoji: '', renderer: renderSonarr },
@@ -58,6 +59,24 @@ let errorLog = [];
 // decide whether it can repaint dots in place (see refreshStatus).
 let _lastHiveSig = null;
 
+// ----- History-aware scroll restoration (see lib/scrollHistory.js) -----
+// Each history entry is tagged with a monotonic `navId`; we remember the last
+// scroll offset per navId so Back/Forward can restore it, new route entries
+// start at the top, and reload/pull-to-refresh preserve the current position.
+let _navSeq = 0;
+let _currentNavId = null;
+let _pendingIntent = null; // 'preserve' | 'new' set by reload/refresh/deep-link call sites
+let _navGen = 0;           // bumped each navigation so stale async restores cancel
+let _restoreRO = null;     // active ResizeObserver during a restore
+let _restoreTimers = [];   // pending restore timers (bounded, always cleared)
+const _scrollStore = createScrollStore();
+
+// ----- Connection banner + health probe (offline / reconnecting) -----
+let _probeActive = false;
+let _probeTimer = 0;
+let _probeDelay = 0;
+let _bootBlocked = false; // initial config load failed; reload shell after probe recovery
+
 const els = {
   hive: document.getElementById('hive'),
   hiveBg: document.getElementById('hive-bg'),
@@ -80,25 +99,40 @@ function currentRoute() {
 async function navigate() {
   const route = currentRoute();
   try { localStorage.setItem('acc:last-route', route); } catch { /* ignore */ }
+
+  // ---- History-aware scroll: remember where we're leaving, decide where to land ----
+  const currentY = window.scrollY || document.documentElement.scrollTop || 0;
+  if (_currentNavId != null) _scrollStore.save(_currentNavId, currentY);
+  const intent = _pendingIntent; _pendingIntent = null;
+  const st = (history.state && typeof history.state === 'object') ? history.state : {};
+  const kind = classifyNavigation({ pendingIntent: intent, navId: st.navId, knownIds: _scrollStore.keys });
+  if (kind === 'new') {
+    _navSeq += 1; _currentNavId = _navSeq;
+    try { history.replaceState(mergeState(history.state, { navId: _currentNavId }), ''); } catch { /* ignore */ }
+  } else if (kind === 'restore') {
+    _currentNavId = st.navId;
+  } // 'preserve' keeps the current navId
+  const targetY = targetScrollFor({ kind, currentY, savedY: _scrollStore.get(_currentNavId) });
+
   buildHive();
   updateTopbarTools(route);
   els.actions && clear(els.actions);
   closeSidebarMobile();
   closeAllServices();
-  window.scrollTo(0, 0); // start each route at the top (mobile: avoids landing mid-scroll)
 
   // Restart the view entrance animation.
   els.view.dataset.route = route;
   els.view.classList.remove('view-enter');
   void els.view.offsetWidth;
   els.view.classList.add('view-enter');
+  scheduleScrollRestore(kind, targetY);
 
   const ctx = {
     api,
     state,
     setTitle: (t) => { els.title.textContent = t; },
     setActions: (...nodes) => { mount(els.actions, ...nodes); },
-    reload: navigate,
+    reload: () => { _pendingIntent = 'preserve'; return navigate(); },
   };
 
   if (route === 'home') {
@@ -129,6 +163,53 @@ async function navigate() {
     return mount(els.view, h('div', { class: 'empty' }, 'No panel for this service type'));
   }
   return meta.renderer(els.view, ctx);
+}
+
+// Cancel any in-flight scroll restoration (observer + timers) so we never leak
+// them across navigations.
+function cancelScrollRestore() {
+  if (_restoreRO) { try { _restoreRO.disconnect(); } catch { /* ignore */ } _restoreRO = null; }
+  _restoreTimers.forEach((t) => clearTimeout(t));
+  _restoreTimers = [];
+}
+
+// Bring the view to `targetY` after a navigation. New/top targets snap
+// immediately; a remembered offset is re-applied as async content grows the
+// page (ResizeObserver, with a bounded timer fallback) until it can be reached
+// or a short budget elapses. Guarded by a generation token so a newer
+// navigation supersedes an older restore.
+function scheduleScrollRestore(kind, targetY) {
+  const gen = ++_navGen;
+  cancelScrollRestore();
+  if (kind === 'new' || !targetY || targetY <= 0) {
+    window.scrollTo(0, 0); // start at the top (mobile: avoids landing mid-scroll)
+    requestAnimationFrame(() => { if (gen === _navGen) window.scrollTo(0, 0); });
+    return;
+  }
+  const apply = () => { if (gen === _navGen) window.scrollTo(0, targetY); };
+  const canReach = () => (document.documentElement.scrollHeight - window.innerHeight) >= targetY - 1;
+  apply();
+  requestAnimationFrame(apply);
+  if (typeof ResizeObserver !== 'undefined') {
+    let settled = 0;
+    _restoreRO = new ResizeObserver(() => {
+      if (gen !== _navGen) { cancelScrollRestore(); return; }
+      apply();
+      if (canReach() && ++settled >= 2) cancelScrollRestore();
+    });
+    try { _restoreRO.observe(els.view); } catch { /* ignore */ }
+  } else {
+    let tries = 0;
+    const tick = () => {
+      if (gen !== _navGen) return;
+      apply();
+      if (canReach() || ++tries > 12) return;
+      _restoreTimers.push(setTimeout(tick, 60));
+    };
+    _restoreTimers.push(setTimeout(tick, 60));
+  }
+  // Hard stop: never keep an observer/timer alive beyond the settle budget.
+  _restoreTimers.push(setTimeout(cancelScrollRestore, 1500));
 }
 
 // ---------- Sidebar honeycomb ("hive") ----------
@@ -301,6 +382,69 @@ function togglePinned(key) {
   buildBottomNav();
 }
 
+// Service-specific quick destinations for the bottom-bar long-press menu. Each
+// entry is [tabId, label] where tabId matches the `tabs()` id used by that
+// service view (persisted under `tabs-<svcKey>`), so navigating deep-links
+// straight to that tab. Types without a tabbed view (e.g. indexer) just get the
+// "Open" entry added below.
+const QUICK_ACTIONS = {
+  sonarr: [['series', 'Library'], ['calendar', 'Calendar'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['history', 'History']],
+  radarr: [['movies', 'Library'], ['calendar', 'Calendar'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['history', 'History']],
+  lidarr: [['library', 'Library'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['calendar', 'Calendar'], ['history', 'History']],
+  readarr: [['library', 'Library'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['calendar', 'Calendar'], ['history', 'History']],
+  sabnzbd: [['queue', 'Queue'], ['history', 'History']],
+  tautulli: [['streams', 'Active Streams'], ['history', 'History'], ['stats', 'Statistics'], ['graphs', 'Graphs']],
+  qbittorrent: [['downloading', 'Downloading'], ['completed', 'Completed']],
+  overseerr: [['pending', 'Pending'], ['all', 'All Requests'], ['issues', 'Issues'], ['recent', 'Recently Added'], ['discover', 'Discover']],
+  bazarr: [['series', 'Series'], ['movies', 'Movies'], ['wanted', 'Wanted'], ['history', 'History'], ['blacklist', 'Blacklist'], ['providers', 'Providers'], ['system', 'System']],
+  prowlarr: [['indexers', 'Indexers'], ['search', 'Search'], ['history', 'History']],
+  plex: [['watchlist', 'Watchlist'], ['duplicates', 'Duplicates'], ['users', 'Users'], ['friends', 'Friends'], ['sessions', 'Now Playing']],
+};
+
+// Attach a press-and-hold gesture (touch): fires `onLongPress` after ~550ms if
+// the finger hasn't moved, cancels on movement/lift, suppresses the synthetic
+// click that follows, and blocks the context menu. Normal taps are unaffected.
+function attachLongPress(el, onLongPress, { ms = 550, moveTol = 10 } = {}) {
+  let timer = 0; let sx = 0; let sy = 0; let fired = false;
+  const clearTimer = () => { if (timer) { clearTimeout(timer); timer = 0; } };
+  el.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { clearTimer(); return; }
+    const t = e.touches[0]; sx = t.clientX; sy = t.clientY; fired = false;
+    clearTimer();
+    timer = setTimeout(() => { fired = true; haptic(20); try { onLongPress(); } catch { /* ignore */ } }, ms);
+  }, { passive: true });
+  el.addEventListener('touchmove', (e) => {
+    const t = e.touches[0]; if (!t) return;
+    if (Math.abs(t.clientX - sx) > moveTol || Math.abs(t.clientY - sy) > moveTol) clearTimer();
+  }, { passive: true });
+  el.addEventListener('touchend', clearTimer, { passive: true });
+  el.addEventListener('touchcancel', clearTimer, { passive: true });
+  el.addEventListener('contextmenu', (e) => { e.preventDefault(); });
+  // Capture-phase so we can swallow the post-long-press click before the
+  // element's own onclick (bubble phase) navigates.
+  el.addEventListener('click', (e) => { if (fired) { e.preventDefault(); e.stopPropagation(); fired = false; } }, true);
+  return el;
+}
+
+// Accessible action sheet (modal) of a service's quick destinations. Selecting
+// one stores the target tab then navigates/re-renders so it deep-links even if
+// we're already on that service (mirrors openInArr). Uses the overlay
+// controller (via openModal) so Back/history stays consistent with Search.
+function openServiceQuickActions(svc) {
+  const go = (tab) => {
+    if (tab) { try { localStorage.setItem(`tabs-${svc.key}`, tab); } catch { /* ignore */ } }
+    const nav = () => { _pendingIntent = 'new'; if (currentRoute() === svc.key) navigate(); else location.hash = `#/${svc.key}`; };
+    if (overlayOpen('modal')) { closeOverlay('modal'); requestAnimationFrame(nav); }
+    else { closeModal(); nav(); }
+  };
+  const dests = QUICK_ACTIONS[svc.type] || [];
+  const body = h('div', { class: 'qa-list' },
+    ...dests.map(([tab, label]) => h('button', { class: 'qa-item', onclick: () => go(tab) }, h('span', { class: 'qa-label' }, label))),
+    h('button', { class: 'qa-item qa-open', onclick: () => go(null) }, h('span', { class: 'qa-label' }, `Open ${svc.label}`)),
+  );
+  openModal({ title: svc.label, body });
+}
+
 // A raised center Home hex with two quick-pick service hexes on each side;
 // swipe up (or tap the grip) opens a sheet with every service.
 function buildBottomNav() {
@@ -321,10 +465,11 @@ function buildBottomNav() {
   const svcHex = (svc) => {
     const meta = SERVICE_META[svc.type] || {};
     const st = state.status[svc.key];
-    return h('button', { class: `bn-hex ${route === svc.key ? 'active' : ''}`, title: svc.label, dataset: { svcKey: svc.key }, onclick: () => { haptic(); location.hash = `#/${svc.key}`; } },
+    const btn = h('button', { class: `bn-hex ${route === svc.key ? 'active' : ''}`, title: svc.label, 'aria-label': svc.label, dataset: { svcKey: svc.key }, onclick: () => { haptic(); location.hash = `#/${svc.key}`; } },
       st ? h('span', { class: `hive-dot ${st.ok ? 'ok' : 'down'}` }) : null,
       h('span', { class: 'hive-icon' }, svcIcon(meta.logo, meta.emoji || '', 24)),
     );
+    return attachLongPress(btn, () => openServiceQuickActions(svc));
   };
   const home = h('button', { class: `bn-hex bn-home ${route === 'home' ? 'active' : ''}`, title: 'Home', onclick: () => { haptic(); location.hash = '#/home'; } },
     h('span', { class: 'hive-icon' }, hiveImg('/icons/home-icon.png')));
@@ -411,6 +556,10 @@ function renderAllServicesGrid() {
     h('span', { class: 'allsvc-label' }, label));
   const items = [
     item('Home', route === 'home', hiveImg('/icons/home-icon.png'), () => { location.hash = '#/home'; }),
+    // Search is a global tool (not a pinnable service). Selecting it closes the
+    // all-services overlay (consuming its history entry + releasing the scroll
+    // lock) before opening the shared Search modal.
+    item('Search', false, h('span', { class: 'allsvc-search-ic', html: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' }), () => openSearch()),
     ...nav.map((svc) => { const meta = SERVICE_META[svc.type] || {}; const st = state.status[svc.key]; return item(svc.label, route === svc.key, svcIcon(meta.logo, meta.emoji || '', 24), () => { location.hash = `#/${svc.key}`; }, st ? (st.ok ? 'ok' : 'down') : '', svc); }),
     item('Settings', route === 'settings', hiveImg('/icons/command-center.svg'), () => { location.hash = '#/settings'; }),
   ];
@@ -478,6 +627,7 @@ function initPullToRefresh() {
     if (dist >= TRIGGER) {
       ind.classList.remove('ready'); ind.classList.add('spinning');
       ind.style.opacity = '1'; ind.style.transform = 'translate(-50%, 12px)';
+      _pendingIntent = 'preserve'; // pull-to-refresh keeps your place
       try { await navigate(); } catch { /* ignore */ }
       ind.classList.remove('spinning');
     }
@@ -723,6 +873,7 @@ function openInArr(m) {
   const libTab = m.svc.type === 'sonarr' ? 'series' : 'movies';
   try { localStorage.setItem(`tabs-${m.svc.key}`, libTab); } catch { /* ignore */ }
   closeModal();
+  _pendingIntent = 'new'; // deep-linked filter: land at the top of the results
   if (currentRoute() === m.svc.key) navigate();
   else location.hash = `#/${m.svc.key}`;
 }
@@ -844,30 +995,108 @@ function buildHiveBackground() {
 }
 
 // ---------- Status polling ----------
+// Apply a freshly fetched status map: repaint dots in place when the layout is
+// unchanged, otherwise rebuild the hive (see currentHiveSignature).
+function applyStatusResult() {
+  if (_lastHiveSig !== null && currentHiveSignature() === _lastHiveSig) {
+    updateStatusDots();
+  } else {
+    buildHive();
+  }
+}
+
 async function refreshStatus() {
   try {
     state.status = await api.status();
-    // A status poll only changes ok/down dots. Rebuild the SVG/layout/flyout
-    // ONLY when a structural/layout input changed (route, service set, order,
-    // hidden/pinned state, mobile breakpoint, flyout expansion, auth/demo);
-    // otherwise repaint the existing dots in place to avoid flicker, dropped
-    // flyouts, and DOM thrash on every poll.
-    if (_lastHiveSig !== null && currentHiveSignature() === _lastHiveSig) {
-      updateStatusDots();
-    } else {
-      buildHive();
-    }
+    applyStatusResult();
+    // The aggregate request succeeded → the dashboard backend is reachable.
+    // (Individual services may still be "down" in the map; that's not offline.)
+    stopProbing();
+    setConnBanner(navigator.onLine ? null : 'offline');
   } catch (err) {
+    // The /api/status request itself failed → the dashboard can't reach its
+    // backend. Surface "Reconnecting" and start the health probe.
     console.error('status error', err);
+    startProbing();
   }
+}
+
+// ----- Connection banner -----
+function setConnBanner(mode) {
+  const el = document.getElementById('conn-banner');
+  if (!el) return;
+  if (!mode) { el.classList.remove('show'); el.removeAttribute('data-mode'); el.textContent = ''; return; }
+  el.dataset.mode = mode;
+  el.textContent = mode === 'offline' ? 'Offline — check your connection' : 'Reconnecting…';
+  el.classList.add('show');
+}
+
+// ----- Health probe (bounded backoff, single in-flight loop) -----
+function stopProbing() {
+  _probeActive = false;
+  if (_probeTimer) { clearTimeout(_probeTimer); _probeTimer = 0; }
+  _probeDelay = 0;
+}
+
+function startProbing() {
+  if (_probeActive) return; // never overlap probe loops
+  _probeActive = true;
+  _probeDelay = 0;
+  setConnBanner(navigator.onLine ? 'reconnecting' : 'offline');
+  probeCycle();
+}
+
+async function probeCycle() {
+  _probeTimer = 0;
+  if (!_probeActive) return;
+  // If the browser itself is offline, pause until the 'online' event resumes us.
+  if (!navigator.onLine) { setConnBanner('offline'); return; }
+  setConnBanner('reconnecting');
+  let healthy = false;
+  try {
+    const res = await fetch('/healthcheck', { cache: 'no-store', headers: { 'cache-control': 'no-store' } });
+    healthy = res.ok;
+  } catch { healthy = false; }
+  if (!_probeActive) return; // stopped while awaiting
+  if (healthy) {
+    // If initial config loading failed, the app shell was never initialized.
+    // Reload once the backend is reachable so config/routes/timers are built.
+    if (_bootBlocked) { stopProbing(); location.reload(); return; }
+    // Backend is up — refresh status once. If that also succeeds we've fully
+    // recovered; otherwise keep probing on the backoff schedule.
+    try {
+      state.status = await api.status();
+      if (!_probeActive) return;
+      applyStatusResult();
+      stopProbing();
+      setConnBanner(navigator.onLine ? null : 'offline');
+      return;
+    } catch { /* status still failing — keep probing */ }
+    if (!_probeActive) return;
+  }
+  _probeDelay = Math.min(_probeDelay ? Math.round(_probeDelay * 1.6) : 1200, 15000);
+  _probeTimer = setTimeout(probeCycle, _probeDelay);
 }
 
 // ---------- Init ----------
 async function init() {
   initAppearance();
+  // Own scroll restoration so route/history-aware logic (see navigate) controls
+  // it instead of the browser guessing on Back/Forward.
+  try { if ('scrollRestoration' in history) history.scrollRestoration = 'manual'; } catch { /* ignore */ }
+  // Connection banner: react to the browser's own online/offline transitions in
+  // addition to backend reachability (see refreshStatus / probeCycle).
+  window.addEventListener('offline', () => { setConnBanner('offline'); });
+  window.addEventListener('online', () => {
+    if (_probeActive) { if (!_probeTimer) probeCycle(); } // resume a paused loop
+    else startProbing();
+  });
   try {
     state.config = await api.config();
   } catch (err) {
+    _bootBlocked = true;
+    setConnBanner(navigator.onLine ? 'reconnecting' : 'offline');
+    startProbing();
     mount(els.view, h('div', { class: 'empty' }, h('div', { class: 'empty-icon' }, ''), 'Could not load config', h('div', { class: 'dim' }, String(err.message))));
     return;
   }
@@ -945,7 +1174,7 @@ async function init() {
     const typing = /input|textarea|select/i.test(document.activeElement.tagName);
     if (e.key === 'Escape' && notifOpen) toggleNotif(false);
     if (typing) return;
-    if (e.key === 'r') { refreshStatus(); navigate(); }
+    if (e.key === 'r') { refreshStatus(); _pendingIntent = 'preserve'; navigate(); }
     if (e.key === '/') { if (toolsAllowed()) { e.preventDefault(); openSearch(); } }
     if (e.key === '?') { e.preventDefault(); openShortcutsHelp(); }
     if (/^[1-9]$/.test(e.key) && !document.getElementById('modal-root').hasChildNodes()) {

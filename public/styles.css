@@ -793,3 +793,60 @@ html[data-theme="dark"] .shx-face { background: linear-gradient(160deg, var(--su
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
+
+/* ---------- #1 Swipe-to-reveal destructive action (touch) ---------- */
+/* The row is wrapped; a red "Remove" button sits behind its right edge and is
+   revealed (never auto-triggered) when the row slides left past the threshold. */
+.swipe-wrap { position: relative; }
+.swipe-wrap.swipe-clip { overflow: hidden; }
+.swipe-action { position: absolute; top: 0; right: 0; bottom: 0; display: flex; align-items: stretch;
+  opacity: 0; pointer-events: none; transition: opacity 0.15s var(--ease); }
+.swipe-wrap.revealed .swipe-action { opacity: 1; pointer-events: auto; }
+.swipe-remove { border: none; width: 108px; padding: 0 18px; cursor: pointer;
+  background: linear-gradient(160deg, #fb7185, #e11d48); color: #fff; font-weight: 700; font-size: 14px;
+  display: flex; align-items: center; justify-content: center; border-radius: 0 12px 12px 0;
+  transition: filter 0.14s var(--ease); }
+.swipe-remove:active { filter: brightness(0.9); }
+
+/* ---------- #12 Poster layout stability ---------- */
+/* Intrinsic 2:3 aspect + placeholder so streamed-in posters don't shift layout.
+   Contexts that pin an explicit width AND height (e.g. square inline posters or
+   the .row/.hist-detail posters) still override this via higher specificity. */
+img.poster { aspect-ratio: 2 / 3; object-fit: cover; background: linear-gradient(145deg, var(--accent-soft), #fbeffb); }
+
+/* ---------- #11 Connection banner (offline / reconnecting) ---------- */
+.conn-banner { position: fixed; left: 50%; top: 0; transform: translate(-50%, -130%); z-index: 1200;
+  padding: 8px 18px; border-radius: 0 0 12px 12px; font-size: 13px; font-weight: 700; color: #fff;
+  box-shadow: var(--shadow); transition: transform 0.28s var(--ease); pointer-events: none;
+  max-width: 92vw; text-align: center; }
+.conn-banner.show { transform: translate(-50%, 0); }
+.conn-banner[data-mode="offline"] { background: linear-gradient(160deg, #64748b, #334155); }
+.conn-banner[data-mode="reconnecting"] { background: linear-gradient(160deg, #f59e0b, #d97706); }
+
+/* ---------- #8 Long-press quick-actions sheet ---------- */
+.qa-list { display: flex; flex-direction: column; gap: 8px; }
+.qa-item { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 14px 16px; font-size: 15px; font-weight: 600; color: var(--text); cursor: pointer;
+  box-shadow: var(--shadow-sm); transition: transform 0.12s var(--ease), background 0.16s var(--ease), filter 0.16s var(--ease); }
+.qa-item.qa-open { background: var(--grad-primary); border: none; color: #fff; box-shadow: 0 6px 16px rgba(124, 58, 237, 0.32); }
+.qa-item:active { transform: scale(0.98); filter: brightness(0.96); }
+.allsvc-search-ic { display: inline-flex; color: #fff; }
+
+/* ---------- #15 Stronger pressed feedback ---------- */
+.btn:active { transform: scale(0.96); filter: brightness(0.94); }
+.btn.primary:active { transform: scale(0.96); filter: brightness(0.9); }
+.topbar-icon-btn:active { transform: scale(0.92); background: var(--surface-hover); color: var(--text); }
+.row.clickable:active { transform: scale(0.985); filter: brightness(0.97); }
+.tab:active { transform: scale(0.96); }
+.bn-hex:active { filter: brightness(1.18); transform: scale(0.95); }
+.bn-home:active { transform: scale(0.95); }
+.allsvc-item .bn-hex:active { transform: scale(0.92); filter: brightness(1.12); }
+
+/* On touch devices, don't let :hover transforms/filters "stick" after a tap. */
+@media (hover: none) {
+  .btn:hover, .btn.primary:hover { transform: none; }
+  .btn.primary:hover { filter: none; background-position: 0 0; }
+  .topbar-icon-btn:hover { transform: none; }
+  .row:hover { transform: none; filter: drop-shadow(0 3px 8px rgba(30, 33, 55, 0.12)); z-index: auto; }
+}

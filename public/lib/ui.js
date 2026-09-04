@@ -222,9 +222,13 @@ export function arrEventInfo(eventType) {
   }
 }
 
-// Poster placeholder / image
+// Poster placeholder / image. The <img> carries intrinsic 2:3 width/height
+// attributes (and CSS aspect-ratio) so the browser reserves layout space before
+// the image loads — preventing content from jumping as posters stream in.
+// Contexts that need an explicit size (e.g. square inline posters) still win via
+// their own width/height CSS, which overrides the intrinsic attributes.
 export function poster(url, fallbackIcon = '') {
-  if (url) return h('img', { class: 'poster', src: url, loading: 'lazy', onerror: function () { this.replaceWith(h('div', { class: 'poster' }, fallbackIcon)); } });
+  if (url) return h('img', { class: 'poster', src: url, loading: 'lazy', decoding: 'async', width: '80', height: '120', onerror: function () { this.replaceWith(h('div', { class: 'poster' }, fallbackIcon)); } });
   return h('div', { class: 'poster' }, fallbackIcon);
 }
 
@@ -347,46 +351,111 @@ export function tabs(body, tabsDef, storageKey) {
   return bar;
 }
 
-// ---- Swipe-to-remove (touch) ----
-// Swipe a list row left to trigger a destructive action. The row follows the
-// finger and turns red ("armed") once past the threshold; releasing past it
-// slides the row out and runs onAction. Vertical drags scroll normally, and
-// swipes that start on a control (button/link/input) are ignored. No-op on
-// non-touch devices. Returns the same row for convenient chaining.
-export function swipeToAction(row, onAction, { threshold = 90 } = {}) {
+// ---- Swipe-to-reveal destructive action (touch) ----
+// Swiping a list row left past the threshold REVEALS a red, accessible "Remove"
+// button — it does NOT run the destructive action. `onAction` fires only when
+// the user taps that revealed button. Swiping right, tapping away, or revealing
+// another row all close the reveal, and only one row is ever revealed at a time.
+// Vertical drags scroll normally and swipes that begin on a control
+// (button/link/input) are ignored. No-op on non-touch devices.
+//
+// The row is wrapped in a positioned container which is returned to the caller.
+// Any `_applyPoster` hook a caller attached to the row (e.g. SABnzbd's lazy
+// poster loader) is forwarded through the wrapper so existing behavior is kept.
+let _openReveal = null; // { close } of the currently revealed row (single-open)
+export function swipeToAction(row, onAction, { threshold = 64, revealWidth = 108, label = 'Remove' } = {}) {
   if (typeof window === 'undefined' || !('ontouchstart' in window)) return row;
-  let startX = 0; let startY = 0; let dx = 0; let active = false; let decided = false;
+
+  const btn = h('button', { type: 'button', class: 'swipe-remove', tabindex: '-1', 'aria-label': label }, label);
+  const action = h('div', { class: 'swipe-action', 'aria-hidden': 'true' }, btn);
+  const wrap = h('div', { class: 'swipe-wrap' }, action, row);
+  // Forward the caller's lazy-poster hook (attached to `row` before wrapping).
+  wrap._applyPoster = (url) => { try { if (row._applyPoster) row._applyPoster(url); } catch { /* ignore */ } };
+
+  let startX = 0; let startY = 0; let dx = 0; let active = false; let decided = false; let revealed = false;
+  let outside = null;
+  const setX = (x) => { row.style.transform = x ? `translateX(${x}px)` : ''; };
+
+  const removeOutside = () => {
+    if (!outside) return;
+    document.removeEventListener('touchstart', outside, true);
+    document.removeEventListener('mousedown', outside, true);
+    outside = null;
+  };
+
+  const close = () => {
+    revealed = false;
+    if (_openReveal && _openReveal.close === close) _openReveal = null;
+    removeOutside();
+    action.setAttribute('aria-hidden', 'true');
+    btn.tabIndex = -1;
+    row.style.transition = 'transform 0.2s var(--ease)';
+    setX(0);
+    wrap.classList.remove('revealed');
+    setTimeout(() => { if (!revealed) wrap.classList.remove('swipe-clip'); }, 220);
+  };
+
+  const open = () => {
+    if (_openReveal && _openReveal.close !== close) _openReveal.close();
+    revealed = true;
+    wrap.classList.add('swipe-clip', 'revealed');
+    action.setAttribute('aria-hidden', 'false');
+    btn.tabIndex = 0;
+    row.style.transition = 'transform 0.2s var(--ease)';
+    setX(-revealWidth);
+    _openReveal = { close };
+    // Tapping anywhere outside the reveal button closes it (tap-away / new swipe).
+    outside = (e) => { if (!btn.contains(e.target)) close(); };
+    setTimeout(() => {
+      document.addEventListener('touchstart', outside, true);
+      document.addEventListener('mousedown', outside, true);
+    }, 0);
+    try { btn.focus({ preventScroll: true }); } catch { /* ignore */ }
+  };
+
+  const doAction = () => {
+    removeOutside();
+    if (_openReveal && _openReveal.close === close) _openReveal = null;
+    row.style.transition = 'transform 0.2s var(--ease)';
+    wrap.style.transition = 'opacity 0.2s var(--ease)';
+    setX(-(wrap.offsetWidth || revealWidth));
+    wrap.style.opacity = '0';
+    setTimeout(() => { try { onAction(); } catch { /* ignore */ } }, 190);
+  };
+  btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); doAction(); });
+
   row.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) { active = false; return; }
     if (e.target.closest && e.target.closest('button, a, input, select, textarea')) { active = false; return; }
-    const t = e.touches[0]; startX = t.clientX; startY = t.clientY; dx = 0; active = true; decided = false;
+    const t = e.touches[0]; startX = t.clientX; startY = t.clientY; dx = revealed ? -revealWidth : 0; active = true; decided = false;
     row.style.transition = '';
+    wrap.classList.add('swipe-clip');
   }, { passive: true });
+
   row.addEventListener('touchmove', (e) => {
     if (!active) return;
     const t = e.touches[0]; const mx = t.clientX - startX; const my = t.clientY - startY;
     if (!decided) {
       if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
       decided = true;
-      if (Math.abs(my) > Math.abs(mx)) { active = false; return; } // vertical scroll wins
+      if (Math.abs(my) > Math.abs(mx)) { active = false; if (!revealed) wrap.classList.remove('swipe-clip'); return; } // vertical scroll wins
+      action.setAttribute('aria-hidden', 'false');
     }
-    dx = Math.min(0, mx);
-    row.style.transform = `translateX(${dx}px)`;
-    row.classList.toggle('swipe-armed', dx <= -threshold);
+    const base = revealed ? -revealWidth : 0;
+    dx = Math.max(-revealWidth * 1.3, Math.min(0, base + mx));
+    setX(dx);
   }, { passive: true });
+
   const finish = () => {
     if (!active) return; active = false;
-    if (dx <= -threshold) {
-      row.style.transition = 'transform 0.2s var(--ease), opacity 0.2s var(--ease)';
-      row.style.transform = 'translateX(-110%)'; row.style.opacity = '0';
-      setTimeout(() => { try { onAction(); } catch { /* ignore */ } }, 190);
-    } else {
-      row.style.transition = 'transform 0.2s var(--ease)';
-      row.style.transform = 'translateX(0)';
-      row.classList.remove('swipe-armed');
-    }
+    if (decided && dx <= -threshold) { open(); return; }
+    if (revealed) { close(); return; }
+    row.style.transition = 'transform 0.2s var(--ease)';
+    setX(0);
+    setTimeout(() => { if (!revealed) wrap.classList.remove('swipe-clip'); }, 220);
   };
   row.addEventListener('touchend', finish, { passive: true });
   row.addEventListener('touchcancel', finish, { passive: true });
-  return row;
+
+  return wrap;
 }
