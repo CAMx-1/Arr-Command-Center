@@ -37,22 +37,98 @@ export function toast(message, type = 'info', timeout = 3200) {
   setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; setTimeout(() => t.remove(), 300); }, timeout);
 }
 
+// ---- Overlay controller (modals + bottom sheet) ----
+// Gives every overlay: (1) a history entry so the hardware/browser Back button
+// (or iOS edge-swipe) closes it instead of navigating away, (2) a focus trap
+// that keeps Tab within the overlay, (3) focus restore to the previously
+// focused element on close, and (4) Escape-to-close. Overlays are keyed by id
+// so re-opening/replacing (e.g. one modal over another) reuses the same slot.
+const _overlays = new Map(); // id -> { close, prevFocus, trap, container }
+let _popWired = false;
+let _cleanupBacks = 0; // programmatic history.back() calls to swallow in popstate
+
+function _focusables(container) {
+  if (!container) return [];
+  return Array.from(container.querySelectorAll(
+    'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )).filter((el) => el.offsetParent !== null);
+}
+function _focusFirst(container) {
+  requestAnimationFrame(() => { const items = _focusables(container); (items[0] || container)?.focus?.(); });
+}
+function _makeTrap(id) {
+  return (e) => {
+    const o = _overlays.get(id); if (!o) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeOverlay(id); return; }
+    if (e.key !== 'Tab') return;
+    const items = _focusables(o.container); if (!items.length) return;
+    const first = items[0]; const last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
+}
+function _teardownOverlay(id) { // no history side effects
+  const o = _overlays.get(id); if (!o) return;
+  _overlays.delete(id);
+  document.removeEventListener('keydown', o.trap, true);
+  try { o.close(); } catch { /* ignore */ }
+  if (o.prevFocus && o.prevFocus.focus) { try { o.prevFocus.focus(); } catch { /* ignore */ } }
+}
+function _ensurePopstate() {
+  if (_popWired) return; _popWired = true;
+  window.addEventListener('popstate', () => {
+    if (_cleanupBacks > 0) { _cleanupBacks--; return; } // swallow our own cleanup backs
+    const ids = [..._overlays.keys()];
+    if (ids.length) _teardownOverlay(ids[ids.length - 1]); // hardware Back closes the topmost overlay
+  });
+}
+// Register an open overlay. container = the element to trap focus within;
+// close = teardown callback that hides/removes the overlay DOM.
+export function registerOverlay(id, { container, close }) {
+  _ensurePopstate();
+  const existing = _overlays.get(id);
+  if (existing) { // replace/refresh in the same history slot
+    document.removeEventListener('keydown', existing.trap, true);
+    existing.container = container; existing.close = close;
+    existing.trap = _makeTrap(id);
+    document.addEventListener('keydown', existing.trap, true);
+    _focusFirst(container);
+    return;
+  }
+  const prevFocus = document.activeElement;
+  try { history.pushState({ overlay: id }, ''); } catch { /* ignore */ }
+  const trap = _makeTrap(id);
+  document.addEventListener('keydown', trap, true);
+  _overlays.set(id, { close, prevFocus, trap, container });
+  _focusFirst(container);
+}
+export function overlayOpen(id) { return _overlays.has(id); }
+// Programmatic/UI close: tear down now, then pop the (now dead) history state.
+export function closeOverlay(id) {
+  if (!_overlays.has(id)) return;
+  _teardownOverlay(id);
+  _cleanupBacks++;
+  try { history.back(); } catch { _cleanupBacks--; }
+}
+
 // ---- Modal ----
 export function openModal({ title, body, footer, wide = false }) {
   const root = document.getElementById('modal-root');
   const overlay = h('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === overlay) closeModal(); } },
-    h('div', { class: 'modal', style: wide ? { maxWidth: '760px' } : {} },
-      h('div', { class: 'modal-head' }, h('h3', {}, title), h('button', { class: 'close-x', onclick: closeModal }, '\u00d7')),
+    h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title ? String(title) : 'Dialog', style: wide ? { maxWidth: '760px' } : {} },
+      h('div', { class: 'modal-head' }, h('h3', {}, title), h('button', { class: 'close-x', 'aria-label': 'Close', onclick: closeModal }, '\u00d7')),
       h('div', { class: 'modal-body' }, body),
       footer ? h('div', { class: 'modal-foot' }, footer) : null,
     )
   );
   clear(root).appendChild(overlay);
-  const onEsc = (e) => { if (e.key === 'Escape') closeModal(); };
-  document.addEventListener('keydown', onEsc, { once: true });
+  registerOverlay('modal', { container: overlay, close: () => clear(document.getElementById('modal-root')) });
   return overlay;
 }
-export function closeModal() { clear(document.getElementById('modal-root')); }
+export function closeModal() {
+  if (overlayOpen('modal')) { closeOverlay('modal'); return; }
+  clear(document.getElementById('modal-root'));
+}
 
 // Confirmation dialog. Calls onConfirm() when the user confirms.
 export function confirmModal({ title, message, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false, onConfirm }) {

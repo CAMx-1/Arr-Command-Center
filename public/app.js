@@ -1,5 +1,5 @@
 import { api } from './lib/api.js';
-import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, debounce, spinner, empty, poster, fmtBytes, copyable } from './lib/ui.js';
+import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, debounce, spinner, empty, poster, fmtBytes, copyable, registerOverlay, closeOverlay, overlayOpen } from './lib/ui.js';
 import { orderServices, isHidden } from './lib/servicePrefs.js';
 import { splitHive, flyoutLayout } from './lib/hiveLayout.js';
 import { cachedGet } from './lib/cache.js';
@@ -241,6 +241,9 @@ function buildHive() {
 }
 
 // ---------- Mobile hex bottom navigation ----------
+// Short vibration on tap where supported (no-op on desktop / unsupported).
+function haptic(ms = 10) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch { /* ignore */ } }
+
 // A raised center Home hex with two quick-pick service hexes on each side;
 // swipe up (or tap the grip) opens a sheet with every service.
 function buildBottomNav() {
@@ -253,12 +256,12 @@ function buildBottomNav() {
   const svcHex = (svc) => {
     const meta = SERVICE_META[svc.type] || {};
     const st = state.status[svc.key];
-    return h('button', { class: `bn-hex ${route === svc.key ? 'active' : ''}`, title: svc.label, onclick: () => { location.hash = `#/${svc.key}`; } },
+    return h('button', { class: `bn-hex ${route === svc.key ? 'active' : ''}`, title: svc.label, onclick: () => { haptic(); location.hash = `#/${svc.key}`; } },
       st ? h('span', { class: `hive-dot ${st.ok ? 'ok' : 'down'}` }) : null,
       h('span', { class: 'hive-icon' }, svcIcon(meta.logo, meta.emoji || '', 24)),
     );
   };
-  const home = h('button', { class: `bn-hex bn-home ${route === 'home' ? 'active' : ''}`, title: 'Home', onclick: () => { location.hash = '#/home'; } },
+  const home = h('button', { class: `bn-hex bn-home ${route === 'home' ? 'active' : ''}`, title: 'Home', onclick: () => { haptic(); location.hash = '#/home'; } },
     h('span', { class: 'hive-icon' }, hiveImg('/icons/home-icon.png')));
   const left = quick.slice(0, 2).map(svcHex);
   const right = quick.slice(2, 4).map(svcHex);
@@ -271,12 +274,12 @@ function buildBottomNav() {
   const W = 68; const HOME_H = 74; const dx = W;
   const row = h('div', { class: 'bn-row', style: { width: `${5 * W}px`, height: `${HOME_H}px` } });
   nodes.forEach((n, i) => { n.style.left = `${i * dx}px`; n.style.bottom = '0'; row.appendChild(n); });
-  const grip = h('button', { class: 'bn-grip', title: 'All services', 'aria-label': 'All services', onclick: openAllServices }, h('span', { class: 'bn-grip-bar' }));
+  const grip = h('button', { class: 'bn-grip', title: 'All services', 'aria-label': 'All services', onclick: () => { haptic(); openAllServices(); } }, h('span', { class: 'bn-grip-bar' }));
   mount(el, grip, row);
   // Swipe up anywhere on the bar to reveal all services.
   let sy = 0; let sactive = false;
   el.ontouchstart = (e) => { if (e.touches.length !== 1) { sactive = false; return; } sy = e.touches[0].clientY; sactive = true; };
-  el.ontouchend = (e) => { if (!sactive) return; sactive = false; if (e.changedTouches[0].clientY - sy < -40) openAllServices(); };
+  el.ontouchend = (e) => { if (!sactive) return; sactive = false; if (e.changedTouches[0].clientY - sy < -40) { haptic(); openAllServices(); } };
 }
 
 function closeAllServices() {
@@ -284,18 +287,54 @@ function closeAllServices() {
   const bd = document.getElementById('allsvc-backdrop');
   if (sheet) sheet.classList.remove('show');
   if (bd) bd.classList.remove('show');
+  unlockScroll();
+}
+
+// UI-initiated dismiss (backdrop tap / swipe-down): route through the overlay
+// controller so the pushed history entry is consumed (keeps Back in sync).
+function dismissAllServices() {
+  if (overlayOpen('allsvc')) closeOverlay('allsvc'); else closeAllServices();
+}
+// Selecting a service: close the sheet (consuming its history state), then
+// navigate on the next frame so the back-navigation settles first.
+function selectAllService(go) {
+  if (overlayOpen('allsvc')) { closeOverlay('allsvc'); requestAnimationFrame(go); }
+  else { closeAllServices(); go(); }
+}
+
+// Lock/unlock background scrolling while the all-services sheet is open. Uses
+// the position:fixed technique because iOS Safari ignores `overflow:hidden` on
+// body for touch scrolling. The sheet itself (position:fixed) still scrolls.
+let _lockedScrollY = 0;
+function lockScroll() {
+  if (document.body.style.position === 'fixed') return; // already locked
+  _lockedScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+  document.body.style.top = `-${_lockedScrollY}px`;
+  document.body.style.position = 'fixed';
+  document.body.style.left = '0';
+  document.body.style.right = '0';
+  document.body.style.width = '100%';
+}
+function unlockScroll() {
+  if (document.body.style.position !== 'fixed') return; // not locked
+  document.body.style.position = '';
+  document.body.style.top = '';
+  document.body.style.left = '';
+  document.body.style.right = '';
+  document.body.style.width = '';
+  window.scrollTo(0, _lockedScrollY);
 }
 
 function openAllServices() {
   const route = currentRoute();
   const app = document.getElementById('app');
   let bd = document.getElementById('allsvc-backdrop');
-  if (!bd) { bd = h('div', { id: 'allsvc-backdrop', class: 'allsvc-backdrop', onclick: closeAllServices }); app.appendChild(bd); }
+  if (!bd) { bd = h('div', { id: 'allsvc-backdrop', class: 'allsvc-backdrop', onclick: dismissAllServices }); app.appendChild(bd); }
   let sheet = document.getElementById('allsvc-sheet');
-  if (!sheet) { sheet = h('div', { id: 'allsvc-sheet', class: 'allsvc-sheet' }); app.appendChild(sheet); }
+  if (!sheet) { sheet = h('div', { id: 'allsvc-sheet', class: 'allsvc-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'All services' }); app.appendChild(sheet); }
   const base = [...state.services].sort((a, b) => (a.type === 'overseerr' ? 0 : 1) - (b.type === 'overseerr' ? 0 : 1));
   const nav = orderServices(base).filter((s) => !isHidden(s.key));
-  const item = (label, active, icon, onClick, dot) => h('button', { class: 'allsvc-item', onclick: () => { closeAllServices(); onClick(); } },
+  const item = (label, active, icon, onClick, dot) => h('button', { class: 'allsvc-item', onclick: () => { haptic(); selectAllService(onClick); } },
     h('span', { class: `bn-hex ${active ? 'active' : ''}` }, dot ? h('span', { class: `hive-dot ${dot}` }) : null, h('span', { class: 'hive-icon' }, icon)),
     h('span', { class: 'allsvc-label' }, label));
   const items = [
@@ -307,8 +346,8 @@ function openAllServices() {
   // Swipe the sheet down (from its top) to dismiss.
   let sy = 0; let sd = false;
   sheet.ontouchstart = (e) => { if (sheet.scrollTop > 0) { sd = false; return; } sy = e.touches[0].clientY; sd = true; };
-  sheet.ontouchend = (e) => { if (!sd) return; sd = false; if (e.changedTouches[0].clientY - sy > 60) closeAllServices(); };
-  requestAnimationFrame(() => { bd.classList.add('show'); sheet.classList.add('show'); });
+  sheet.ontouchend = (e) => { if (!sd) return; sd = false; if (e.changedTouches[0].clientY - sy > 60) dismissAllServices(); };
+  requestAnimationFrame(() => { lockScroll(); bd.classList.add('show'); sheet.classList.add('show'); registerOverlay('allsvc', { container: sheet, close: closeAllServices }); });
 }
 
 // ---------- Pull to refresh (touch) ----------
