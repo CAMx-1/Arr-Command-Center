@@ -334,7 +334,7 @@ export function tabs(body, tabsDef, storageKey) {
   body.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) { swiping = false; return; }
     const el = e.target;
-    if (el && el.closest && el.closest('.stat-scroll, .bchart-plot, .stat-strip, input, textarea, select, .modal-overlay')) { swiping = false; return; }
+    if (el && el.closest && el.closest('.swipe-wrap, .stat-scroll, .bchart-plot, .stat-strip, input, textarea, select, .modal-overlay')) { swiping = false; return; }
     const t = e.touches[0]; sx = t.clientX; sy = t.clientY; swiping = true;
   }, { passive: true });
   body.addEventListener('touchend', (e) => {

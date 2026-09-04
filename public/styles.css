@@ -346,7 +346,8 @@ button { font-family: inherit; cursor: pointer; }
   /* Wrap the honeycomb instead of overlapping/overflowing, size hexes for
      readability, and scale text down so it fits inside the hex. */
   .honeycomb .hc-row { flex-wrap: wrap; }
-  .honeycomb.hc-wide-even .hc-row { transform: none; }
+  .honeycomb.hc-wide-even .hc-row:nth-child(1),
+  .honeycomb.hc-wide-even .hc-row:nth-child(2) { transform: none; }
   .hc-row + .hc-row { margin-top: 6px; }
   .hex-cell { --hex-w: 166px; --hex-h: 188px; margin: 6px; }
   .hex-inner { padding: 0 20px; gap: 4px; }

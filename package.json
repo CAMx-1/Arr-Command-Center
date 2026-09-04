@@ -8,7 +8,7 @@
     "start": "node server/index.js",
     "demo": "MOCK=1 node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node --test"
+    "test": "node --test server/test/*.test.js test/*.test.js"
   },
   "engines": {
     "node": ">=23"
@@ -17,5 +17,8 @@
     "express": "^4.22.2",
     "web-push": "^3.6.7"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
+  }
 }
