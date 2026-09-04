@@ -284,6 +284,14 @@ export function tabs(body, tabsDef, storageKey) {
     void body.offsetWidth;
     if (animate) body.classList.add('panel-enter');
     requestAnimationFrame(moveIndicator);
+    // Keep the active tab visible when the bar overflows horizontally (mobile).
+    requestAnimationFrame(() => {
+      const a = bar.querySelector('.tab.active');
+      if (a && bar.scrollWidth > bar.clientWidth + 4) {
+        const target = a.offsetLeft - (bar.clientWidth - a.offsetWidth) / 2;
+        bar.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
+      }
+    });
   }
 
   for (const t of tabsDef) {

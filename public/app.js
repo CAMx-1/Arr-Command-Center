@@ -81,6 +81,7 @@ async function navigate() {
   els.actions && clear(els.actions);
   closeSidebarMobile();
   closeAllServices();
+  window.scrollTo(0, 0); // start each route at the top (mobile: avoids landing mid-scroll)
 
   // Restart the view entrance animation.
   els.view.dataset.route = route;
@@ -244,6 +245,19 @@ function buildHive() {
 // Short vibration on tap where supported (no-op on desktop / unsupported).
 function haptic(ms = 10) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch { /* ignore */ } }
 
+// User-pinned quick-picks for the bottom bar (max 4). Falls back to nav order.
+function loadPinned() { try { return JSON.parse(localStorage.getItem('bn:pinned') || '[]'); } catch { return []; } }
+function savePinned(keys) { try { localStorage.setItem('bn:pinned', JSON.stringify(keys.slice(0, 4))); } catch { /* ignore */ } }
+function isPinned(key) { return loadPinned().includes(key); }
+function togglePinned(key) {
+  const p = loadPinned();
+  const i = p.indexOf(key);
+  if (i >= 0) p.splice(i, 1);
+  else { if (p.length >= 4) p.shift(); p.push(key); }
+  savePinned(p);
+  buildBottomNav();
+}
+
 // A raised center Home hex with two quick-pick service hexes on each side;
 // swipe up (or tap the grip) opens a sheet with every service.
 function buildBottomNav() {
@@ -252,7 +266,15 @@ function buildBottomNav() {
   const route = currentRoute();
   const base = [...state.services].sort((a, b) => (a.type === 'overseerr' ? 0 : 1) - (b.type === 'overseerr' ? 0 : 1));
   const nav = orderServices(base).filter((s) => !isHidden(s.key));
-  const quick = nav.slice(0, 4);
+  // Quick-picks: pinned first (in order), then fill from nav order up to 4.
+  const pinned = loadPinned().map((k) => nav.find((s) => s.key === k)).filter(Boolean);
+  const quick = [...pinned];
+  for (const s of nav) { if (quick.length >= 4) break; if (!quick.includes(s)) quick.push(s); }
+  quick.length = Math.min(quick.length, 4);
+  // Reflect the current route: if you're on a service that isn't a quick-pick,
+  // surface it in the last slot so the bar always shows where you are.
+  const curSvc = nav.find((s) => s.key === route);
+  if (curSvc && !quick.includes(curSvc)) { if (quick.length < 4) quick.push(curSvc); else quick[3] = curSvc; }
   const svcHex = (svc) => {
     const meta = SERVICE_META[svc.type] || {};
     const st = state.status[svc.key];
@@ -274,7 +296,9 @@ function buildBottomNav() {
   const W = 68; const HOME_H = 74; const dx = W;
   const row = h('div', { class: 'bn-row', style: { width: `${5 * W}px`, height: `${HOME_H}px` } });
   nodes.forEach((n, i) => { n.style.left = `${i * dx}px`; n.style.bottom = '0'; row.appendChild(n); });
-  const grip = h('button', { class: 'bn-grip', title: 'All services', 'aria-label': 'All services', onclick: () => { haptic(); openAllServices(); } }, h('span', { class: 'bn-grip-bar' }));
+  // Grip is "active" when you're on a route no hex represents (e.g. Settings).
+  const gripActive = route === 'settings' || (route !== 'home' && !quick.some((s) => s.key === route));
+  const grip = h('button', { class: `bn-grip ${gripActive ? 'active' : ''}`, title: 'All services', 'aria-label': 'All services', onclick: () => { haptic(); openAllServices(); } }, h('span', { class: 'bn-grip-bar' }));
   mount(el, grip, row);
   // Swipe up anywhere on the bar to reveal all services.
   let sy = 0; let sactive = false;
@@ -325,24 +349,42 @@ function unlockScroll() {
   window.scrollTo(0, _lockedScrollY);
 }
 
-function openAllServices() {
+// Build (or rebuild) the all-services sheet contents. Each service has a pin
+// toggle (★) that adds/removes it from the bottom bar's quick-picks (max 4).
+function renderAllServicesGrid() {
+  const sheet = document.getElementById('allsvc-sheet');
+  if (!sheet) return;
   const route = currentRoute();
+  const base = [...state.services].sort((a, b) => (a.type === 'overseerr' ? 0 : 1) - (b.type === 'overseerr' ? 0 : 1));
+  const nav = orderServices(base).filter((s) => !isHidden(s.key));
+  const pinBtn = (svc) => h('span', { class: `allsvc-pin ${isPinned(svc.key) ? 'on' : ''}`, role: 'button',
+    title: isPinned(svc.key) ? 'Unpin from bottom bar' : 'Pin to bottom bar',
+    onclick: (e) => { e.stopPropagation(); haptic(); togglePinned(svc.key); renderAllServicesGrid(); } }, isPinned(svc.key) ? '\u2605' : '\u2606');
+  const item = (label, active, icon, onClick, dot, svc) => h('button', { class: 'allsvc-item', onclick: () => { haptic(); selectAllService(onClick); } },
+    h('span', { class: 'allsvc-hexwrap' },
+      h('span', { class: `bn-hex ${active ? 'active' : ''}` }, dot ? h('span', { class: `hive-dot ${dot}` }) : null, h('span', { class: 'hive-icon' }, icon)),
+      svc ? pinBtn(svc) : null,
+    ),
+    h('span', { class: 'allsvc-label' }, label));
+  const items = [
+    item('Home', route === 'home', hiveImg('/icons/home-icon.png'), () => { location.hash = '#/home'; }),
+    ...nav.map((svc) => { const meta = SERVICE_META[svc.type] || {}; const st = state.status[svc.key]; return item(svc.label, route === svc.key, svcIcon(meta.logo, meta.emoji || '', 24), () => { location.hash = `#/${svc.key}`; }, st ? (st.ok ? 'ok' : 'down') : '', svc); }),
+    item('Settings', route === 'settings', hiveImg('/icons/command-center.svg'), () => { location.hash = '#/settings'; }),
+  ];
+  mount(sheet,
+    h('div', { class: 'allsvc-grip' }),
+    h('div', { class: 'section-title', style: { marginTop: '2px' } }, 'All services'),
+    h('div', { class: 'allsvc-hint' }, 'Tap \u2606 to pin up to 4 services to the bottom bar'),
+    h('div', { class: 'allsvc-grid' }, ...items));
+}
+
+function openAllServices() {
   const app = document.getElementById('app');
   let bd = document.getElementById('allsvc-backdrop');
   if (!bd) { bd = h('div', { id: 'allsvc-backdrop', class: 'allsvc-backdrop', onclick: dismissAllServices }); app.appendChild(bd); }
   let sheet = document.getElementById('allsvc-sheet');
   if (!sheet) { sheet = h('div', { id: 'allsvc-sheet', class: 'allsvc-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'All services' }); app.appendChild(sheet); }
-  const base = [...state.services].sort((a, b) => (a.type === 'overseerr' ? 0 : 1) - (b.type === 'overseerr' ? 0 : 1));
-  const nav = orderServices(base).filter((s) => !isHidden(s.key));
-  const item = (label, active, icon, onClick, dot) => h('button', { class: 'allsvc-item', onclick: () => { haptic(); selectAllService(onClick); } },
-    h('span', { class: `bn-hex ${active ? 'active' : ''}` }, dot ? h('span', { class: `hive-dot ${dot}` }) : null, h('span', { class: 'hive-icon' }, icon)),
-    h('span', { class: 'allsvc-label' }, label));
-  const items = [
-    item('Home', route === 'home', hiveImg('/icons/home-icon.png'), () => { location.hash = '#/home'; }),
-    ...nav.map((svc) => { const meta = SERVICE_META[svc.type] || {}; const st = state.status[svc.key]; return item(svc.label, route === svc.key, svcIcon(meta.logo, meta.emoji || '', 24), () => { location.hash = `#/${svc.key}`; }, st ? (st.ok ? 'ok' : 'down') : ''); }),
-    item('Settings', route === 'settings', hiveImg('/icons/command-center.svg'), () => { location.hash = '#/settings'; }),
-  ];
-  mount(sheet, h('div', { class: 'allsvc-grip' }), h('div', { class: 'section-title', style: { marginTop: '2px' } }, 'All services'), h('div', { class: 'allsvc-grid' }, ...items));
+  renderAllServicesGrid();
   // Swipe the sheet down (from its top) to dismiss.
   let sy = 0; let sd = false;
   sheet.ontouchstart = (e) => { if (sheet.scrollTop > 0) { sd = false; return; } sy = e.touches[0].clientY; sd = true; };

@@ -273,12 +273,24 @@ async function openSeasonBrowser(arr, ctx, series) {
   const bySeason = new Map();
   for (const e of episodes) { if (!bySeason.has(e.seasonNumber)) bySeason.set(e.seasonNumber, []); bySeason.get(e.seasonNumber).push(e); }
   const seasons = [...bySeason.keys()].sort((a, b) => (a === 0 ? 1e9 : a) - (b === 0 ? 1e9 : b));
-  const render = () => mount(body, ...seasons.map((sn) => seasonBlock(sn, bySeason.get(sn), fileById, arr, series, render)));
+  // Start minimized (headers only) so long-running shows don't force a huge
+  // scroll; each season expands on tap.
+  const collapsed = new Set(seasons);
+  const render = () => {
+    const allCollapsed = seasons.every((sn) => collapsed.has(sn));
+    const toolbar = h('div', { class: 'season-toolbar' },
+      h('button', { class: 'btn sm', onclick: () => { if (allCollapsed) collapsed.clear(); else seasons.forEach((sn) => collapsed.add(sn)); render(); } },
+        allCollapsed ? 'Expand all' : 'Collapse all'),
+    );
+    mount(body, toolbar, ...seasons.map((sn) => seasonBlock(sn, bySeason.get(sn), fileById, arr, series, render, collapsed)));
+  };
   render();
 }
 
-function seasonBlock(sn, eps, fileById, arr, series, reload) {
+function seasonBlock(sn, eps, fileById, arr, series, reload, collapsed) {
   eps.sort((a, b) => a.episodeNumber - b.episodeNumber);
+  const isCollapsed = collapsed.has(sn);
+  const toggleCollapse = () => { if (collapsed.has(sn)) collapsed.delete(sn); else collapsed.add(sn); reload(); };
   const withFile = eps.filter((e) => e.hasFile).length;
   const totalSize = eps.reduce((s, e) => s + ((e.episodeFileId && fileById[e.episodeFileId] && fileById[e.episodeFileId].size) || 0), 0);
   const seasonObj = (series.seasons || []).find((x) => x.seasonNumber === sn);
@@ -295,16 +307,18 @@ function seasonBlock(sn, eps, fileById, arr, series, reload) {
       reload();
     } catch (err) { toast(err.message, 'error'); btn.disabled = false; }
   };
-  const header = h('div', { class: 'season-head' },
+  const header = h('div', { class: 'season-head', style: { cursor: 'pointer' }, onclick: toggleCollapse, title: isCollapsed ? 'Expand season' : 'Collapse season' },
+    h('span', { class: 'season-caret' }, isCollapsed ? '\u25b8' : '\u25be'),
     h('div', { class: 'season-title' }, sn === 0 ? 'Specials' : `Season ${sn}`),
     h('span', { class: 'dim' }, `${withFile}/${eps.length} · ${fmtBytes(totalSize)}`),
-    h('button', { class: `btn sm ${seasonObj && seasonObj.monitored ? 'primary' : ''}`, style: { marginLeft: 'auto' }, title: 'Toggle season monitoring', onclick: toggleSeason }, seasonObj && seasonObj.monitored ? 'Monitored' : 'Unmonitored'),
-    h('button', { class: 'btn sm', title: 'Search season', onclick: async () => {
+    h('button', { class: `btn sm ${seasonObj && seasonObj.monitored ? 'primary' : ''}`, style: { marginLeft: 'auto' }, title: 'Toggle season monitoring', onclick: (e) => { e.stopPropagation(); toggleSeason(e); } }, seasonObj && seasonObj.monitored ? 'Monitored' : 'Unmonitored'),
+    h('button', { class: 'btn sm', title: 'Search season', onclick: async (e) => {
+      e.stopPropagation();
       try { await arr.post('command', { name: 'SeasonSearch', seriesId: series.id, seasonNumber: sn }); toast(`Searching Season ${sn}`, 'success'); }
-      catch (e) { toast(e.message, 'error'); }
+      catch (err) { toast(err.message, 'error'); }
     } }, 'Search'),
   );
-  return h('div', { class: 'season-block' }, header, h('div', { class: 'list' }, ...eps.map((e) => seasonEpisodeRow(e, fileById[e.episodeFileId], arr, reload))));
+  return h('div', { class: 'season-block' }, header, isCollapsed ? null : h('div', { class: 'list' }, ...eps.map((e) => seasonEpisodeRow(e, fileById[e.episodeFileId], arr, reload))));
 }
 
 function seasonEpisodeRow(e, file, arr, reload) {
