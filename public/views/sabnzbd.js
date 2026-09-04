@@ -1,4 +1,4 @@
-import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, pct, poster, openModal, closeModal, autoRefresh } from '../lib/ui.js';
+import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, pct, poster, openModal, closeModal, autoRefresh, swipeToAction } from '../lib/ui.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 
@@ -147,6 +147,10 @@ async function buildHistoryPosters(ctx) {
 function slotRow(s, sab, ctx) {
   const prog = Number(s.percentage) || 0;
   const fallback = h('div', { class: 'poster', style: { width: '40px', height: '40px', fontSize: '18px' } }, catIcon(s.cat));
+  const remove = async () => {
+    try { await sab({ mode: 'queue', name: 'delete', value: s.nzo_id, del_files: '1' }); toast('Removed', 'success'); ctx.reload(); }
+    catch (e) { toast(e.message, 'error'); }
+  };
   const row = h('div', { class: 'row' },
     fallback,
     h('div', { class: 'row-main' },
@@ -161,14 +165,11 @@ function slotRow(s, sab, ctx) {
       h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })),
     ),
     h('div', { class: 'row-actions' },
-      h('button', { class: 'btn sm danger', onclick: async () => {
-        try { await sab({ mode: 'queue', name: 'delete', value: s.nzo_id, del_files: '1' }); toast('Removed', 'success'); ctx.reload(); }
-        catch (e) { toast(e.message, 'error'); }
-      } }, '✕'),
+      h('button', { class: 'btn sm danger', onclick: remove }, '✕'),
     ),
   );
   row._applyPoster = (url) => { try { fallback.replaceWith(poster(url, '')); } catch { /* ignore */ } };
-  return row;
+  return swipeToAction(row, remove); // swipe left to remove (touch)
 }
 
 function slotHex(s, sab, ctx) {

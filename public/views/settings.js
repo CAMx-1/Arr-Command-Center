@@ -144,8 +144,8 @@ async function hydrateLinksAdmin(ctx) {
   let links = [];
   try { links = await ctx.api.links(); } catch { /* ignore */ }
   const label = h('input', { class: 'input', placeholder: 'Label (e.g. Router)' });
-  const url = h('input', { class: 'input', placeholder: 'https://…' });
-  const icon = h('input', { class: 'input', placeholder: 'Icon URL (optional)' });
+  const url = h('input', { class: 'input', type: 'url', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'go', placeholder: 'https://…' });
+  const icon = h('input', { class: 'input', type: 'url', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Icon URL (optional)' });
   const add = async () => {
     if (!label.value.trim() || !url.value.trim()) { toast('Label and URL required', 'error'); return; }
     try { await ctx.api.addLink({ label: label.value.trim(), url: url.value.trim(), icon: icon.value.trim() }); toast('Link added', 'success'); hydrateLinksAdmin(ctx); }
@@ -400,7 +400,7 @@ function openServiceForm(root, ctx, existingKey, existing) {
   const keyInput = h('input', { class: 'input', value: existingKey || '', placeholder: 'e.g. sonarr4k', disabled: isNew ? null : 'disabled' });
   const label = h('input', { class: 'input', value: (existing && existing.label) || '' });
   const typeSel = h('select', { class: 'input' }, ...SERVICE_TYPE_OPTIONS.map((t) => h('option', { value: t, selected: existing && existing.type === t ? 'selected' : null }, t)));
-  const baseUrl = h('input', { class: 'input', placeholder: existing && existing.configured ? '•••• (leave blank to keep)' : 'https://sonarr.example.com' });
+  const baseUrl = h('input', { class: 'input', type: 'url', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'go', placeholder: existing && existing.configured ? '•••• (leave blank to keep)' : 'https://sonarr.example.com' });
   const apiKey = h('input', { class: 'input', type: 'password', placeholder: existing && existing.configured ? '•••• (leave blank to keep)' : 'API key' });
   const username = h('input', { class: 'input', placeholder: 'WebUI username' });
   const password = h('input', { class: 'input', type: 'password', placeholder: existing && existing.type === 'qbittorrent' ? '•••• (leave blank to keep)' : 'WebUI password' });

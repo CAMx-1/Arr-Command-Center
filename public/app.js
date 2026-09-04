@@ -393,6 +393,17 @@ function openAllServices() {
 }
 
 // ---------- Pull to refresh (touch) ----------
+function initHideNavOnKeyboard() {
+  const nav = document.getElementById('bottom-nav');
+  if (!nav) return;
+  const isField = (el) => el && el.matches && el.matches('input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]), textarea, [contenteditable=""], [contenteditable="true"]');
+  document.addEventListener('focusin', (e) => { if (isField(e.target)) nav.classList.add('kb-hidden'); });
+  document.addEventListener('focusout', () => {
+    // Defer so focus moving between fields doesn't flicker the bar.
+    setTimeout(() => { if (!isField(document.activeElement)) nav.classList.remove('kb-hidden'); }, 60);
+  });
+}
+
 function initPullToRefresh() {
   if (!('ontouchstart' in window)) return;
   const ind = h('div', { id: 'ptr', class: 'ptr' }, h('span', { class: 'ptr-spin' }));
@@ -591,7 +602,7 @@ function openShortcutsHelp() {
 }
 
 function openSearch() {
-  const input = h('input', { class: 'input', placeholder: 'Search libraries & discover new titles…' });
+  const input = h('input', { class: 'input', type: 'search', enterkeyhint: 'search', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Search libraries & discover new titles…' });
   const results = h('div', { class: 'list', style: { marginTop: '12px' } });
   let typeFilter = 'all';
   const seg = (t, label) => h('button', { class: `view-seg ${typeFilter === t ? 'active' : ''}`, dataset: { t }, onclick: () => setType(t) }, label);
@@ -839,6 +850,10 @@ async function init() {
 
   // Mobile: pull down at the top of any view to refresh.
   initPullToRefresh();
+
+  // Mobile: hide the bottom hex nav while a text field is focused so it doesn't
+  // float in the middle of the screen above the on-screen keyboard.
+  initHideNavOnKeyboard();
 
   // Web push: register the service worker and self-heal the subscription so the
   // server always has this browser's current endpoint (fixes push silently

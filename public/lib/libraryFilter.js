@@ -44,7 +44,7 @@ export function libraryFilter(kind, items, onChange, { initialTerm = '' } = {}) 
     onChange(filtered);
   };
 
-  const search = h('input', { class: 'input lib-filter-search', type: 'search', placeholder: 'Filter by title…', value: term });
+  const search = h('input', { class: 'input lib-filter-search', type: 'search', enterkeyhint: 'search', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Filter by title…', value: term });
   search.addEventListener('input', () => { term = search.value; apply(); });
 
   const sel = h('select', { class: 'input lib-filter-select' }, ...defs.map((d) => h('option', { value: d.id }, d.label)));

@@ -427,6 +427,8 @@ button { font-family: inherit; cursor: pointer; }
   contain-intrinsic-size: auto 92px;
 }
 .row.clickable { cursor: pointer; }
+.row.swipe-armed { background: linear-gradient(160deg, #fb7185, #e11d48); color: #fff; }
+.row.swipe-armed .pill, .row.swipe-armed .dim, .row.swipe-armed .meta-line span { color: #fff; }
 .row:hover { transform: translateY(-4px) scale(1.01); z-index: 3; filter: drop-shadow(0 14px 28px rgba(124, 58, 237, 0.5)); }
 .row.clickable:hover { background: linear-gradient(160deg, var(--accent-soft), var(--surface)); }
 
@@ -682,8 +684,11 @@ html[data-theme="dark"] .shx-face { background: linear-gradient(160deg, var(--su
 @media (max-width: 720px) {
   .bottom-nav { display: flex; flex-direction: column; align-items: center;
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
-    padding: 0 8px; background: none; pointer-events: none; }
+    padding: 0 8px; background: none; pointer-events: none;
+    transition: transform 0.22s var(--ease), opacity 0.22s var(--ease); }
   .bottom-nav .bn-row, .bottom-nav .bn-grip { pointer-events: auto; }
+  /* Slide the bar out of the way while a text field is focused (keyboard open). */
+  .bottom-nav.kb-hidden { transform: translateY(140%); opacity: 0; pointer-events: none; }
 }
 
 /* All-services bottom sheet (opened via swipe-up / grip) */

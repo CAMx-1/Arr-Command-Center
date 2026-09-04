@@ -326,3 +326,47 @@ export function tabs(body, tabsDef, storageKey) {
 
   return bar;
 }
+
+// ---- Swipe-to-remove (touch) ----
+// Swipe a list row left to trigger a destructive action. The row follows the
+// finger and turns red ("armed") once past the threshold; releasing past it
+// slides the row out and runs onAction. Vertical drags scroll normally, and
+// swipes that start on a control (button/link/input) are ignored. No-op on
+// non-touch devices. Returns the same row for convenient chaining.
+export function swipeToAction(row, onAction, { threshold = 90 } = {}) {
+  if (typeof window === 'undefined' || !('ontouchstart' in window)) return row;
+  let startX = 0; let startY = 0; let dx = 0; let active = false; let decided = false;
+  row.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { active = false; return; }
+    if (e.target.closest && e.target.closest('button, a, input, select, textarea')) { active = false; return; }
+    const t = e.touches[0]; startX = t.clientX; startY = t.clientY; dx = 0; active = true; decided = false;
+    row.style.transition = '';
+  }, { passive: true });
+  row.addEventListener('touchmove', (e) => {
+    if (!active) return;
+    const t = e.touches[0]; const mx = t.clientX - startX; const my = t.clientY - startY;
+    if (!decided) {
+      if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+      decided = true;
+      if (Math.abs(my) > Math.abs(mx)) { active = false; return; } // vertical scroll wins
+    }
+    dx = Math.min(0, mx);
+    row.style.transform = `translateX(${dx}px)`;
+    row.classList.toggle('swipe-armed', dx <= -threshold);
+  }, { passive: true });
+  const finish = () => {
+    if (!active) return; active = false;
+    if (dx <= -threshold) {
+      row.style.transition = 'transform 0.2s var(--ease), opacity 0.2s var(--ease)';
+      row.style.transform = 'translateX(-110%)'; row.style.opacity = '0';
+      setTimeout(() => { try { onAction(); } catch { /* ignore */ } }, 190);
+    } else {
+      row.style.transition = 'transform 0.2s var(--ease)';
+      row.style.transform = 'translateX(0)';
+      row.classList.remove('swipe-armed');
+    }
+  };
+  row.addEventListener('touchend', finish, { passive: true });
+  row.addEventListener('touchcancel', finish, { passive: true });
+  return row;
+}

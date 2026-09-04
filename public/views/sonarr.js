@@ -1,4 +1,4 @@
-import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, debounce, autoRefresh } from '../lib/ui.js';
+import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, debounce, autoRefresh, swipeToAction } from '../lib/ui.js';
 import { openDetailModal, openArrFileInfo } from './detail.js';
 import { openReleaseSearch } from './releaseSearch.js';
 import { bulkLibrary } from './bulk.js';
@@ -224,7 +224,11 @@ function queueAttentionBanner(records, ctx) {
 
 function queueRow(r, arr, ctx) {
   const prog = r.size ? ((r.size - (r.sizeleft || 0)) / r.size) * 100 : 0;
-  return h('div', { class: 'row' },
+  const remove = async () => {
+    try { await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=false`); toast('Removed from queue', 'success'); ctx.reload(); }
+    catch (e) { toast(e.message, 'error'); }
+  };
+  const row = h('div', { class: 'row' },
     h('div', { class: 'poster', style: { width: '40px', height: '40px', fontSize: '18px' } }, '⬇'),
     h('div', { class: 'row-main' },
       h('div', { class: 'row-title' }, r.title),
@@ -238,10 +242,7 @@ function queueRow(r, arr, ctx) {
     ),
     h('div', { class: 'row-actions' },
       h('button', { class: 'btn sm', title: 'Manually import completed files', onclick: () => openManualImport(arr, 'series', { downloadId: r.downloadId, title: r.title }) }, '⇩ Import'),
-      h('button', { class: 'btn sm danger', onclick: async () => {
-        try { await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=false`); toast('Removed from queue', 'success'); ctx.reload(); }
-        catch (e) { toast(e.message, 'error'); }
-      } }, '✕ Remove'),
+      h('button', { class: 'btn sm danger', onclick: remove }, '✕ Remove'),
       h('button', { class: 'btn sm', title: 'Blocklist this release and search for a replacement', onclick: async () => {
         try {
           await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=true`);
@@ -252,6 +253,7 @@ function queueRow(r, arr, ctx) {
       } }, '⛔ Blocklist & search'),
     ),
   );
+  return swipeToAction(row, remove); // swipe left to remove (touch)
 }
 
 // ---- Season / episode browser ----
