@@ -682,6 +682,17 @@ html[data-theme="dark"] .shx-face { background: linear-gradient(160deg, var(--su
 .bn-grip-bar { display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--border-strong); }
 
 @media (max-width: 720px) {
+
+/* iOS: reserve long-press on bottom-nav service hexes for app quick actions,
+   instead of showing the native image Save/Copy callout. Scoped to the fixed
+   bottom nav so images elsewhere keep normal browser behavior. */
+.bottom-nav .bn-hex, .bottom-nav .bn-hex * {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.bottom-nav .bn-hex img { pointer-events: none; }
   .bottom-nav { display: flex; flex-direction: column; align-items: center;
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
     padding: 0 8px; background: none; pointer-events: none;

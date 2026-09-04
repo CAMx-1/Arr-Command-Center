@@ -253,7 +253,7 @@ export function autoRefresh(sentinel, ms, fn) {
 export function svcIcon(src, emoji = '', size = 22) {
   if (!src) return h('span', {}, emoji);
   return h('img', {
-    src, alt: '', class: 'svc-logo', loading: 'lazy',
+    src, alt: '', class: 'svc-logo', loading: 'lazy', draggable: 'false',
     style: { width: `${size}px`, height: `${size}px` },
     onerror: function () { this.replaceWith(h('span', {}, emoji)); },
   });
