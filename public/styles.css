@@ -729,6 +729,11 @@ html[data-theme="dark"] .shx-face { background: linear-gradient(160deg, var(--su
   #topbar { padding: calc(12px + env(safe-area-inset-top)) 16px 8px calc(62px + env(safe-area-inset-left)); flex-wrap: wrap; row-gap: 8px; }
   #page-title { font-size: 16px; padding: 8px 22px; }
   .topbar-right { gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  /* Center the notifications panel in the viewport regardless of where the
+     bell sits in the (wrapping) topbar. Vertical offset is set in JS from the
+     topbar's real bottom. */
+  .notif-panel { position: fixed; left: 50%; right: auto; transform: translateX(-50%);
+    width: min(360px, calc(100vw - 20px)); max-height: 68vh; }
   #topbar-actions { gap: 6px; }
   .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; }
   #view { padding: 12px 14px calc(128px + env(safe-area-inset-bottom)); }

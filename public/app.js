@@ -484,7 +484,22 @@ function relTime(ms) {
 function toggleNotif(open) {
   notifOpen = open ?? !notifOpen;
   els.notifPanel.classList.toggle('hidden', !notifOpen);
-  if (notifOpen) { renderNotifPanel(); markSeen(); updateNotifBadge(); }
+  if (notifOpen) { positionNotifPanel(); renderNotifPanel(); markSeen(); updateNotifBadge(); }
+}
+
+// On mobile the panel is fixed + centered (see CSS); anchor its top just below
+// the topbar's real bottom edge, which varies as the topbar wraps. On desktop
+// clear the inline top so the CSS-anchored (wrapper-relative) position applies.
+function positionNotifPanel() {
+  const panel = els.notifPanel;
+  if (!panel) return;
+  if (window.matchMedia('(max-width: 720px)').matches) {
+    const tb = document.getElementById('topbar');
+    const bottom = tb ? tb.getBoundingClientRect().bottom : 56;
+    panel.style.top = `${Math.round(bottom + 8)}px`;
+  } else {
+    panel.style.top = '';
+  }
 }
 
 // ---------- Global search ----------
