@@ -4,8 +4,10 @@
 import express from 'express';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, publicConfig, ALLOWED_SERVICE_TYPES, saveServiceToDisk, removeServiceFromDisk, isInsecureExposure } from './config.js';
+import { loadConfig, publicConfig, ALLOWED_SERVICE_TYPES, saveServiceToDisk, removeServiceFromDisk, isInsecureExposure, buildServiceUpdate } from './config.js';
 import { createProxyRouter, pingService } from './proxy.js';
 import { startMockServices } from './mock/mockServices.js';
 import { createPlexAuth } from './plexAuth.js';
@@ -123,7 +125,7 @@ app.get('/api/status', async (req, res) => {
   const results = await Promise.all(entries.map(async ([key, svc]) => {
     if (svc.sample) return [key, { label: svc.label || key, type: svc.type, ok: true, status: 200, ms: 0, version: 'sample' }];
     if (svc.type === 'plex') { const ok = plex.hasToken(cfg); return [key, { label: svc.label || key, type: 'plex', ok, status: ok ? 200 : 0, ms: 0, error: ok ? undefined : 'Sign in with Plex to enable' }]; }
-    const health = await pingService(svc).catch((e) => ({ ok: false, status: 0, ms: 0, error: (e && e.message) || 'ping failed' }));
+    const health = await pingService(svc, key).catch((e) => ({ ok: false, status: 0, ms: 0, error: (e && e.message) || 'ping failed' }));
     return [key, { label: svc.label || key, type: svc.type, ...health }];
   }));
   res.json(Object.fromEntries(results));
@@ -135,7 +137,7 @@ app.get('/api/status/:service', async (req, res) => {
   if (!svc || svc.enabled === false) return res.status(404).json({ error: 'Unknown service' });
   if (svc.sample) return res.json({ label: svc.label || req.params.service, type: svc.type, ok: true, status: 200, ms: 0, version: 'sample' });
   if (svc.type === 'plex') { const ok = plex.hasToken(cfg); return res.json({ label: svc.label || req.params.service, type: 'plex', ok, status: ok ? 200 : 0, ms: 0, error: ok ? undefined : 'Sign in with Plex to enable' }); }
-  res.json({ label: svc.label || req.params.service, type: svc.type, ...(await pingService(svc).catch((e) => ({ ok: false, status: 0, ms: 0, error: (e && e.message) || 'ping failed' }))) });
+  res.json({ label: svc.label || req.params.service, type: svc.type, ...(await pingService(svc, req.params.service).catch((e) => ({ ok: false, status: 0, ms: 0, error: (e && e.message) || 'ping failed' }))) });
 });
 
 // Diagnostics: server info + recent request log (behind auth).
@@ -291,8 +293,20 @@ app.get('/api/plex/image', async (req, res) => {
     if (!r.ok) return res.status(r.status).end();
     const ct = r.headers.get('content-type'); if (ct) res.set('content-type', ct);
     res.set('Cache-Control', 'private, max-age=3600');
-    res.send(Buffer.from(await r.arrayBuffer()));
-  } catch { res.status(502).end(); }
+    // Stream the image body rather than buffering the whole thing in memory.
+    // The Plex token is only ever sent upstream, never echoed to the browser.
+    if (!r.body) { res.end(); return; }
+    const onClose = () => { try { controller.abort(); } catch { /* ignore */ } };
+    res.on('close', onClose);
+    try {
+      await pipeline(Readable.fromWeb(r.body), res);
+    } catch (err) {
+      try { controller.abort(); } catch { /* ignore */ }
+      if (!res.writableEnded) res.destroy(err);
+    } finally {
+      res.off('close', onClose);
+    }
+  } catch { if (!res.headersSent) res.status(502).end(); else if (!res.writableEnded) res.end(); }
 });
 
 // The proxy (handles its own raw body parsing).
@@ -300,40 +314,23 @@ app.use('/api/proxy', createProxyRouter(cfg));
 
 // ---- Add / edit / remove a service (writes config.json). Behind auth. ----
 // Note: this persists API keys / Cloudflare tokens to config.json on the server.
-app.post('/api/config/service', express.json({ limit: '32kb' }), (req, res) => {
+app.post('/api/config/service', express.json({ limit: '32kb' }), async (req, res) => {
   if (cfg.mock) return res.status(400).json({ error: 'Services cannot be edited in demo mode' });
   const { key, service } = req.body || {};
   if (!key || !/^[a-z0-9_-]{1,40}$/i.test(key)) return res.status(400).json({ error: 'Invalid service key (use letters, numbers, - or _)' });
   if (!service || typeof service !== 'object') return res.status(400).json({ error: 'Missing service' });
   if (!ALLOWED_SERVICE_TYPES.includes(service.type)) return res.status(400).json({ error: `Type must be one of: ${ALLOWED_SERVICE_TYPES.join(', ')}` });
-  // Build a clean service object (drop unknown fields). Blank secret fields keep
-  // the existing values so editing label/type doesn't wipe the API key.
+  // Build a clean service object (drops unknown fields). Blank secret fields keep
+  // the existing values so editing label/type/path doesn't wipe the API key —
+  // BUT only while the upstream origin is unchanged. If the origin changes,
+  // secrets are not silently carried to the new host and must be re-supplied.
   const prev = cfg.services[key] || {};
-  const clean = {
-    label: String(service.label || key).slice(0, 60),
-    type: service.type,
-    enabled: service.enabled !== false,
-  };
-  const baseUrl = service.baseUrl ? String(service.baseUrl).slice(0, 300) : prev.baseUrl;
-  if (service.baseUrl && !isHttpUrl(service.baseUrl)) return res.status(400).json({ error: 'baseUrl must be an http(s) URL' });
-  const apiKey = service.apiKey ? String(service.apiKey).slice(0, 300) : prev.apiKey;
-  if (baseUrl) clean.baseUrl = baseUrl;
-  if (apiKey) clean.apiKey = apiKey;
-  // qBittorrent username/password fallback (blank keeps the existing value).
-  const username = service.username ? String(service.username).slice(0, 120) : prev.username;
-  const password = service.password ? String(service.password).slice(0, 300) : prev.password;
-  if (username) clean.username = username;
-  if (password) clean.password = password;
-  if (service.cloudflareAccess && (service.cloudflareAccess.clientId || service.cloudflareAccess.clientSecret)) {
-    clean.cloudflareAccess = {
-      clientId: String(service.cloudflareAccess.clientId || '').slice(0, 300),
-      clientSecret: String(service.cloudflareAccess.clientSecret || '').slice(0, 300),
-    };
-  } else if (prev.cloudflareAccess) {
-    clean.cloudflareAccess = prev.cloudflareAccess;
-  }
+  const built = buildServiceUpdate(key, service, prev, { isHttpUrl });
+  if (built.error) return res.status(400).json({ error: built.error });
+  const clean = built.clean;
   try {
-    saveServiceToDisk(key, clean);
+    // Durable write first; only reflect into the live config once persisted.
+    await saveServiceToDisk(key, clean);
     cfg.services[key] = { ...clean }; // apply live (proxy/status read cfg.services per request)
     res.json({ ok: true, services: publicConfig(cfg).services });
   } catch (err) {
@@ -341,12 +338,12 @@ app.post('/api/config/service', express.json({ limit: '32kb' }), (req, res) => {
   }
 });
 
-app.delete('/api/config/service/:key', (req, res) => {
+app.delete('/api/config/service/:key', async (req, res) => {
   if (cfg.mock) return res.status(400).json({ error: 'Services cannot be edited in demo mode' });
   const key = req.params.key;
   if (!cfg.services[key]) return res.status(404).json({ error: 'Unknown service' });
   try {
-    removeServiceFromDisk(key);
+    await removeServiceFromDisk(key);
     delete cfg.services[key];
     res.json({ ok: true, services: publicConfig(cfg).services });
   } catch (err) {

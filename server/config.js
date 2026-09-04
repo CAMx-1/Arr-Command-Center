@@ -2,8 +2,11 @@
 // In MOCK mode it synthesizes a config that points at the bundled mock services.
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { MOCK_PORTS } from './mock/mockServices.js';
+
+const fsp = fs.promises;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -31,20 +34,163 @@ const SERVICE_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'overseerr', 'sa
 export const ALLOWED_SERVICE_TYPES = SERVICE_TYPES;
 export const CONFIG_PATH = path.join(ROOT, 'config.json');
 
+// ---- Atomic, serialized config.json writes ----
+// All mutations of config.json funnel through a single in-process promise chain
+// (a lightweight mutex) so concurrent add/update/delete requests can't perform a
+// lost-update read-modify-write race. Each write goes to a unique temp file in
+// the SAME directory (so rename() is atomic on the same filesystem) and is then
+// renamed over the real file. The temp file is cleaned up if anything fails, and
+// the on-disk file is only replaced once the new contents are durably written.
+let writeChain = Promise.resolve();
+
+// Queue `task` on the serialization chain. The chain never stays rejected, so a
+// failed write does not poison subsequent writes; callers still see their own
+// task's rejection via the returned promise.
+function serialize(task) {
+  const run = writeChain.then(task, task);
+  writeChain = run.then(() => {}, () => {});
+  return run;
+}
+
+// Read config.json, apply `mutate(disk)` to it, and durably persist the result.
+// `mutate` returns an optional value that is passed back to the caller.
+async function atomicUpdateConfig(mutate) {
+  return serialize(async () => {
+    const disk = JSON.parse(await fsp.readFile(CONFIG_PATH, 'utf8'));
+    disk.services = disk.services || {};
+    const result = mutate(disk);
+    const tmp = path.join(
+      path.dirname(CONFIG_PATH),
+      `.config.${process.pid}.${randomUUID()}.tmp`
+    );
+    try {
+      await fsp.writeFile(tmp, JSON.stringify(disk, null, 2) + '\n');
+      await fsp.rename(tmp, CONFIG_PATH);
+    } catch (err) {
+      // Best-effort cleanup so failed writes don't leave orphan temp files.
+      try { await fsp.unlink(tmp); } catch { /* already gone */ }
+      throw err;
+    }
+    return result;
+  });
+}
+
 // Persist a single service into config.json (add or update) and return it.
-export function saveServiceToDisk(key, service) {
-  const disk = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-  disk.services = disk.services || {};
-  disk.services[key] = service;
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(disk, null, 2) + '\n');
+export async function saveServiceToDisk(key, service) {
+  await atomicUpdateConfig((disk) => { disk.services[key] = service; });
   return service;
 }
 
 // Remove a service from config.json.
-export function removeServiceFromDisk(key) {
-  const disk = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-  if (disk.services) delete disk.services[key];
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(disk, null, 2) + '\n');
+export async function removeServiceFromDisk(key) {
+  await atomicUpdateConfig((disk) => { if (disk.services) delete disk.services[key]; });
+}
+
+// ---- Credential-safe service edits (pure helpers, exported for testing) ----
+
+function defaultIsHttpUrl(u) {
+  try { const p = new URL(u).protocol; return p === 'http:' || p === 'https:'; }
+  catch { return false; }
+}
+
+// True when the effective upstream ORIGIN (scheme + hostname + port, with default
+// ports normalized) differs between two base URLs. Path/query/trailing-slash
+// differences are intentionally ignored: a label-only or path-only edit must NOT
+// count as an origin change (and therefore must not trigger credential clearing).
+// A missing previous origin (brand-new service) is never treated as a change.
+export function upstreamOriginChanged(prevBaseUrl, nextBaseUrl) {
+  if (!prevBaseUrl || !nextBaseUrl) return false;
+  let a, b;
+  try { a = new URL(prevBaseUrl); } catch { return false; }
+  try { b = new URL(nextBaseUrl); } catch { return false; }
+  // URL.origin already normalizes default ports (e.g. http://h:80 -> http://h).
+  return a.origin !== b.origin;
+}
+
+// Build the clean, persistable service object from an incoming edit.
+//
+// Behavior:
+//   • Unknown fields are dropped.
+//   • When the upstream origin is UNCHANGED, blank secret fields keep their
+//     previous values (so editing a label/type/path doesn't wipe the API key).
+//   • When the upstream origin CHANGES, secrets are NOT silently carried forward
+//     to the new host. Any secret that previously existed but is not explicitly
+//     re-supplied causes a 400-style error (returned as { error }) BEFORE any
+//     write. This prevents leaking credentials to a different (possibly
+//     attacker-controlled) origin.
+//
+// Returns { clean } on success or { error } on validation failure. Never echoes
+// secret VALUES back in error messages — only the names of the missing fields.
+export function buildServiceUpdate(key, service, prev = {}, { isHttpUrl = defaultIsHttpUrl } = {}) {
+  if (!service || typeof service !== 'object') return { error: 'Missing service' };
+  if (!ALLOWED_SERVICE_TYPES.includes(service.type)) {
+    return { error: `Type must be one of: ${ALLOWED_SERVICE_TYPES.join(', ')}` };
+  }
+  if (service.baseUrl && !isHttpUrl(service.baseUrl)) {
+    return { error: 'baseUrl must be an http(s) URL' };
+  }
+
+  const clean = {
+    label: String(service.label || key).slice(0, 60),
+    type: service.type,
+    enabled: service.enabled !== false,
+  };
+
+  const baseUrl = service.baseUrl ? String(service.baseUrl).slice(0, 300) : prev.baseUrl;
+  const originChanged = upstreamOriginChanged(prev.baseUrl, baseUrl);
+
+  const suppliedApiKey = !!service.apiKey;
+  const suppliedUsername = !!service.username;
+  const suppliedPassword = !!service.password;
+  const suppliedCf = !!(service.cloudflareAccess &&
+    (service.cloudflareAccess.clientId || service.cloudflareAccess.clientSecret));
+  const prevHasCf = !!(prev.cloudflareAccess &&
+    (prev.cloudflareAccess.clientId || prev.cloudflareAccess.clientSecret));
+
+  if (originChanged) {
+    // Refuse to carry any previously-stored secret over to a new origin unless
+    // it is explicitly re-supplied in this request.
+    const missing = [];
+    if (prev.apiKey && !suppliedApiKey) missing.push('apiKey');
+    if (prev.username && !suppliedUsername) missing.push('username');
+    if (prev.password && !suppliedPassword) missing.push('password');
+    if (prevHasCf && !suppliedCf) missing.push('cloudflareAccess');
+    if (missing.length) {
+      return {
+        error: `Upstream origin changed to ${new URL(baseUrl).origin}; ` +
+          `re-enter credentials for the new host (${missing.join(', ')}). ` +
+          `Existing secrets are not carried over to a different origin.`,
+      };
+    }
+  }
+
+  if (baseUrl) clean.baseUrl = baseUrl;
+
+  // Secrets: use supplied value; otherwise keep previous ONLY if origin unchanged.
+  const apiKey = suppliedApiKey
+    ? String(service.apiKey).slice(0, 300)
+    : (originChanged ? undefined : prev.apiKey);
+  if (apiKey) clean.apiKey = apiKey;
+
+  const username = suppliedUsername
+    ? String(service.username).slice(0, 120)
+    : (originChanged ? undefined : prev.username);
+  const password = suppliedPassword
+    ? String(service.password).slice(0, 300)
+    : (originChanged ? undefined : prev.password);
+  if (username) clean.username = username;
+  if (password) clean.password = password;
+
+  if (suppliedCf) {
+    clean.cloudflareAccess = {
+      clientId: String(service.cloudflareAccess.clientId || '').slice(0, 300),
+      clientSecret: String(service.cloudflareAccess.clientSecret || '').slice(0, 300),
+    };
+  } else if (prevHasCf && !originChanged) {
+    clean.cloudflareAccess = prev.cloudflareAccess;
+  }
+
+  return { clean };
 }
 
 function envKey(serviceKey, suffix) {

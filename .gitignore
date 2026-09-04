@@ -7,3 +7,7 @@ config.json
 
 # App data store (contains captured Plex token)
 data/
+
+# Local audit/regression tests
+/test/
+/server/test/

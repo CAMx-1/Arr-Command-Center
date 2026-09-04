@@ -1,4 +1,5 @@
 import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, debounce, autoRefresh, swipeToAction } from '../lib/ui.js';
+import { reconcileQueueIssues } from '../lib/queueIssues.js';
 import { openDetailModal, openArrFileInfo } from './detail.js';
 import { openReleaseSearch } from './releaseSearch.js';
 import { bulkLibrary } from './bulk.js';
@@ -186,8 +187,11 @@ async function tabQueue(root, arr, ctx) {
     try {
       const queue = await arr.get('queue?pageSize=50');
       const records = queue.records || [];
+      // Always reconcile the attention-dedup state (even for an empty queue) so
+      // a cleared issue resets and can notify again if it recurs.
+      const banner = queueAttentionBanner(records, ctx);
       if (!records.length) { mount(wrap, empty('', 'Queue is empty', 'Nothing downloading right now')); return; }
-      mount(wrap, queueAttentionBanner(records, ctx) || null, h('div', { class: 'list' }, ...records.map((r) => queueRow(r, arr, ctx))));
+      mount(wrap, banner || null, h('div', { class: 'list' }, ...records.map((r) => queueRow(r, arr, ctx))));
     } catch (err) {
       if (!silent) mount(wrap, empty('', 'Failed to load queue', err.message));
     }
@@ -196,17 +200,17 @@ async function tabQueue(root, arr, ctx) {
   autoRefresh(wrap, 5000, () => load(true));
 }
 
-const _emittedQueueIssues = new Set();
+const _queueIssueState = new Map(); // serviceKey -> Set of currently-bad keys
 function queueAttentionBanner(records, ctx) {
   const bad = records.filter((r) => /warning|stalled|failed|error/i.test(`${r.status} ${r.trackedDownloadStatus} ${(r.statusMessages || []).map((m) => m.title).join(' ')} ${r.errorMessage || ''}`));
-  if (!bad.length) return null;
-  for (const r of bad) {
-    const key = `${ctx.service.key}:${r.downloadId || r.id}`;
-    if (!_emittedQueueIssues.has(key)) {
-      _emittedQueueIssues.add(key);
-      try { window.dispatchEvent(new CustomEvent('app-error', { detail: { message: `${ctx.service.label}: “${r.title}” ${r.errorMessage || 'download needs attention'}`, at: Date.now() } })); } catch { /* ignore */ }
-    }
+  const byKey = new Map();
+  for (const r of bad) byKey.set(`${ctx.service.key}:${r.downloadId || r.id}`, r);
+  const emitKeys = reconcileQueueIssues(_queueIssueState, ctx.service.key, byKey.keys());
+  for (const key of emitKeys) {
+    const r = byKey.get(key);
+    try { window.dispatchEvent(new CustomEvent('app-error', { detail: { message: `${ctx.service.label}: “${r.title}” ${r.errorMessage || 'download needs attention'}`, at: Date.now() } })); } catch { /* ignore */ }
   }
+  if (!bad.length) return null;
   return h('div', { class: 'attention-banner' },
     h('span', { class: 'pill down' }, `${bad.length} need${bad.length === 1 ? 's' : ''} attention`),
     h('span', { class: 'dim' }, bad.slice(0, 3).map((r) => r.title).join(' · ') + (bad.length > 3 ? '…' : '')),

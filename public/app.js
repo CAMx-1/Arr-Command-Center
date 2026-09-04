@@ -2,6 +2,7 @@ import { api } from './lib/api.js';
 import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, debounce, spinner, empty, poster, fmtBytes, copyable, registerOverlay, closeOverlay, overlayOpen } from './lib/ui.js';
 import { orderServices, isHidden } from './lib/servicePrefs.js';
 import { splitHive, flyoutLayout } from './lib/hiveLayout.js';
+import { hiveSignature, statusDotClass } from './lib/hiveState.js';
 import { cachedGet } from './lib/cache.js';
 import { setPendingFilter } from './lib/libraryFilter.js';
 import { renderHome, refreshHome } from './views/home.js';
@@ -53,6 +54,9 @@ let hiveExpanded = false;
 const HIVE_CAP = 10;
 let notifications = [];
 let errorLog = [];
+// Signature of the last full hive build. A status poll compares against this to
+// decide whether it can repaint dots in place (see refreshStatus).
+let _lastHiveSig = null;
 
 const els = {
   hive: document.getElementById('hive'),
@@ -149,6 +153,7 @@ function buildHive() {
     const st = state.status[svc.key];
     cells.push({
       kind: 'service', active: route === svc.key, title: svc.label,
+      key: svc.key,
       dot: st ? (st.ok ? 'ok' : 'down') : '',
       icon: svcIcon(meta.logo, meta.emoji || '', 34),
       onClick: () => { location.hash = `#/${svc.key}`; },
@@ -169,6 +174,7 @@ function buildHive() {
   const W = 100, H = 88, step = 88, oy = 10;
   const mkCell = (c) => h('button', {
     class: `hive-cell hive-${c.kind} ${c.active ? 'active' : ''}`, title: c.title,
+    dataset: c.key ? { svcKey: c.key } : null,
     onclick: (e) => {
       if (c.kind === 'more') { e.stopPropagation(); hiveExpanded = !hiveExpanded; buildHive(); return; }
       closeSidebarMobile(); hiveExpanded = false; c.onClick();
@@ -239,6 +245,43 @@ function buildHive() {
   // Rebuild the background now that the nav buttons exist, so it aligns to them.
   buildHiveBackground();
   buildBottomNav();
+  // Remember what this build reflects so a status-only poll can skip the rebuild.
+  _lastHiveSig = currentHiveSignature();
+}
+
+// The current layout-affecting signature (route/services/order/hidden/pinned/
+// mobile/expansion/auth/demo/cap). Mirrors the ordering used by buildHive and
+// buildBottomNav so the gate matches what actually gets rendered.
+function isMobileHive() {
+  return typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 720px)').matches;
+}
+function currentHiveSignature() {
+  const base = [...state.services].sort((a, b) => (a.type === 'overseerr' ? 0 : 1) - (b.type === 'overseerr' ? 0 : 1));
+  const ordered = orderServices(base).map((s) => ({ key: s.key, type: s.type, hidden: isHidden(s.key) }));
+  return hiveSignature({
+    route: currentRoute(),
+    services: ordered,
+    pinned: loadPinned(),
+    isMobile: isMobileHive(),
+    hiveExpanded,
+    plexEnabled: !!(state.config && state.config.auth && state.config.auth.plexEnabled),
+    mock: !!(state.config && state.config.mock),
+    cap: HIVE_CAP,
+  });
+}
+
+// Repaint just the connection dots on every rendered hive node (sidebar rail,
+// overflow flyout, bottom-nav hexes, all-services sheet) without rebuilding any
+// layout. Only touches dots that already exist, so appearance is unchanged for
+// nodes that intentionally render no dot.
+function updateStatusDots() {
+  const nodes = document.querySelectorAll('[data-svc-key]');
+  nodes.forEach((node) => {
+    const dot = node.querySelector('.hive-dot');
+    if (!dot) return;
+    const cls = statusDotClass(state.status[node.dataset.svcKey]);
+    dot.className = `hive-dot ${cls}`.trim();
+  });
 }
 
 // ---------- Mobile hex bottom navigation ----------
@@ -278,7 +321,7 @@ function buildBottomNav() {
   const svcHex = (svc) => {
     const meta = SERVICE_META[svc.type] || {};
     const st = state.status[svc.key];
-    return h('button', { class: `bn-hex ${route === svc.key ? 'active' : ''}`, title: svc.label, onclick: () => { haptic(); location.hash = `#/${svc.key}`; } },
+    return h('button', { class: `bn-hex ${route === svc.key ? 'active' : ''}`, title: svc.label, dataset: { svcKey: svc.key }, onclick: () => { haptic(); location.hash = `#/${svc.key}`; } },
       st ? h('span', { class: `hive-dot ${st.ok ? 'ok' : 'down'}` }) : null,
       h('span', { class: 'hive-icon' }, svcIcon(meta.logo, meta.emoji || '', 24)),
     );
@@ -362,7 +405,7 @@ function renderAllServicesGrid() {
     onclick: (e) => { e.stopPropagation(); haptic(); togglePinned(svc.key); renderAllServicesGrid(); } }, isPinned(svc.key) ? '\u2605' : '\u2606');
   const item = (label, active, icon, onClick, dot, svc) => h('button', { class: 'allsvc-item', onclick: () => { haptic(); selectAllService(onClick); } },
     h('span', { class: 'allsvc-hexwrap' },
-      h('span', { class: `bn-hex ${active ? 'active' : ''}` }, dot ? h('span', { class: `hive-dot ${dot}` }) : null, h('span', { class: 'hive-icon' }, icon)),
+      h('span', { class: `bn-hex ${active ? 'active' : ''}`, dataset: svc ? { svcKey: svc.key } : null }, dot ? h('span', { class: `hive-dot ${dot}` }) : null, h('span', { class: 'hive-icon' }, icon)),
       svc ? pinBtn(svc) : null,
     ),
     h('span', { class: 'allsvc-label' }, label));
@@ -804,7 +847,16 @@ function buildHiveBackground() {
 async function refreshStatus() {
   try {
     state.status = await api.status();
-    buildHive();
+    // A status poll only changes ok/down dots. Rebuild the SVG/layout/flyout
+    // ONLY when a structural/layout input changed (route, service set, order,
+    // hidden/pinned state, mobile breakpoint, flyout expansion, auth/demo);
+    // otherwise repaint the existing dots in place to avoid flicker, dropped
+    // flyouts, and DOM thrash on every poll.
+    if (_lastHiveSig !== null && currentHiveSignature() === _lastHiveSig) {
+      updateStatusDots();
+    } else {
+      buildHive();
+    }
   } catch (err) {
     console.error('status error', err);
   }

@@ -8,6 +8,7 @@ import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, invalidate } from '../lib/cache.js';
 import { libraryFilter, consumePendingFilter } from '../lib/libraryFilter.js';
 import { tagEditor, arrCommandBar, loadTags, openManualImport } from '../lib/arrActions.js';
+import { reconcileQueueIssues } from '../lib/queueIssues.js';
 
 export async function renderSonarr(root, ctx) {
   const svc = ctx.service;
@@ -192,8 +193,10 @@ async function tabQueue(root, arr, ctx) {
     try {
       const queue = await arr.get('queue?pageSize=50');
       const records = queue.records || [];
-      if (!records.length) { mount(wrap, empty('', 'Queue is empty', 'Nothing downloading right now')); return; }
+      // Always reconcile the attention-dedup state (even for an empty queue) so
+      // a cleared issue resets and can notify again if it recurs.
       const banner = queueAttentionBanner(records, ctx);
+      if (!records.length) { mount(wrap, empty('', 'Queue is empty', 'Nothing downloading right now')); return; }
       mount(wrap, banner || null, h('div', { class: 'list' }, ...records.map((r) => queueRow(r, arr, ctx))));
     } catch (err) {
       if (!silent) mount(wrap, empty('', 'Failed to load queue', err.message));
@@ -204,18 +207,21 @@ async function tabQueue(root, arr, ctx) {
 }
 
 // Surface stalled/failed downloads as a banner (and emit to the notifications
-// action-center) so problems are visible without digging.
-let _emittedQueueIssues = new Set();
+// action-center) so problems are visible without digging. Dedup state is kept
+// per-service and bounded to the currently-bad set (see reconcileQueueIssues),
+// so a resolved issue can notify again if it comes back and distinct service
+// instances never clobber each other.
+const _queueIssueState = new Map(); // serviceKey -> Set of currently-bad keys
 function queueAttentionBanner(records, ctx) {
   const bad = records.filter((r) => /warning|stalled|failed|error/i.test(`${r.status} ${r.trackedDownloadStatus} ${(r.statusMessages || []).map((m) => m.title).join(' ')} ${r.errorMessage || ''}`));
-  if (!bad.length) return null;
-  for (const r of bad) {
-    const key = `${ctx.service.key}:${r.downloadId || r.id}`;
-    if (!_emittedQueueIssues.has(key)) {
-      _emittedQueueIssues.add(key);
-      try { window.dispatchEvent(new CustomEvent('app-error', { detail: { message: `${ctx.service.label}: “${r.title}” ${r.errorMessage || 'download needs attention'}`, at: Date.now() } })); } catch { /* ignore */ }
-    }
+  const byKey = new Map();
+  for (const r of bad) byKey.set(`${ctx.service.key}:${r.downloadId || r.id}`, r);
+  const emitKeys = reconcileQueueIssues(_queueIssueState, ctx.service.key, byKey.keys());
+  for (const key of emitKeys) {
+    const r = byKey.get(key);
+    try { window.dispatchEvent(new CustomEvent('app-error', { detail: { message: `${ctx.service.label}: “${r.title}” ${r.errorMessage || 'download needs attention'}`, at: Date.now() } })); } catch { /* ignore */ }
   }
+  if (!bad.length) return null;
   return h('div', { class: 'attention-banner' },
     h('span', { class: 'pill down' }, `${bad.length} need${bad.length === 1 ? 's' : ''} attention`),
     h('span', { class: 'dim' }, bad.slice(0, 3).map((r) => r.title).join(' · ') + (bad.length > 3 ? '…' : '')),

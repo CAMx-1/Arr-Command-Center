@@ -4,6 +4,8 @@
 // backend: browsers can't safely hold these secrets or set these headers cross-origin,
 // so the Node process does it.
 import express from 'express';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 function trimSlash(u) {
   return String(u || '').replace(/\/+$/, '');
@@ -63,13 +65,51 @@ function authFor(svc) {
   return { headers, query };
 }
 
+// Stream an upstream fetch Response body straight to the Express response,
+// instead of buffering the whole payload in memory via arrayBuffer(). Preserves
+// the already-set status/content-type. Only content-type is copied by callers —
+// upstream auth headers (set-cookie, www-authenticate, etc.) are intentionally
+// NOT forwarded to the browser.
+//
+// `controller` is the AbortController driving the upstream fetch; if the client
+// disconnects mid-stream we abort it so we don't keep pulling from the upstream.
+async function pipeUpstream(upstream, res, controller) {
+  if (!upstream.body) { res.end(); return; }
+  const nodeStream = Readable.fromWeb(upstream.body);
+  // If the client goes away before we finish, stop reading from the upstream.
+  const onClose = () => { try { controller.abort(); } catch { /* ignore */ } };
+  res.on('close', onClose);
+  try {
+    // pipeline() propagates errors/backpressure in both directions and cleans up
+    // both streams (destroying the upstream reader) if either side fails.
+    await pipeline(nodeStream, res);
+  } catch (err) {
+    try { controller.abort(); } catch { /* ignore */ }
+    if (!res.writableEnded) res.destroy(err);
+  } finally {
+    res.off('close', onClose);
+  }
+}
+
 // ---- qBittorrent authentication ----
 // Two supported modes:
 //   1) API key (qBittorrent >= v5.2.0): stateless `Authorization: Bearer <key>`.
 //   2) username/password: we POST /api/v2/auth/login server-side, cache the
 //      returned SID cookie, and re-login on 401/403.
+//
+// SESSION ISOLATION: the SID cookie and the in-flight login promise are keyed by
+// the ROUTE service key (the identifier under which the service is configured),
+// never by an ambient `svc.key` field (which is not guaranteed to exist — an
+// undefined key would make every qBittorrent instance share a single cache
+// entry, cross-contaminating sessions between distinct servers).
 const qbitSid = new Map();     // serviceKey -> SID cookie value
 const qbitPending = new Map(); // serviceKey -> in-flight login promise (de-dupe)
+
+// Test-only helpers to inspect/reset the module-level session caches.
+export function _resetQbitSessions() { qbitSid.clear(); qbitPending.clear(); }
+export function _qbitSessionSnapshot() {
+  return { sid: new Map(qbitSid), pending: new Map(qbitPending) };
+}
 
 async function qbitLogin(svc) {
   const base = trimSlash(svc.baseUrl);
@@ -94,17 +134,22 @@ async function qbitLogin(svc) {
   throw new Error('qBittorrent login: no SID returned (check username/password)');
 }
 
-async function ensureQbitSid(svc, force = false) {
-  if (!force && qbitSid.has(svc.key)) return qbitSid.get(svc.key);
-  if (qbitPending.has(svc.key)) return qbitPending.get(svc.key);
-  const p = qbitLogin(svc)
-    .then((sid) => { qbitSid.set(svc.key, sid); qbitPending.delete(svc.key); return sid; })
-    .catch((e) => { qbitPending.delete(svc.key); throw e; });
-  qbitPending.set(svc.key, p);
+// Resolve (and cache) the SID for a service, keyed by the explicit `serviceKey`.
+// `login` is injectable so the caching/de-dup/isolation logic can be tested
+// without a live qBittorrent instance.
+async function ensureQbitSid(svc, serviceKey, force = false, login = qbitLogin) {
+  if (!force && qbitSid.has(serviceKey)) return qbitSid.get(serviceKey);
+  if (qbitPending.has(serviceKey)) return qbitPending.get(serviceKey);
+  const p = login(svc)
+    .then((sid) => { qbitSid.set(serviceKey, sid); qbitPending.delete(serviceKey); return sid; })
+    .catch((e) => { qbitPending.delete(serviceKey); throw e; });
+  qbitPending.set(serviceKey, p);
   return p;
 }
+// Exported alias for regression testing of session isolation.
+export { ensureQbitSid as _ensureQbitSid };
 
-async function forwardQbit(svc, subPath, req, res) {
+async function forwardQbit(svc, serviceKey, subPath, req, res) {
   const base = trimSlash(svc.baseUrl);
   const incomingQs = (req.originalUrl.split('?')[1]) || '';
   const cleanSub = subPath.replace(/^\/+/, '');
@@ -113,6 +158,9 @@ async function forwardQbit(svc, subPath, req, res) {
   const hasBody = !['GET', 'HEAD'].includes(method);
   const useApiKey = !!svc.apiKey;
 
+  // Shared controller so a client disconnect during streaming aborts the upstream.
+  const controller = new AbortController();
+
   const doFetch = async (sid) => {
     // qBittorrent requires Referer/Origin to match the Host for its host-header check.
     const headers = { Referer: base, Origin: base, ...cfHeaders(svc) };
@@ -120,27 +168,29 @@ async function forwardQbit(svc, subPath, req, res) {
     else if (sid) headers['Cookie'] = `SID=${sid}`;
     if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
     if (req.headers['accept']) headers['accept'] = req.headers['accept'];
-    const init = { method, headers, redirect: 'manual' };
+    const init = { method, headers, redirect: 'manual', signal: controller.signal };
     if (hasBody && req.body && req.body.length) init.body = req.body;
-    const controller = new AbortController();
+    // Header/first-byte deadline (matches prior 120s ceiling). Cleared once the
+    // response headers arrive; the body is then streamed.
     const timer = setTimeout(() => controller.abort(), 120000);
-    init.signal = controller.signal;
     try { return await fetch(target, init); } finally { clearTimeout(timer); }
   };
 
   try {
     let sid = '';
-    if (!useApiKey) sid = qbitSid.has(svc.key) ? qbitSid.get(svc.key) : await ensureQbitSid(svc);
+    if (!useApiKey) sid = qbitSid.has(serviceKey) ? qbitSid.get(serviceKey) : await ensureQbitSid(svc, serviceKey);
     let upstream = await doFetch(sid);
     if (!useApiKey && (upstream.status === 401 || upstream.status === 403)) {
-      sid = await ensureQbitSid(svc, true); // stale cookie — re-login once
+      sid = await ensureQbitSid(svc, serviceKey, true); // stale cookie — re-login once
       upstream = await doFetch(sid);
     }
     res.status(upstream.status);
     const ct = upstream.headers.get('content-type');
     if (ct) res.set('content-type', ct);
-    res.send(Buffer.from(await upstream.arrayBuffer()));
+    // Stream the body; do NOT forward upstream auth/set-cookie headers.
+    await pipeUpstream(upstream, res, controller);
   } catch (err) {
+    if (res.headersSent) { if (!res.writableEnded) res.destroy(err); return; }
     const aborted = err.name === 'AbortError';
     const reason = classifyUpstreamError(err);
     res.status(aborted ? 504 : 502).json({ error: reason, detail: reason, service: svc.label });
@@ -170,8 +220,8 @@ function buildTargetUrl(svc, subPath, incomingQuery) {
   return new URL(`${base}/${cleanSub}${qs ? `?${qs}` : ''}`);
 }
 
-async function forward(svc, subPath, req, res) {
-  if (svc.type === 'qbittorrent') return forwardQbit(svc, subPath, req, res);
+async function forward(svc, serviceKey, subPath, req, res) {
+  if (svc.type === 'qbittorrent') return forwardQbit(svc, serviceKey, subPath, req, res);
   const incomingQs = (req.originalUrl.split('?')[1]) || '';
   const target = buildTargetUrl(svc, subPath, incomingQs);
   const { headers: authHeaders } = authFor(svc);
@@ -184,18 +234,19 @@ async function forward(svc, subPath, req, res) {
   const method = req.method.toUpperCase();
   const hasBody = !['GET', 'HEAD'].includes(method);
 
+  const controller = new AbortController();
   const init = {
     method,
     headers,
     redirect: 'manual',
+    signal: controller.signal,
   };
   if (hasBody && req.body && req.body.length) init.body = req.body;
 
-  const controller = new AbortController();
   // Interactive indexer searches (Sonarr/Radarr /release) can take a while as
-  // they query every indexer, so allow a generous ceiling.
+  // they query every indexer, so allow a generous ceiling for the response
+  // headers. Once headers arrive the timer is cleared and the body is streamed.
   const timeout = setTimeout(() => controller.abort(), 120000);
-  init.signal = controller.signal;
 
   try {
     const upstream = await fetch(target, init);
@@ -204,11 +255,12 @@ async function forward(svc, subPath, req, res) {
     res.status(upstream.status);
     const ct = upstream.headers.get('content-type');
     if (ct) res.set('content-type', ct);
-    // Prevent leaking upstream auth-related headers back to the browser.
-    const buf = Buffer.from(await upstream.arrayBuffer());
-    res.send(buf);
+    // Stream the body instead of buffering it; do NOT forward upstream
+    // auth-related headers (set-cookie / www-authenticate) back to the browser.
+    await pipeUpstream(upstream, res, controller);
   } catch (err) {
     clearTimeout(timeout);
+    if (res.headersSent) { if (!res.writableEnded) res.destroy(err); return; }
     const aborted = err.name === 'AbortError';
     const reason = classifyUpstreamError(err);
     res.status(aborted ? 504 : 502).json({
@@ -235,7 +287,7 @@ const HEALTH_PATH = {
 };
 
 // qBittorrent needs Bearer/cookie auth + Referer, so it has its own ping.
-async function pingQbit(svc, started) {
+async function pingQbit(svc, serviceKey, started) {
   const base = trimSlash(svc.baseUrl);
   const useApiKey = !!svc.apiKey;
   const fetchVersion = async (sid) => {
@@ -249,9 +301,9 @@ async function pingQbit(svc, started) {
   };
   try {
     let sid = '';
-    if (!useApiKey) sid = await ensureQbitSid(svc, true);
+    if (!useApiKey) sid = await ensureQbitSid(svc, serviceKey, true);
     let u = await fetchVersion(sid);
-    if (!useApiKey && (u.status === 401 || u.status === 403)) { sid = await ensureQbitSid(svc, true); u = await fetchVersion(sid); }
+    if (!useApiKey && (u.status === 401 || u.status === 403)) { sid = await ensureQbitSid(svc, serviceKey, true); u = await fetchVersion(sid); }
     const ms = Date.now() - started;
     let version; try { version = (await u.text()).trim(); } catch { /* ignore */ }
     const error = u.ok ? undefined : (u.status === 401 || u.status === 403) ? 'Auth / access denied' : `HTTP ${u.status}`;
@@ -304,10 +356,14 @@ export async function serviceRequest(svc, path, { method = 'POST', body, timeout
   } finally { clearTimeout(timer); }
 }
 
-export async function pingService(svc) {
+export async function pingService(svc, serviceKey) {
   const started = Date.now();
   if (!svc || !svc.baseUrl) return { ok: false, status: 0, ms: 0, error: 'No base URL configured' };
-  if (svc.type === 'qbittorrent') return pingQbit(svc, started);
+  // Fall back to a stable per-service identifier so distinct services never
+  // share a qBittorrent session cache entry (serviceKey should be provided by
+  // callers that have it; svc.baseUrl is a safe last-resort discriminator).
+  const key = serviceKey || svc.key || svc.baseUrl;
+  if (svc.type === 'qbittorrent') return pingQbit(svc, key, started);
   try {
     const path = HEALTH_PATH[svc.type] || '';
     const [p, q] = path.split('?');
@@ -347,7 +403,7 @@ export function createProxyRouter(cfg) {
       return res.status(500).json({ error: `Service ${req.params.service} has no baseUrl configured` });
     }
     const subPath = req.params[0] || '';
-    await forward(svc, subPath, req, res);
+    await forward(svc, req.params.service, subPath, req, res);
   });
 
   // Allow proxying the service root as well.
@@ -356,7 +412,7 @@ export function createProxyRouter(cfg) {
     if (!svc || svc.enabled === false) {
       return res.status(404).json({ error: `Unknown or disabled service: ${req.params.service}` });
     }
-    await forward(svc, '', req, res);
+    await forward(svc, req.params.service, '', req, res);
   });
 
   return router;

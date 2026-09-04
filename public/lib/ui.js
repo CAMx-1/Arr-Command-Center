@@ -302,7 +302,27 @@ export function tabs(body, tabsDef, storageKey) {
   // Reposition once mounted and on resize.
   requestAnimationFrame(moveIndicator);
   setTimeout(moveIndicator, 60);
-  window.addEventListener('resize', moveIndicator);
+
+  // Keep the indicator aligned as the bar's size changes (viewport resize,
+  // sidebar toggle, orientation, late font load). Previously this attached a
+  // permanent window 'resize' listener that was never removed, so every tab
+  // view leaked a listener (and its detached DOM closure) on navigation.
+  // Prefer a ResizeObserver scoped to the bar itself; it disconnects
+  // automatically once the bar is detached. A window-listener fallback
+  // self-cleans the same way for environments without ResizeObserver.
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => {
+      if (!bar.isConnected) { ro.disconnect(); return; } // bar removed on nav — self-clean
+      moveIndicator();
+    });
+    ro.observe(bar);
+  } else if (typeof window !== 'undefined' && window.addEventListener) {
+    const onResize = () => {
+      if (!bar.isConnected) { window.removeEventListener('resize', onResize); return; } // self-clean once detached
+      moveIndicator();
+    };
+    window.addEventListener('resize', onResize);
+  }
 
   // Horizontal swipe to change tabs (touch). Ignores mostly-vertical drags and
   // swipes that begin inside a horizontally-scrollable element or a form field.
