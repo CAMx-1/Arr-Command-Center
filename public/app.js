@@ -560,6 +560,23 @@ function discoverSearchRow(r, seerrSvc) {
   );
 }
 
+// Open a library title in its Sonarr/Radarr app and pre-filter to it. Stashing
+// the term + changing the hash is enough when we're coming from a different
+// route, but if we're ALREADY on that app's route the hash assignment fires no
+// `hashchange`, so navigate() wouldn't re-run and the filter would be dropped.
+// In that case we invoke navigate() directly so the deep-link filter applies.
+function openInArr(m) {
+  setPendingFilter(m.svc.key, m.title);
+  // The filter lives on the Library tab, but tabs() restores whatever tab the
+  // app was last left on. Pin the Library tab so the deep-link always lands
+  // there (matters most when we're already in the app on another tab).
+  const libTab = m.svc.type === 'sonarr' ? 'series' : 'movies';
+  try { localStorage.setItem(`tabs-${m.svc.key}`, libTab); } catch { /* ignore */ }
+  closeModal();
+  if (currentRoute() === m.svc.key) navigate();
+  else location.hash = `#/${m.svc.key}`;
+}
+
 function searchRow(m) {
   const url = m.poster && (m.poster.remoteUrl || m.poster.url);
   const openMeta = () => { if (m.tmdbId) openDetailModal({ api, state }, { mediaType: m.mediaType, tmdbId: m.tmdbId, fallback: { title: m.title, year: m.year, posterUrl: url } }); };
@@ -576,7 +593,7 @@ function searchRow(m) {
     ),
     h('div', { class: 'row-actions' },
       h('button', { class: 'btn sm', onclick: () => openArrInfo(m), title: 'Storage & file info' }, 'Info'),
-      h('button', { class: 'btn sm primary', title: `Open in ${m.svc.label} and filter to this title`, onclick: () => { setPendingFilter(m.svc.key, m.title); closeModal(); location.hash = `#/${m.svc.key}`; } }, 'Open'),
+      h('button', { class: 'btn sm primary', title: `Open in ${m.svc.label} and filter to this title`, onclick: () => openInArr(m) }, 'Open'),
     ),
   );
 }
@@ -604,7 +621,7 @@ function openArrInfo(m) {
     body: h('div', {}, ...rows),
     footer: h('div', { style: { display: 'flex', gap: '10px', justifyContent: 'flex-end', width: '100%' } },
       h('button', { class: 'btn', onclick: closeModal }, 'Close'),
-      h('button', { class: 'btn primary', onclick: () => { setPendingFilter(m.svc.key, m.title); closeModal(); location.hash = `#/${m.svc.key}`; } }, `Open ${m.svc.label}`),
+      h('button', { class: 'btn primary', onclick: () => openInArr(m) }, `Open ${m.svc.label}`),
     ),
   });
 }
