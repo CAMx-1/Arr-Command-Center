@@ -37,21 +37,21 @@
 
 /* Dark theme overrides (sidebar stays its purple gradient) */
 html[data-theme="dark"] {
-  --bg: #0f1117;
-  --bg-grad-1: #141726;
-  --bg-grad-2: #181528;
-  --surface: #1b1f2b;
-  --surface-2: #232838;
-  --surface-hover: #2a3042;
-  --border: #2a2f3d;
-  --border-strong: #3a4152;
-  --text: #e6e8ee;
-  --text-dim: #a3abbd;
-  --text-faint: #6b7280;
-  --accent-soft: #241f3d;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.4), 0 2px 6px rgba(0,0,0,0.3);
-  --shadow: 0 6px 20px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.35);
-  --shadow-lg: 0 18px 40px rgba(0,0,0,0.55);
+  --bg: #171a24;
+  --bg-grad-1: #1d2133;
+  --bg-grad-2: #231e38;
+  --surface: #252a39;
+  --surface-2: #2e3548;
+  --surface-hover: #384158;
+  --border: #394052;
+  --border-strong: #4d576c;
+  --text: #eceef4;
+  --text-dim: #b0b7c8;
+  --text-faint: #7f8798;
+  --accent-soft: #30294a;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.28), 0 2px 6px rgba(0,0,0,0.22);
+  --shadow: 0 6px 20px rgba(0,0,0,0.32), 0 2px 6px rgba(0,0,0,0.26);
+  --shadow-lg: 0 18px 40px rgba(0,0,0,0.42);
 }
 html[data-theme="dark"] .hex-face { background: linear-gradient(160deg, var(--surface), var(--surface-2)); }
 html[data-theme="dark"] .stat-hex { background: linear-gradient(160deg, var(--surface), var(--surface-2)); }
