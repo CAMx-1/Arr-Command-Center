@@ -455,6 +455,11 @@ button { font-family: inherit; cursor: pointer; }
 .hx-overlay .pill.warn { background: #f59e0b; color: #3a2e00; }
 .hx-overlay .pill.down { background: #ef4444; }
 .hx-overlay .pill.muted { background: rgba(255, 255, 255, 0.28); }
+/* WebKit repaints drop-shadow + clipped hexes very slowly while scrolling on
+   touch layouts. The gradient border still provides depth without that cost. */
+@media (max-width: 760px) {
+  .seerr-hex, .seerr-hex:hover { filter: none; }
+}
 .list .row { animation: rowIn 0.34s var(--ease) backwards; }
 @keyframes rowIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .row .poster { width: 48px; height: 70px; border-radius: 8px; background: linear-gradient(145deg, var(--accent-soft), #fbeffb); object-fit: cover; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--accent-2); }

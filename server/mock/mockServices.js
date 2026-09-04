@@ -40,6 +40,67 @@ function mockReleases(name) {
   ];
 }
 
+function fillSonarrLibrary(series, requestedSize) {
+  const size = Number.parseInt(requestedSize, 10);
+  if (!Number.isFinite(size) || size <= series.length) return series;
+  const networks = ['Apple TV+', 'HBO', 'Netflix', 'FX', 'Prime Video'];
+  for (let id = series.length + 1; id <= size; id++) {
+    const episodeCount = 8 + (id % 5) * 4;
+    const missing = id % 4 === 0 ? 0 : id % 7;
+    const episodeFileCount = Math.max(0, episodeCount - missing);
+    const title = `Performance Series ${String(id).padStart(3, '0')}`;
+    series.push({
+      id,
+      title,
+      year: 2010 + (id % 15),
+      tvdbId: 900000 + id,
+      status: id % 5 === 0 ? 'ended' : 'continuing',
+      monitored: id % 3 !== 0,
+      seasonCount: 1 + (id % 6),
+      network: networks[id % networks.length],
+      overview: `Deterministic performance fixture for series ${String(id).padStart(3, '0')}.`,
+      path: `C:\\Media\\TV\\${title}`,
+      rootFolderPath: 'C:\\Media\\TV',
+      statistics: {
+        episodeFileCount,
+        episodeCount,
+        percentOfEpisodes: episodeCount ? Math.round((episodeFileCount / episodeCount) * 1000) / 10 : 0,
+        sizeOnDisk: episodeFileCount * (700 * 1024 * 1024 + (id % 4) * 100 * 1024 * 1024),
+      },
+      images: [],
+    });
+  }
+  return series;
+}
+
+function fillRadarrLibrary(movies, requestedSize) {
+  const size = Number.parseInt(requestedSize, 10);
+  if (!Number.isFinite(size) || size <= movies.length) return movies;
+  const studios = ['Aperture Pictures', 'Northstar Films', 'Beacon Studios', 'Summit Works'];
+  for (let id = movies.length + 1; id <= size; id++) {
+    const hasFile = id % 4 !== 0;
+    const title = `Performance Movie ${String(id).padStart(3, '0')}`;
+    const year = 2005 + (id % 20);
+    movies.push({
+      id,
+      title,
+      year,
+      tmdbId: 800000 + id,
+      status: id % 8 === 0 ? 'announced' : 'released',
+      monitored: id % 3 !== 0,
+      hasFile,
+      runtime: 85 + (id % 70),
+      overview: `Deterministic performance fixture for movie ${String(id).padStart(3, '0')}.`,
+      path: `C:\\Media\\Movies\\${title} (${year})`,
+      rootFolderPath: 'C:\\Media\\Movies',
+      sizeOnDisk: hasFile ? (4 + (id % 16)) * 1024 * 1024 * 1024 : 0,
+      studio: studios[id % studios.length],
+      images: [],
+    });
+  }
+  return movies;
+}
+
 // ---------------- Sonarr ----------------
 function makeSonarr(opts = {}) {
   const app = express();
@@ -51,6 +112,7 @@ function makeSonarr(opts = {}) {
     { id: 4, title: 'Severance', year: 2022, tvdbId: 371980, status: 'continuing', monitored: false, seasonCount: 2, network: 'Apple TV+', overview: 'Duplicate entry added on another drive.', path: 'C:\\Media\\TV2\\Severance', rootFolderPath: 'C:\\Media\\TV2', statistics: { episodeFileCount: 0, episodeCount: 19, percentOfEpisodes: 0, sizeOnDisk: 0 }, images: [] },
   ];
   if (opts.series) series = opts.series.map((s) => ({ ...s }));
+  else series = fillSonarrLibrary(series, opts.librarySize);
   let queue = [
     { id: 101, title: 'Severance S02E10', seriesId: 1, status: 'downloading', trackedDownloadState: 'downloading', size: 2147483648, sizeleft: 536870912, timeleft: '00:04:12', estimatedCompletionTime: new Date(Date.now() + 252000).toISOString(), downloadClient: 'SABnzbd', indexer: 'NZBgeek' },
   ];
@@ -150,6 +212,7 @@ function makeRadarr(opts = {}) {
     { id: 5, title: '1917', year: 2019, tmdbId: 530915, status: 'released', monitored: true, hasFile: true, runtime: 119, overview: 'Two soldiers race against time to deliver a message.', path: 'C:\\Media\\Movies\\1917 (2019)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 8589934592, studio: 'DreamWorks', images: [] },
   ];
   if (opts.movies) movies = opts.movies.map((m) => ({ ...m }));
+  else movies = fillRadarrLibrary(movies, opts.librarySize);
   let queue = [
     { id: 201, title: 'Furiosa 2024 2160p', movieId: 3, status: 'downloading', trackedDownloadState: 'downloading', size: 21474836480, sizeleft: 6442450944, timeleft: '00:11:38', downloadClient: 'SABnzbd', indexer: 'DrunkenSlug' },
   ];
@@ -853,14 +916,16 @@ function makeReadarr(opts = {}) {
 }
 
 export function startMockServices() {
+  const librarySize = Number.parseInt(process.env.MOCK_LIBRARY_SIZE || '', 10);
+  const primaryLibraryOptions = Number.isFinite(librarySize) && librarySize > 0 ? { librarySize } : {};
   const defs = [
-    ['sonarr', makeSonarr(), MOCK_PORTS.sonarr],
+    ['sonarr', makeSonarr(primaryLibraryOptions), MOCK_PORTS.sonarr],
     ['sonarr-anime', makeSonarr({ instanceName: 'Sonarr Anime (mock)', series: [
       { id: 1, title: 'Frieren: Beyond Journey\u2019s End', year: 2023, tvdbId: 424536, status: 'continuing', monitored: true, seasonCount: 1, network: 'Nippon TV', overview: 'A mage reflects on her journey after the hero party disbands.', path: '/anime/Frieren', rootFolderPath: '/anime', statistics: { episodeFileCount: 28, episodeCount: 28, percentOfEpisodes: 100, sizeOnDisk: 21474836480 }, images: [] },
       { id: 2, title: 'Attack on Titan', year: 2013, tvdbId: 267440, status: 'ended', monitored: true, seasonCount: 4, network: 'MBS', overview: 'Humanity fights for survival against man-eating titans.', path: '/anime/Attack on Titan', rootFolderPath: '/anime', statistics: { episodeFileCount: 85, episodeCount: 88, percentOfEpisodes: 96.6, sizeOnDisk: 96636764160 }, images: [] },
       { id: 3, title: 'Jujutsu Kaisen', year: 2020, tvdbId: 377543, status: 'continuing', monitored: false, seasonCount: 2, network: 'MBS', overview: 'A student joins a secret organization of sorcerers.', path: '/anime/Jujutsu Kaisen', rootFolderPath: '/anime', statistics: { episodeFileCount: 47, episodeCount: 47, percentOfEpisodes: 100, sizeOnDisk: 53687091200 }, images: [] },
     ] }), MOCK_PORTS.sonarrAnime],
-    ['radarr', makeRadarr(), MOCK_PORTS.radarr],
+    ['radarr', makeRadarr(primaryLibraryOptions), MOCK_PORTS.radarr],
     ['radarr-4k', makeRadarr({ instanceName: 'Radarr 4K (mock)', movies: [
       { id: 1, title: 'Blade Runner 2049', year: 2017, tmdbId: 335984, status: 'released', monitored: true, hasFile: true, runtime: 164, overview: 'A young blade runner uncovers a long-buried secret.', path: '/movies-4k/Blade Runner 2049 (2017)', rootFolderPath: '/movies-4k', sizeOnDisk: 64424509440, studio: 'Alcon', images: [] },
       { id: 2, title: 'Interstellar', year: 2014, tmdbId: 157336, status: 'released', monitored: true, hasFile: true, runtime: 169, overview: 'Explorers travel through a wormhole in search of a new home.', path: '/movies-4k/Interstellar (2014)', rootFolderPath: '/movies-4k', sizeOnDisk: 75161927680, studio: 'Paramount', images: [] },
