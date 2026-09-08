@@ -70,16 +70,21 @@ export async function renderHome(root, ctx) {
       h('div', { class: 'card panel-bare dashboard-feed-panel', id: 'upcoming-panel' }, h('div', { class: 'dim' }, 'Loading calendar…')),
     ),
     links: h('div', { class: 'card', id: 'links-panel' }, h('div', { class: 'dim' }, 'Loading links…')),
+    streams: h('div', { class: 'card panel-bare dashboard-feed-panel', id: 'streams-panel' }, h('div', { class: 'dim' }, 'Loading active streams…')),
   };
-  const widgets = dashboard.widgets.filter((widget) => widget.visible).map((widget) => h('section', {
-    class: `dashboard-widget widget-${widget.id} size-${widget.size}`, dataset: { widget: widget.id },
-  }, h('div', { class: 'dashboard-widget-head' }, h('h2', { class: 'section-title' }, widget.label)), content[widget.id]));
+  const hasTautulli = (state.services || []).some((s) => s.type === 'tautulli');
+  const widgets = dashboard.widgets
+    .filter((widget) => widget.visible && (widget.id !== 'streams' || hasTautulli))
+    .map((widget) => h('section', {
+      class: `dashboard-widget widget-${widget.id} size-${widget.size}`, dataset: { widget: widget.id },
+    }, h('div', { class: 'dashboard-widget-head' }, h('h2', { class: 'section-title' }, widget.label)), content[widget.id]));
   mount(root, h('div', { class: 'dashboard-grid', dataset: { dashboard: dashboard.id } }, ...widgets));
 
   for (const svc of shown) hydrateCardStats(svc, ctx);
   hydrateOperations(ctx);
   hydrateUpcoming(ctx);
   hydrateLinks(ctx);
+  hydrateStreams(ctx);
   if (ctx.params.focus) requestAnimationFrame(() => document.querySelector(`.widget-${CSS.escape(ctx.params.focus)}`)?.scrollIntoView({ block: 'start' }));
 }
 
@@ -264,6 +269,60 @@ async function hydrateLinks(ctx) {
 
 const pad2 = (n) => String(n ?? 0).padStart(2, '0');
 
+function fmtStreamBandwidth(kbps) {
+  const n = Number(kbps) || 0;
+  return n >= 1000 ? `${(n / 1000).toFixed(1)} Mbps` : `${n} kbps`;
+}
+
+// Tautulli "Active Streams" Overview widget: a summary line (streaming /
+// direct-play / bandwidth) plus a now-playing list, aggregated across every
+// configured Tautulli instance. Posters stream through the proxy so the Plex
+// token stays server-side. The section itself is only rendered when at least
+// one Tautulli service exists (see the render filter above).
+async function hydrateStreams(ctx) {
+  const panel = document.getElementById('streams-panel');
+  if (!panel) return;
+  const { api } = ctx;
+  const services = (ctx.state.services || []).filter((svc) => svc.type === 'tautulli');
+  if (!services.length) return;
+  try {
+    const results = (await Promise.all(services.map((svc) =>
+      api.tautulli(svc.key).get('get_activity').then((d) => ({ svc, d })).catch(() => null)
+    ))).filter(Boolean);
+    let streamCount = 0; let directPlay = 0; let bandwidth = 0;
+    const rows = [];
+    for (const { svc, d } of results) {
+      const sessions = d.sessions || [];
+      streamCount += Number(d.stream_count ?? sessions.length) || 0;
+      directPlay += Number(d.stream_count_direct_play) || 0;
+      bandwidth += Number(d.total_bandwidth) || 0;
+      for (const s of sessions) {
+        const state = s.state || 'playing';
+        const isTranscode = (s.transcode_decision || '').toLowerCase().includes('transcode');
+        const thumb = s.grandparent_thumb || s.thumb;
+        const url = thumb
+          ? `/api/proxy/${svc.key}/api/v2?${new URLSearchParams({ cmd: 'pms_image_proxy', img: thumb, width: '80', height: '80', fallback: 'poster' }).toString()}`
+          : null;
+        rows.push(activityRow({
+          posterUrl: url, title: s.full_title || s.title,
+          sub: `${s.friendly_name || s.user || 'unknown'} · ${state} · ${isTranscode ? 'Transcode' : 'Direct Play'}`,
+          progress: Number(s.progress_percent) || 0,
+          nav: { key: svc.key, tab: 'streams' },
+        }));
+      }
+    }
+    const badges = h('div', { class: 'seerr-widget-summary' },
+      h('span', { class: streamCount ? 'pill ok' : 'pill muted' }, `${streamCount} streaming`),
+      h('span', { class: 'pill muted' }, `${directPlay} direct play`),
+      h('span', { class: 'pill muted' }, fmtStreamBandwidth(bandwidth)),
+    );
+    if (!rows.length) { mount(panel, badges, dashboardFeedEmpty('No active streams', 'Nobody is watching right now')); return; }
+    mount(panel, badges, h('div', { class: 'dashboard-feed-list' }, ...rows));
+  } catch (error) {
+    mount(panel, empty('', 'Could not load active streams', error.message));
+  }
+}
+
 // Merged upcoming calendar across all configured Sonarr + Radarr instances.
 async function hydrateUpcoming(ctx) {
   const panel = document.getElementById('upcoming-panel');
@@ -316,6 +375,7 @@ async function hydrateUpcoming(ctx) {
 // Silent refresh used by the auto-refresh interval (no loading flash).
 export function refreshHome(ctx) {
   hydrateOperations(ctx, true);
+  hydrateStreams(ctx);
   for (const svc of ctx.state.services) hydrateCardStats(svc, ctx);
 }
 

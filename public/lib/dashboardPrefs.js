@@ -1,6 +1,7 @@
 export const DEFAULT_WIDGETS = [
   { id: 'services', label: 'Services', visible: true, size: 'full' },
   { id: 'activity', label: 'Activity', visible: true, size: 'full' },
+  { id: 'streams', label: 'Tautulli Active Streams', visible: true, size: 'full' },
   { id: 'seerr', label: 'Seerr Requests & Issues', visible: true, size: 'full' },
   { id: 'upcoming', label: 'Upcoming', visible: true, size: 'full' },
   { id: 'links', label: 'Quick Links', visible: true, size: 'full' },
