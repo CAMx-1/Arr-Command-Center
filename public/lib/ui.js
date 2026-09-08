@@ -263,9 +263,10 @@ export function svcIcon(src, emoji = '', size = 22) {
 // tabsDef: [{ id, label, render(container) }]. Returns the tab-bar element and
 // mounts content into `body`. Remembers last tab per storageKey. Includes an
 // animated sliding indicator and an entrance animation on each panel switch.
-export function tabs(body, tabsDef, storageKey) {
+export function tabs(body, tabsDef, storageKey, options = {}) {
   const saved = storageKey ? localStorage.getItem(storageKey) : null;
-  let activeId = (saved && tabsDef.some((t) => t.id === saved)) ? saved : tabsDef[0].id;
+  const requested = options.activeId || saved;
+  let activeId = (requested && tabsDef.some((t) => t.id === requested)) ? requested : tabsDef[0].id;
   const bar = h('div', { class: 'tabs' });
   const indicator = h('span', { class: 'tab-indicator' });
 
@@ -276,9 +277,10 @@ export function tabs(body, tabsDef, storageKey) {
     indicator.style.transform = `translateX(${btn.offsetLeft}px)`;
   }
 
-  function select(id, animate = true) {
+  function select(id, animate = true, notify = true) {
     activeId = id;
     if (storageKey) localStorage.setItem(storageKey, id);
+    if (notify && options.onChange) options.onChange(id);
     for (const btn of bar.querySelectorAll('.tab')) btn.classList.toggle('active', btn.dataset.id === id);
     const def = tabsDef.find((t) => t.id === id);
     clear(body);
@@ -302,7 +304,7 @@ export function tabs(body, tabsDef, storageKey) {
     bar.appendChild(h('button', { class: 'tab', dataset: { id: t.id }, onclick: () => select(t.id) }, t.label));
   }
   bar.appendChild(indicator);
-  select(activeId, false);
+  select(activeId, false, false);
   // Reposition once mounted and on resize.
   requestAnimationFrame(moveIndicator);
   setTimeout(moveIndicator, 60);
@@ -334,7 +336,7 @@ export function tabs(body, tabsDef, storageKey) {
   body.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) { swiping = false; return; }
     const el = e.target;
-    if (el && el.closest && el.closest('.swipe-wrap, .stat-scroll, .bchart-plot, .stat-strip, input, textarea, select, .modal-overlay')) { swiping = false; return; }
+    if (el && el.closest && el.closest('.swipe-wrap, .arr-table-wrap, .compare-drawer, .stat-scroll, .bchart-plot, .stat-strip, input, textarea, select, .modal-overlay')) { swiping = false; return; }
     const t = e.touches[0]; sx = t.clientX; sy = t.clientY; swiping = true;
   }, { passive: true });
   body.addEventListener('touchend', (e) => {

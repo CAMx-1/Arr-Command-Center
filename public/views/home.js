@@ -1,8 +1,9 @@
-import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, pct, svcIcon, toast } from '../lib/ui.js';
+import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast, openModal, closeModal } from '../lib/ui.js';
 import { SERVICE_META } from '../app.js';
 import { listFailed, removeFailed } from '../lib/failedRequests.js';
 import { visibleServices } from '../lib/servicePrefs.js';
 import { honeycombRows, isWide } from '../lib/honeycomb.js';
+import { loadDashboards, saveDashboards, activeDashboard, createDashboard, removeDashboard, updateDashboard, moveWidget } from '../lib/dashboardPrefs.js';
 
 // ---- Activity source definitions ----
 const ACTIVITY_DEFS = [
@@ -30,43 +31,192 @@ function saveActivityPrefs(prefs) { localStorage.setItem('activity-sources', JSO
 
 export async function renderHome(root, ctx) {
   const { api, state } = ctx;
-  ctx.setActions(h('span', { class: 'dim', style: { fontSize: '13px' } }, state.config.mock ? 'Showing mock data' : 'Live'));
+  let dashboards = loadDashboards();
+  const dashboard = activeDashboard(dashboards);
+  ctx.setActions(
+    h('span', { class: 'dim', style: { fontSize: '13px' } }, state.config.mock ? 'Showing mock data' : 'Live'),
+    dashboardActions(ctx, dashboards),
+  );
 
   mount(root, spinner());
-
   let status = {};
   try { status = await api.status(); state.status = status; } catch { /* ignore */ }
 
   const shown = visibleServices(state.services);
   const rows = honeycombRows(shown);
   const wide = isWide(shown.length);
-  // When the two rows are equal length they don't nestle by centering alone, so
-  // flag it for CSS to offset alternate rows.
   const evenSplit = wide && rows.length === 2 && rows[0].length === rows[1].length;
   const hcClass = 'honeycomb' + (wide ? ' hc-wide' : '') + (evenSplit ? ' hc-wide-even' : '');
-  const honeycomb = h('div', { class: hcClass },
-    ...rows.map((rowItems) =>
-      h('div', { class: 'hc-row' }, ...rowItems.map((svc) => hexCell(svc, status[svc.key], ctx)))));
+  const honeycomb = h('div', { class: hcClass }, ...rows.map((rowItems) =>
+    h('div', { class: 'hc-row' }, ...rowItems.map((svc) => hexCell(svc, status[svc.key], ctx)))));
 
-  mount(root,
-    h('div', { class: 'section-title' }, 'Services'),
-    honeycomb,
-    h('div', { class: 'activity-header' },
-      h('div', { class: 'section-title', style: { margin: 0 } }, 'Activity'),
-      h('div', { class: 'activity-toggles', id: 'activity-toggles' }),
+  const content = {
+    status: h('div', { class: 'ops-summary', id: 'ops-status-panel' }, h('div', { class: 'dim' }, 'Loading operational status…')),
+    inbox: h('div', { class: 'card', id: 'inbox-panel' }, h('div', { class: 'dim' }, 'Loading action inbox…')),
+    services: honeycomb,
+    activity: h('div', {},
+      h('div', { class: 'timeline-tools' },
+        h('input', { class: 'input', id: 'timeline-search', type: 'search', placeholder: 'Filter activity…' }),
+        h('select', { class: 'input', id: 'timeline-kind' }, h('option', { value: '' }, 'All events')),
+      ),
+      h('div', { class: 'card', id: 'activity-panel' }, h('div', { class: 'dim' }, 'Loading activity…')),
     ),
-    h('div', { class: 'card', id: 'activity-panel' }, h('div', { class: 'dim' }, 'Loading activity…')),
-    h('div', { class: 'section-title', style: { marginTop: '26px' } }, 'Upcoming'),
-    h('div', { class: 'card', id: 'upcoming-panel' }, h('div', { class: 'dim' }, 'Loading calendar…')),
-    h('div', { class: 'section-title', style: { marginTop: '26px' } }, 'Quick Links'),
-    h('div', { class: 'card', id: 'links-panel' }, h('div', { class: 'dim' }, 'Loading links…')),
-  );
+    upcoming: h('div', { class: 'card', id: 'upcoming-panel' }, h('div', { class: 'dim' }, 'Loading calendar…')),
+    links: h('div', { class: 'card', id: 'links-panel' }, h('div', { class: 'dim' }, 'Loading links…')),
+  };
+  const widgets = dashboard.widgets.filter((widget) => widget.visible).map((widget) => h('section', {
+    class: `dashboard-widget widget-${widget.id} size-${widget.size}`, dataset: { widget: widget.id },
+  }, h('div', { class: 'dashboard-widget-head' }, h('h2', { class: 'section-title' }, widget.label)), content[widget.id]));
+  mount(root, h('div', { class: 'dashboard-grid', dataset: { dashboard: dashboard.id } }, ...widgets));
 
   for (const svc of shown) hydrateCardStats(svc, ctx);
-  buildActivityToggles(ctx);
-  hydrateActivity(ctx);
+  hydrateOperations(ctx);
   hydrateUpcoming(ctx);
   hydrateLinks(ctx);
+  if (ctx.params.focus) requestAnimationFrame(() => document.querySelector(`.widget-${CSS.escape(ctx.params.focus)}`)?.scrollIntoView({ block: 'start' }));
+}
+
+function dashboardActions(ctx, state) {
+  const select = h('select', { class: 'input dashboard-select', title: 'Active dashboard' },
+    ...state.dashboards.map((dashboard) => h('option', { value: dashboard.id, selected: dashboard.id === state.activeId }, dashboard.name)),
+  );
+  select.value = state.activeId;
+  select.addEventListener('change', () => { saveDashboards({ ...state, activeId: select.value }); ctx.reload(); });
+  return h('div', { class: 'dashboard-actions' },
+    select,
+    h('button', { class: 'btn sm', onclick: () => openDashboardEditor(ctx) }, 'Customize'),
+    h('button', { class: 'btn sm', onclick: () => openNewDashboard(ctx) }, '＋ Dashboard'),
+  );
+}
+
+function openNewDashboard(ctx) {
+  const input = h('input', { class: 'input', maxlength: '60', placeholder: 'Dashboard name' });
+  const create = () => {
+    try { saveDashboards(createDashboard(loadDashboards(), input.value)); closeModal(); ctx.reload(); }
+    catch (error) { toast(error.message, 'error'); }
+  };
+  input.addEventListener('keydown', (event) => { if (event.key === 'Enter') create(); });
+  openModal({ title: 'New dashboard', body: input, footer: h('button', { class: 'btn primary', onclick: create }, 'Create') });
+}
+
+function openDashboardEditor(ctx) {
+  const state = loadDashboards();
+  const dashboard = activeDashboard(state);
+  const rows = dashboard.widgets.map((widget, index) => h('div', {
+    class: 'dashboard-edit-row', draggable: 'true', dataset: { widget: widget.id },
+    ondragstart: (event) => { event.dataTransfer.setData('text/plain', widget.id); event.dataTransfer.effectAllowed = 'move'; },
+    ondragover: (event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; },
+    ondrop: (event) => {
+      event.preventDefault();
+      const source = event.dataTransfer.getData('text/plain');
+      const from = dashboard.widgets.findIndex((entry) => entry.id === source);
+      const to = dashboard.widgets.findIndex((entry) => entry.id === widget.id);
+      if (from >= 0 && to >= 0 && from !== to) {
+        dashboard.widgets = moveWidget(dashboard.widgets, source, to - from);
+        saveDashboards(updateDashboard(state, dashboard.id, { widgets: dashboard.widgets }));
+        openDashboardEditor(ctx);
+      }
+    },
+  },
+    h('label', { class: 'dashboard-visible' }, h('input', {
+      type: 'checkbox', checked: widget.visible,
+      onchange: (event) => { widget.visible = event.target.checked; },
+    }), widget.label),
+    h('select', { class: 'input', onchange: (event) => { widget.size = event.target.value; } },
+      ...['small', 'medium', 'wide', 'full'].map((size) => h('option', { value: size, selected: widget.size === size }, size)),
+    ),
+    h('button', { class: 'btn sm', disabled: index === 0, title: 'Move up', onclick: () => {
+      dashboard.widgets = moveWidget(dashboard.widgets, widget.id, -1); saveDashboards(updateDashboard(state, dashboard.id, { widgets: dashboard.widgets })); openDashboardEditor(ctx);
+    } }, '↑'),
+    h('button', { class: 'btn sm', disabled: index === dashboard.widgets.length - 1, title: 'Move down', onclick: () => {
+      dashboard.widgets = moveWidget(dashboard.widgets, widget.id, 1); saveDashboards(updateDashboard(state, dashboard.id, { widgets: dashboard.widgets })); openDashboardEditor(ctx);
+    } }, '↓'),
+  ));
+  const save = () => { saveDashboards(updateDashboard(state, dashboard.id, { widgets: dashboard.widgets })); closeModal(); ctx.reload(); };
+  const footer = h('div', { class: 'dashboard-editor-foot' },
+    state.dashboards.length > 1 ? h('button', { class: 'btn danger', onclick: () => { saveDashboards(removeDashboard(state, dashboard.id)); closeModal(); ctx.reload(); } }, 'Delete dashboard') : null,
+    h('button', { class: 'btn primary', onclick: save }, 'Save layout'),
+  );
+  openModal({ title: `Customize ${dashboard.name}`, body: h('div', { class: 'dashboard-editor' }, ...rows), footer, wide: true });
+}
+
+let lastOperations = null;
+async function hydrateOperations(ctx, silent = false) {
+  const statusPanel = document.getElementById('ops-status-panel');
+  const inboxPanel = document.getElementById('inbox-panel');
+  const activityPanel = document.getElementById('activity-panel');
+  if (!statusPanel && !inboxPanel && !activityPanel) return;
+  if (!silent) {
+    if (inboxPanel) mount(inboxPanel, h('div', { class: 'dim' }, 'Loading action inbox…'));
+    if (activityPanel) mount(activityPanel, h('div', { class: 'dim' }, 'Loading activity…'));
+  }
+  try { lastOperations = await ctx.api.operations({ fresh: !silent }); }
+  catch (error) {
+    if (inboxPanel) mount(inboxPanel, empty('', 'Could not load action inbox', error.message));
+    if (activityPanel) mount(activityPanel, empty('', 'Could not load activity', error.message));
+    return;
+  }
+  const summary = lastOperations.summary || {};
+  const unavailable = Object.values(ctx.state.status || {}).filter((entry) => entry && !entry.ok).length || summary.serviceErrors || 0;
+  if (statusPanel) mount(statusPanel,
+    summaryCard(summary.total || 0, 'Needs attention', summary.critical ? 'down' : summary.warning ? 'warn' : 'ok'),
+    summaryCard(summary.critical || 0, 'Critical', summary.critical ? 'down' : 'muted'),
+    summaryCard(summary.approvals || 0, 'Approvals', summary.approvals ? 'warn' : 'muted'),
+    summaryCard(summary.missing || 0, 'Missing', summary.missing ? 'warn' : 'muted'),
+    summaryCard(unavailable, 'Unavailable', unavailable ? 'down' : 'ok'),
+  );
+  if (inboxPanel) {
+    const entries = lastOperations.inbox || [];
+    mount(inboxPanel, entries.length ? h('div', { class: 'ops-inbox-list' }, ...entries.map((entry) => operationRow(entry, ctx, true))) : empty('', 'All clear', 'No actions currently need attention'));
+  }
+  wireTimeline(ctx);
+}
+
+function summaryCard(value, label, cls) {
+  return h('div', { class: `ops-summary-card ${cls}` }, h('strong', {}, String(value)), h('span', {}, label));
+}
+
+function operationRow(entry, ctx, actionable = false) {
+  const navigate = () => entry.serviceKey && ctx.go(entry.serviceKey, entry.tab ? { tab: entry.tab } : {});
+  let actions = null;
+  if (actionable && entry.action?.type === 'overseerr-request') {
+    const act = async (verb, event) => {
+      event.stopPropagation();
+      try { await ctx.api.seerr(entry.serviceKey).post(`request/${entry.action.requestId}/${verb}`); toast(`Request ${verb}d`, 'success'); await hydrateOperations(ctx); }
+      catch (error) { toast(error.message, 'error'); }
+    };
+    actions = h('div', { class: 'row-actions' },
+      h('button', { class: 'btn sm primary', onclick: (event) => act('approve', event) }, 'Approve'),
+      h('button', { class: 'btn sm danger', onclick: (event) => act('decline', event) }, 'Decline'),
+    );
+  }
+  return h('div', { class: `row operation-row severity-${entry.severity || 'info'}${entry.serviceKey ? ' clickable' : ''}`, onclick: navigate },
+    h('span', { class: `operation-marker ${entry.severity || 'info'}` }),
+    h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, entry.title),
+      h('div', { class: 'row-sub' }, `${entry.serviceLabel || ''}${entry.detail ? ` · ${entry.detail}` : ''}`),
+      h('div', { class: 'meta-line' }, h('span', { class: 'pill muted' }, entry.kind || 'event'), entry.at ? h('span', {}, fmtRelative(entry.at)) : null)),
+    actions,
+  );
+}
+
+function wireTimeline(ctx) {
+  const panel = document.getElementById('activity-panel');
+  if (!panel || !lastOperations) return;
+  const search = document.getElementById('timeline-search');
+  const kind = document.getElementById('timeline-kind');
+  const events = lastOperations.activity || [];
+  if (kind && kind.options.length <= 1) {
+    for (const value of [...new Set(events.map((entry) => entry.kind))].sort()) kind.appendChild(h('option', { value }, value.replace(/(^|-)(\w)/g, (_, a, b) => `${a ? ' ' : ''}${b.toUpperCase()}`)));
+  }
+  const render = () => {
+    const term = (search?.value || '').trim().toLowerCase();
+    const selectedKind = kind?.value || '';
+    const shown = events.filter((entry) => (!selectedKind || entry.kind === selectedKind) && (!term || `${entry.title} ${entry.detail} ${entry.serviceLabel}`.toLowerCase().includes(term)));
+    mount(panel, shown.length ? h('div', { class: 'timeline-list' }, ...shown.map((entry) => operationRow(entry, ctx))) : empty('', 'No matching activity'));
+  };
+  search?.addEventListener('input', render);
+  kind?.addEventListener('change', render);
+  render();
 }
 
 async function hydrateLinks(ctx) {
@@ -136,7 +286,7 @@ async function hydrateUpcoming(ctx) {
 
 // Silent refresh used by the auto-refresh interval (no loading flash).
 export function refreshHome(ctx) {
-  hydrateActivity(ctx, true);
+  hydrateOperations(ctx, true);
   for (const svc of ctx.state.services) hydrateCardStats(svc, ctx);
 }
 

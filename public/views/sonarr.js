@@ -8,13 +8,16 @@ import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, invalidate } from '../lib/cache.js';
 import { libraryFilter, consumePendingFilter } from '../lib/libraryFilter.js';
 import { tagEditor, arrCommandBar, loadTags, openManualImport } from '../lib/arrActions.js';
+import { compactTable } from '../lib/tableView.js';
+import { savedViewsControl } from '../lib/savedViews.js';
+import { comparisonBar } from '../lib/comparisonDrawer.js';
 import { reconcileQueueIssues } from '../lib/queueIssues.js';
 
 export async function renderSonarr(root, ctx) {
   const svc = ctx.service;
   const arr = ctx.api.arr(svc.key);
   ctx.setActions(
-    viewToggle(svc.key, ctx.reload),
+    viewToggle(svc.key, (mode) => ctx.setParams({ mode }, { reload: true }), ctx.params.mode, { table: true }),
     h('button', { class: 'btn primary', onclick: () => openAddModal(arr, ctx) }, '＋ Add Series'),
   );
 
@@ -26,7 +29,10 @@ export async function renderSonarr(root, ctx) {
     { id: 'queue', label: 'Queue', render: (c) => tabQueue(c, arr, ctx) },
     { id: 'history', label: 'History', render: (c) => tabHistory(c, arr) },
     { id: 'system', label: 'System', render: (c) => tabSystem(c, arr, ctx, 'series') },
-  ], `tabs-${svc.key}`);
+  ], `tabs-${svc.key}`, {
+    activeId: ctx.params.tab,
+    onChange: (id) => ctx.setParams({ tab: id === 'series' ? '' : id }),
+  });
   mount(root, bar, body);
 }
 
@@ -66,21 +72,56 @@ async function tabSeries(root, arr, ctx) {
     const series = [...await cachedGet(`arr:${ctx.service.key}:series`, () => arr.get('series'), 300000)];
     series.sort((a, b) => a.title.localeCompare(b.title));
     if (!series.length) return mount(root, empty('', 'No series yet', 'Add a series to get started', { label: '＋ Add Series', onClick: () => openAddModal(arr, ctx) }));
-    const isHex = effectiveMode(ctx.service.key) === 'hex';
+    const mode = ['hex', 'list', 'table'].includes(ctx.params.mode) ? ctx.params.mode : effectiveMode(ctx.service.key);
+    let sortKey = ctx.params.sort || 'title';
+    let direction = ctx.params.dir === 'desc' ? 'desc' : 'asc';
+    let filteredItems = series;
+    const selected = new Map();
     const listWrap = h('div', {});
-    const renderList = (items) => {
-      if (!items.length) return mount(listWrap, empty('', 'No matches', 'No series match this filter'));
-      mount(listWrap, pagedLibrary(items, {
-        isHex,
-        makeCard: (s) => seriesHex(s, arr, ctx),
-        makeRow: (s) => seriesRow(s, arr, ctx),
-      }));
+    const compareWrap = h('div', {});
+    const fields = [
+      { label: 'Year', value: (s) => s.year }, { label: 'Status', value: (s) => s.status },
+      { label: 'Network', value: (s) => s.network }, { label: 'Monitored', value: (s) => s.monitored ? 'Yes' : 'No' },
+      { label: 'Episodes', value: (s) => `${s.statistics?.episodeFileCount ?? 0}/${s.statistics?.episodeCount ?? 0}` },
+      { label: 'Storage', value: (s) => s.statistics?.sizeOnDisk || 0, bytes: true }, { label: 'Path', value: (s) => s.path },
+    ];
+    const updateCompare = () => mount(compareWrap, comparisonBar(selected, { title: 'Compare series', fields, onClear: () => { selected.clear(); renderList(filteredItems); updateCompare(); } }));
+    const openInfo = (s) => {
+      const img = (s.images || []).find((i) => i.coverType === 'poster');
+      openDetailModal(ctx, { mediaType: 'tv', tmdbId: s.tmdbId, fallback: { title: s.title, year: s.year, overview: s.overview, genres: s.genres, rating: s.ratings?.value, posterUrl: img && (img.remoteUrl || img.url) } });
     };
+    const columns = [
+      { key: 'title', label: 'Title', value: (s) => s.title },
+      { key: 'year', label: 'Year', value: (s) => s.year },
+      { key: 'status', label: 'Status', value: (s) => s.status },
+      { key: 'episodes', label: 'Episodes', value: (s) => s.statistics?.episodeFileCount || 0, render: (s) => `${s.statistics?.episodeFileCount ?? 0}/${s.statistics?.episodeCount ?? 0}` },
+      { key: 'size', label: 'Storage', value: (s) => s.statistics?.sizeOnDisk || 0, render: (s) => fmtBytes(s.statistics?.sizeOnDisk || 0) },
+      { key: 'monitored', label: 'Monitored', value: (s) => s.monitored ? 1 : 0, render: (s) => s.monitored ? 'Yes' : 'No' },
+    ];
+    const renderList = (items) => {
+      filteredItems = items;
+      if (!items.length) return mount(listWrap, empty('', 'No matches', 'No series match this filter'));
+      if (mode === 'table') {
+        return mount(listWrap, compactTable(items, {
+          columns, sortKey, direction, selected,
+          onSort: (key, dir) => { sortKey = key; direction = dir; ctx.setParams({ sort: key === 'title' ? '' : key, dir: dir === 'asc' ? '' : dir }); renderList(filteredItems); },
+          onToggle: (entry) => { selected.has(entry.id) ? selected.delete(entry.id) : selected.set(entry.id, entry); renderList(filteredItems); updateCompare(); },
+          onOpen: openInfo,
+        }));
+      }
+      mount(listWrap, pagedLibrary(items, { isHex: mode === 'hex', makeCard: (s) => seriesHex(s, arr, ctx), makeRow: (s) => seriesRow(s, arr, ctx) }));
+    };
+    const initialTerm = ctx.params.q || consumePendingFilter(ctx.service.key);
     const libHead = h('div', { class: 'lib-head' },
-      libraryFilter('series', series, renderList, { initialTerm: consumePendingFilter(ctx.service.key) }),
+      libraryFilter('series', series, renderList, {
+        initialTerm, initialStatus: ctx.params.status || 'all',
+        onStateChange: ({ term, status }) => ctx.setParams({ q: term, status: status === 'all' ? '' : status }),
+      }),
+      savedViewsControl(ctx),
       h('button', { class: 'btn sm', title: 'Bulk select', onclick: () => bulkLibrary(root, { items: series, kind: 'series', arr, invalidateKey: `arr:${ctx.service.key}:series`, onExit: () => tabSeries(root, arr, ctx) }) }, '☑ Select'),
     );
-    mount(root, libHead, listWrap);
+    mount(root, libHead, compareWrap, listWrap);
+    updateCompare();
   } catch (err) {
     mount(root, empty('', 'Failed to load series', err.message, { label: 'Retry', onClick: () => tabSeries(root, arr, ctx) }));
   }

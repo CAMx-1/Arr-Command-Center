@@ -9,12 +9,15 @@ import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, invalidate } from '../lib/cache.js';
 import { libraryFilter, consumePendingFilter } from '../lib/libraryFilter.js';
 import { tagEditor, arrCommandBar, loadTags, openManualImport } from '../lib/arrActions.js';
+import { compactTable } from '../lib/tableView.js';
+import { savedViewsControl } from '../lib/savedViews.js';
+import { comparisonBar } from '../lib/comparisonDrawer.js';
 
 export async function renderRadarr(root, ctx) {
   const svc = ctx.service;
   const arr = ctx.api.arr(svc.key);
   ctx.setActions(
-    viewToggle(svc.key, ctx.reload),
+    viewToggle(svc.key, (mode) => ctx.setParams({ mode }, { reload: true }), ctx.params.mode, { table: true }),
     h('button', { class: 'btn primary', onclick: () => openAddModal(arr, ctx) }, '＋ Add Movie'),
   );
 
@@ -26,7 +29,10 @@ export async function renderRadarr(root, ctx) {
     { id: 'queue', label: 'Queue', render: (c) => tabQueue(c, arr, ctx) },
     { id: 'history', label: 'History', render: (c) => tabHistory(c, arr) },
     { id: 'system', label: 'System', render: (c) => tabSystem(c, arr, ctx, 'movie') },
-  ], `tabs-${svc.key}`);
+  ], `tabs-${svc.key}`, {
+    activeId: ctx.params.tab,
+    onChange: (id) => ctx.setParams({ tab: id === 'movies' ? '' : id }),
+  });
   mount(root, bar, body);
 }
 
@@ -98,21 +104,57 @@ async function tabMovies(root, arr, ctx) {
     const movies = [...await cachedGet(`arr:${ctx.service.key}:movie`, () => arr.get('movie'), 300000)];
     movies.sort((a, b) => a.title.localeCompare(b.title));
     if (!movies.length) return mount(root, empty('', 'No movies yet', 'Add a movie to get started', { label: '＋ Add Movie', onClick: () => openAddModal(arr, ctx) }));
-    const isHex = effectiveMode(ctx.service.key) === 'hex';
+    const mode = ['hex', 'list', 'table'].includes(ctx.params.mode) ? ctx.params.mode : effectiveMode(ctx.service.key);
+    let sortKey = ctx.params.sort || 'title';
+    let direction = ctx.params.dir === 'desc' ? 'desc' : 'asc';
+    let filteredItems = movies;
+    const selected = new Map();
     const listWrap = h('div', {});
-    const renderList = (items) => {
-      if (!items.length) return mount(listWrap, empty('', 'No matches', 'No movies match this filter'));
-      mount(listWrap, pagedLibrary(items, {
-        isHex,
-        makeCard: (m) => movieHex(m, arr, ctx),
-        makeRow: (m) => movieRow(m, arr, ctx),
-      }));
+    const compareWrap = h('div', {});
+    const fields = [
+      { label: 'Year', value: (m) => m.year }, { label: 'Status', value: (m) => m.status },
+      { label: 'Studio', value: (m) => m.studio }, { label: 'Runtime', value: (m) => m.runtime ? `${m.runtime} min` : '—' },
+      { label: 'Downloaded', value: (m) => m.hasFile ? 'Yes' : 'No' }, { label: 'Monitored', value: (m) => m.monitored ? 'Yes' : 'No' },
+      { label: 'Storage', value: (m) => m.sizeOnDisk || 0, bytes: true }, { label: 'Path', value: (m) => m.path },
+    ];
+    const updateCompare = () => mount(compareWrap, comparisonBar(selected, { title: 'Compare movies', fields, onClear: () => { selected.clear(); renderList(filteredItems); updateCompare(); } }));
+    const openInfo = (m) => {
+      const img = (m.images || []).find((i) => i.coverType === 'poster');
+      const rating = m.ratings && (m.ratings.tmdb?.value || m.ratings.imdb?.value || m.ratings.value);
+      openDetailModal(ctx, { mediaType: 'movie', tmdbId: m.tmdbId, fallback: { title: m.title, year: m.year, overview: m.overview, genres: m.genres, rating, runtime: m.runtime, posterUrl: img && (img.remoteUrl || img.url) } });
     };
+    const columns = [
+      { key: 'title', label: 'Title', value: (m) => m.title },
+      { key: 'year', label: 'Year', value: (m) => m.year },
+      { key: 'status', label: 'Status', value: (m) => m.hasFile ? 'Downloaded' : 'Missing', render: (m) => m.hasFile ? 'Downloaded' : 'Missing' },
+      { key: 'runtime', label: 'Runtime', value: (m) => m.runtime || 0, render: (m) => m.runtime ? `${m.runtime} min` : '—' },
+      { key: 'size', label: 'Storage', value: (m) => m.sizeOnDisk || 0, render: (m) => fmtBytes(m.sizeOnDisk || 0) },
+      { key: 'monitored', label: 'Monitored', value: (m) => m.monitored ? 1 : 0, render: (m) => m.monitored ? 'Yes' : 'No' },
+    ];
+    const renderList = (items) => {
+      filteredItems = items;
+      if (!items.length) return mount(listWrap, empty('', 'No matches', 'No movies match this filter'));
+      if (mode === 'table') {
+        return mount(listWrap, compactTable(items, {
+          columns, sortKey, direction, selected,
+          onSort: (key, dir) => { sortKey = key; direction = dir; ctx.setParams({ sort: key === 'title' ? '' : key, dir: dir === 'asc' ? '' : dir }); renderList(filteredItems); },
+          onToggle: (entry) => { selected.has(entry.id) ? selected.delete(entry.id) : selected.set(entry.id, entry); renderList(filteredItems); updateCompare(); },
+          onOpen: openInfo,
+        }));
+      }
+      mount(listWrap, pagedLibrary(items, { isHex: mode === 'hex', makeCard: (m) => movieHex(m, arr, ctx), makeRow: (m) => movieRow(m, arr, ctx) }));
+    };
+    const initialTerm = ctx.params.q || consumePendingFilter(ctx.service.key);
     const libHead = h('div', { class: 'lib-head' },
-      libraryFilter('movie', movies, renderList, { initialTerm: consumePendingFilter(ctx.service.key) }),
+      libraryFilter('movie', movies, renderList, {
+        initialTerm, initialStatus: ctx.params.status || 'all',
+        onStateChange: ({ term, status }) => ctx.setParams({ q: term, status: status === 'all' ? '' : status }),
+      }),
+      savedViewsControl(ctx),
       h('button', { class: 'btn sm', title: 'Bulk select', onclick: () => bulkLibrary(root, { items: movies, kind: 'movie', arr, invalidateKey: `arr:${ctx.service.key}:movie`, onExit: () => tabMovies(root, arr, ctx) }) }, '☑ Select'),
     );
-    mount(root, libHead, listWrap);
+    mount(root, libHead, compareWrap, listWrap);
+    updateCompare();
   } catch (err) {
     mount(root, empty('', 'Failed to load movies', err.message, { label: 'Retry', onClick: () => tabMovies(root, arr, ctx) }));
   }

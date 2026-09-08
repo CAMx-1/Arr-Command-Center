@@ -23,7 +23,10 @@ import { openDetailModal } from './views/detail.js';
 import { fetchNotifications, getLastSeen, markSeen, notifKind } from './lib/notifications.js';
 import * as push from './lib/push.js';
 import { initAppearance } from './lib/theme.js';
+import { openCommandPalette } from './lib/commandPalette.js';
+import { setDashboardScope } from './lib/dashboardPrefs.js';
 import { mergeState, classifyNavigation, targetScrollFor, createScrollStore } from './lib/scrollHistory.js';
+import { parseHash, buildHash, patchParams } from './lib/urlState.js';
 
 export const SERVICE_META = {
   sonarr: { logo: '/icons/sonarr.svg', emoji: '', renderer: renderSonarr },
@@ -91,14 +94,19 @@ const els = {
 };
 
 // ---------- Routing ----------
-function currentRoute() {
-  const hash = location.hash.replace(/^#\/?/, '');
-  return hash || 'home';
+function currentRoute() { return parseHash(location.hash).route; }
+function currentParams() { return parseHash(location.hash).params; }
+
+function replaceRouteParams(route, params, patch) {
+  const next = patchParams(params, patch);
+  try { history.replaceState(history.state, '', buildHash(route, next)); } catch { location.hash = buildHash(route, next); }
+  return next;
 }
 
 async function navigate() {
   const route = currentRoute();
-  try { localStorage.setItem('acc:last-route', route); } catch { /* ignore */ }
+  const routeParams = currentParams();
+  try { localStorage.setItem('acc:last-route', buildHash(route, routeParams).replace(/^#\//, '')); } catch { /* ignore */ }
 
   // ---- History-aware scroll: remember where we're leaving, decide where to land ----
   const currentY = window.scrollY || document.documentElement.scrollTop || 0;
@@ -130,8 +138,16 @@ async function navigate() {
   const ctx = {
     api,
     state,
+    route,
+    params: routeParams,
     setTitle: (t) => { els.title.textContent = t; },
     setActions: (...nodes) => { mount(els.actions, ...nodes); },
+    setParams: (patch, { reload = false } = {}) => {
+      ctx.params = replaceRouteParams(route, ctx.params, patch);
+      if (reload) { _pendingIntent = 'preserve'; return navigate(); }
+      return ctx.params;
+    },
+    go: (nextRoute, params = {}) => { location.hash = buildHash(nextRoute, params); },
     reload: () => { _pendingIntent = 'preserve'; return navigate(); },
   };
 
@@ -787,6 +803,7 @@ function openShortcutsHelp() {
     body: h('div', {},
       row('?', 'Show this help'),
       row('/', 'Search your libraries'),
+      row('⌘/Ctrl K', 'Open command palette'),
       row('r', 'Refresh connection status'),
       row('1 – 9', 'Jump to a nav item (1 = Home)'),
       row('Esc', 'Close dialogs'),
@@ -1101,6 +1118,7 @@ async function init() {
     return;
   }
   state.services = Object.values(state.config.services || {});
+  setDashboardScope(state.config.auth?.user);
 
   // The sidebar is a permanent icon-only rail.
   document.getElementById('app').classList.add('collapsed');
@@ -1177,6 +1195,10 @@ async function init() {
     if (e.key === 'r') { refreshStatus(); _pendingIntent = 'preserve'; navigate(); }
     if (e.key === '/') { if (toolsAllowed()) { e.preventDefault(); openSearch(); } }
     if (e.key === '?') { e.preventDefault(); openShortcutsHelp(); }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      openCommandPalette({ services: state.services, go: (route, params = {}) => { location.hash = buildHash(route, params); }, openSearch });
+    }
     if (/^[1-9]$/.test(e.key) && !document.getElementById('modal-root').hasChildNodes()) {
       const cells = document.querySelectorAll('#hive .hive-cell');
       const cell = cells[Number(e.key) - 1];

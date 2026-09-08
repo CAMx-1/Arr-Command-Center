@@ -32,9 +32,9 @@ const FILTERS = {
 // `onChange` receives the filtered subset whenever the search text or status
 // selection changes. `opts.initialTerm` pre-fills the search box (used by the
 // global search "Open" deep-link). Returns the control element for the lib-head.
-export function libraryFilter(kind, items, onChange, { initialTerm = '' } = {}) {
+export function libraryFilter(kind, items, onChange, { initialTerm = '', initialStatus = 'all', onStateChange = null } = {}) {
   const defs = FILTERS[kind] || FILTERS.movie;
-  let statusId = 'all';
+  let statusId = defs.some((d) => d.id === initialStatus) ? initialStatus : 'all';
   let term = initialTerm || '';
 
   const apply = () => {
@@ -45,10 +45,11 @@ export function libraryFilter(kind, items, onChange, { initialTerm = '' } = {}) 
   };
 
   const search = h('input', { class: 'input lib-filter-search', type: 'search', enterkeyhint: 'search', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Filter by title…', value: term });
-  search.addEventListener('input', () => { term = search.value; apply(); });
+  search.addEventListener('input', () => { term = search.value; apply(); if (onStateChange) onStateChange({ term, status: statusId }); });
 
-  const sel = h('select', { class: 'input lib-filter-select' }, ...defs.map((d) => h('option', { value: d.id }, d.label)));
-  sel.addEventListener('change', () => { statusId = sel.value; apply(); });
+  const sel = h('select', { class: 'input lib-filter-select' }, ...defs.map((d) => h('option', { value: d.id, selected: d.id === statusId }, d.label)));
+  sel.value = statusId;
+  sel.addEventListener('change', () => { statusId = sel.value; apply(); if (onStateChange) onStateChange({ term, status: statusId }); });
 
   // Initial render (respects any pre-filled term).
   apply();

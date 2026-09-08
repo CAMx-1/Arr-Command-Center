@@ -16,6 +16,7 @@ import * as plex from './plex.js';
 import * as push from './push.js';
 import { startPoller, pollOnce } from './poller.js';
 import * as automation from './automation.js';
+import { getOperations } from './operations.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -138,6 +139,16 @@ app.get('/api/status/:service', async (req, res) => {
   if (svc.sample) return res.json({ label: svc.label || req.params.service, type: svc.type, ok: true, status: 200, ms: 0, version: 'sample' });
   if (svc.type === 'plex') { const ok = plex.hasToken(cfg); return res.json({ label: svc.label || req.params.service, type: 'plex', ok, status: ok ? 200 : 0, ms: 0, error: ok ? undefined : 'Sign in with Plex to enable' }); }
   res.json({ label: svc.label || req.params.service, type: svc.type, ...(await pingService(svc, req.params.service).catch((e) => ({ ok: false, status: 0, ms: 0, error: (e && e.message) || 'ping failed' }))) });
+});
+
+// Normalized cross-service action inbox and chronological activity feed.
+app.get('/api/operations', async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(250, Number(req.query.limit) || 100));
+    res.json(await getOperations(cfg, { limit, ttlMs: req.query.fresh ? 0 : 5000 }));
+  } catch (e) {
+    res.status(502).json({ error: e.message || 'Could not collect operations data' });
+  }
 });
 
 // Diagnostics: server info + recent request log (behind auth).

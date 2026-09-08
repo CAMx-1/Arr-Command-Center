@@ -16,25 +16,27 @@ function isSmallScreen() {
 // (list on mobile, hex on desktop). An explicit user choice always wins.
 export function globalMode() {
   const raw = localStorage.getItem(GLOBAL_KEY);
-  if (raw === 'list' || raw === 'hex') return raw;
+  if (raw === 'list' || raw === 'hex' || raw === 'table') return raw;
   return isSmallScreen() ? 'list' : 'hex';
 }
 export function setGlobalMode(m) { localStorage.setItem(GLOBAL_KEY, m === 'list' ? 'list' : 'hex'); }
 
-export function pageOverride(page) { return localStorage.getItem(pageKey(page)); } // 'hex' | 'list' | null
+export function pageOverride(page) { const value = localStorage.getItem(pageKey(page)); return ['hex', 'list', 'table'].includes(value) ? value : null; }
 export function setPageOverride(page, m) {
   if (m === null || m === undefined) localStorage.removeItem(pageKey(page));
-  else localStorage.setItem(pageKey(page), m);
+  else localStorage.setItem(pageKey(page), ['list', 'table'].includes(m) ? m : 'hex');
 }
 
 export function effectiveMode(page) { return pageOverride(page) || globalMode(); }
 
 // A small segmented Hex/List control for a page's action area.
-export function viewToggle(page, onChange) {
-  const mode = effectiveMode(page);
+export function viewToggle(page, onChange, requestedMode = null, { table = false } = {}) {
+  const modes = table ? ['hex', 'list', 'table'] : ['hex', 'list'];
+  const stored = effectiveMode(page);
+  const mode = modes.includes(requestedMode) ? requestedMode : modes.includes(stored) ? stored : 'list';
   const mk = (m, label) => h('button', {
     class: `view-seg ${mode === m ? 'active' : ''}`,
-    onclick: () => { if (effectiveMode(page) !== m) { setPageOverride(page, m); onChange(); } },
+    onclick: () => { if (mode !== m) { setPageOverride(page, m); onChange(m); } },
   }, label);
-  return h('div', { class: 'view-toggle' }, mk('hex', 'Hex'), mk('list', 'List'));
+  return h('div', { class: 'view-toggle' }, ...modes.map((value) => mk(value, value[0].toUpperCase() + value.slice(1))));
 }

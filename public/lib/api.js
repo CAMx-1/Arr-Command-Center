@@ -19,6 +19,7 @@ export const api = {
   async config() { return parse(await fetch('/api/config')); },
   async status() { return parse(await fetch('/api/status')); },
   async diagnostics() { return parse(await fetch('/api/diagnostics')); },
+  async operations({ limit = 100, fresh = false } = {}) { return parse(await fetch(`/api/operations?limit=${encodeURIComponent(limit)}${fresh ? `&fresh=${Date.now()}` : ''}`)); },
   // Plex API (server holds the token)
   plex: {
     watchlist: async () => parse(await fetch('/api/plex/watchlist')),
