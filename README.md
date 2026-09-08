@@ -1,7 +1,9 @@
 # 🎬 Arr Command Center
 
 A single, locally-hosted web dashboard to view and manage your whole media stack —
-**Sonarr**, **Radarr**, **Overseerr/Seerr**, and **SABnzbd** — from one place.
+**Sonarr**, **Radarr**, **Lidarr**, **Readarr**, **Overseerr/Seerr**, **SABnzbd**,
+**qBittorrent**, **Tautulli**, **Bazarr**, **Prowlarr**, **Plex**, and any Newznab
+**indexer** — from one place.
 
 Built as a self-hosted replacement for the now-discontinued **LunaSea** iOS app. Because
 it's a responsive web app, it works from your phone's browser (and you can "Add to Home
@@ -20,37 +22,64 @@ Access, and secrets never touch the browser.
 
 ![Arr Command Center home dashboard](docs/home-page.png)
 
-*Live status hexes for each service with at-a-glance stats, quick activity filters, and a recent-requests feed.*
+*Live status hexes for every service with at-a-glance stats, a filterable activity
+feed, and a Seerr requests panel. The whole Overview is customizable — reorder, resize,
+show/hide widgets, and keep multiple dashboards (see Settings).*
 
 ### Sonarr library (Hexagon view)
 
 ![Sonarr library in hexagon view](docs/sonarr-library.png)
 
-*Poster hexes show monitored status and episode progress, with per-title Info, Seasons, Search, and Auto actions.*
+*Poster hexes show monitored status and episode progress, with per-title Info, Seasons,
+Search, and Auto actions. Tabs across the top add Calendar, Wanted, Queue, History, and a
+full System panel — and you can save filtered "views" for one-click recall.*
 
 ### Radarr library (List view)
 
 ![Radarr library in list view](docs/radarr-library.png)
 
-*A compact list view with download/monitor status, file size, and quick actions — toggle between Hexagon and List per page.*
+*A compact list view with download/monitor status, file size, and quick actions. Toggle
+between Hexagon, List, and Table per page — your choice is remembered and reflected in the
+URL so you can bookmark or share it.*
+
+### Sortable table view
+
+![Sonarr library in sortable table view](docs/sonarr-table.png)
+
+*The Table view turns any library into a dense, sortable grid — click a column to sort,
+tick rows for bulk actions, and combine it with the title filter, status dropdown, and
+saved views.*
 
 ### Filter your library
 
-![Filtering the library by title](docs/library-filter.png)
+![Filtering the library by title and status](docs/library-filter.png)
 
-*Filter Sonarr/Radarr libraries instantly by title, plus a status dropdown (Monitored, Missing, Downloaded, …), right next to the bulk Select button.*
+*Filter Sonarr/Radarr/Lidarr/Readarr libraries instantly by title, plus a status dropdown
+(Monitored, Missing, Downloaded, Continuing, …). The filter, sort, and view mode all live
+in the URL for deep-linking.*
+
+### Overseerr / Seerr requests
+
+![Overseerr pending requests with approve and decline](docs/overseerr.png)
+
+*Approve or decline pending requests with one click, browse All Requests, Issues, and
+Recently Added, or jump to Discover to create a new request — posters pulled straight
+from TMDB.*
 
 ### Tautulli — active streams
 
 ![Tautulli active streams](docs/tautulli.png)
 
-*See who's watching what: active stream count, direct-play/transcode, bandwidth, and now-playing details.*
+*See who's watching what: active stream count, direct-play/transcode, bandwidth, and
+now-playing details with a Stop control, plus History, Statistics, and Graphs tabs.*
 
 ### Settings
 
 ![Settings page](docs/settings.png)
 
-*Drag to reorder services, hide them from the sidebar, edit connections, and manage appearance — all secrets stay server-side.*
+*Themes (light/dark) with accent colors, a comfortable/compact density toggle, a default
+library view, drag-to-reorder services, and a full Overview dashboard builder — all
+secrets stay server-side.*
 
 ### Push notifications (iOS / Safari)
 
@@ -89,8 +118,9 @@ npm install
 npm run demo
 ```
 
-Then open <http://localhost:7373>. This spins up **bundled mock services** with fake
-Sonarr/Radarr/Overseerr/SABnzbd data so you can click around immediately. The mock services
+Then open <http://localhost:7373>. This spins up a full set of **bundled mock services**
+(Sonarr, Radarr, Lidarr, Readarr, Overseerr, SABnzbd, qBittorrent, Tautulli, Bazarr, and a
+Newznab indexer) with fake data so you can click around immediately. The mock services
 even *require* the injected API key and record the Cloudflare Access headers, proving the
 proxy works end-to-end.
 
@@ -123,7 +153,9 @@ Copy `config.example.json` → `config.json` and fill it in:
   "services": {
     "sonarr": {
       "label": "Sonarr",
-      "type": "sonarr",         // one of: sonarr | radarr | overseerr | sabnzbd
+      "type": "sonarr",         // sonarr | radarr | lidarr | readarr | overseerr |
+                                //   sabnzbd | qbittorrent | tautulli | bazarr |
+                                //   prowlarr | indexer | plex
       "enabled": true,
       "baseUrl": "https://sonarr.example.com",
       "apiKey": "YOUR_SONARR_API_KEY",
@@ -132,19 +164,28 @@ Copy `config.example.json` → `config.json` and fill it in:
         "clientSecret": "yyyyyyyy"
       }
     }
-    // ... radarr, overseerr, sabnzbd
+    // ... radarr, lidarr, readarr, overseerr, sabnzbd, qbittorrent, tautulli,
+    //     bazarr, prowlarr, indexer, plex
   }
 }
 ```
 
 Where to find each **API key**:
 
-| Service    | Location |
-|------------|----------|
-| Sonarr     | Settings → General → API Key |
-| Radarr     | Settings → General → API Key |
-| Overseerr  | Settings → General → API Key |
-| SABnzbd    | Config → General → API Key |
+| Service     | Location |
+|-------------|----------|
+| Sonarr      | Settings → General → API Key |
+| Radarr      | Settings → General → API Key |
+| Lidarr      | Settings → General → API Key |
+| Readarr     | Settings → General → API Key |
+| Prowlarr    | Settings → General → API Key |
+| Overseerr   | Settings → General → API Key |
+| SABnzbd     | Config → General → API Key |
+| Tautulli    | Settings → Web Interface → API Key |
+| Bazarr      | Settings → General → API Key |
+| Indexer     | Newznab: your account's API key |
+| qBittorrent | Uses WebUI username/password (see `config.example.json`) |
+| Plex        | Signed in with your Plex account — no manual key needed |
 
 ### Environment variable overrides
 
@@ -153,7 +194,8 @@ Docker/secrets). See `.env.example`. Pattern:
 
 ```
 SONARR_BASE_URL, SONARR_API_KEY, SONARR_CF_CLIENT_ID, SONARR_CF_CLIENT_SECRET
-RADARR_...   OVERSEERR_...   SABNZBD_...
+RADARR_...   LIDARR_...   READARR_...   OVERSEERR_...   SABNZBD_...
+TAUTULLI_... BAZARR_...   PROWLARR_...  QBITTORRENT_... INDEXER_...
 ```
 
 Env values **override** the matching value in `config.json`.
@@ -170,7 +212,7 @@ allow it on the relevant Access applications.
    Copy the **Client ID** (ends in `.access`) and **Client Secret** (shown once).
 
 2. **Allow the token on each app**
-   For each Access application protecting Sonarr/Radarr/Overseerr/SABnzbd:
+   For each Access application protecting a service (Sonarr, Radarr, Overseerr, … ):
    **Access → Applications → (your app) → Policies →** add/edit a policy with
    **Action: Service Auth** and an **Include** rule of
    **Service Token → (your token)**.
@@ -220,18 +262,57 @@ internal traffic typically bypasses Cloudflare Access — in that case just omit
 
 ## Features
 
-- **Overview** — live status of every service, versions, quick stats, and a combined
-  "what's downloading now" activity feed.
-- **Sonarr** — series library with progress, 4-week calendar, download queue (remove
-  items), and add-series search with root-folder/quality-profile picker.
-- **Radarr** — movie library, download queue, add-movie search flow.
-- **Overseerr/Seerr** — pending & all requests with one-click **approve/decline**, plus a
-  **discover** search to create new requests.
+**Unified dashboard**
+- **Overview** — live status of every service, versions, quick stats, and a filterable
+  "what's happening now" activity feed.
+- **Customizable dashboards** — build multiple Overview layouts; drag to reorder widgets,
+  set per-widget width, and show/hide panels (Services, Activity, Seerr Requests & Issues,
+  Upcoming calendar, Quick Links, Status, Action Inbox).
+- **Organizr-style Quick Links** — add your own custom links to the Overview and manage
+  them in Settings.
+
+**Library management (Sonarr / Radarr / Lidarr / Readarr)**
+- **Three view modes** — Hexagon, List, and a sortable **Table**, toggled per page and
+  remembered.
+- **Filter & saved views** — instant title search + status dropdown; save filter/sort/view
+  combinations for one-click recall.
+- **Deep-linkable URLs** — the active view mode, filter, status, and sort all live in the
+  URL hash so any state is bookmarkable and shareable.
+- **Add / edit / delete** titles, interactive + automatic search, and a season/episode
+  browser with monitor toggles.
+- **Wanted** tab — Missing + Cutoff Unmet, with per-item search.
+- **System** tab — health checks, disk space, quality profiles, tags (view/create/delete),
+  blocklist (view/remove), and commands.
+- **Bulk operations** — multi-select across the library for bulk monitor, search, delete,
+  and **bulk tag** add/remove.
+
+**Requests, streaming & downloads**
+- **Overseerr / Seerr** — pending & all requests with one-click **approve/decline**,
+  issues, recently added, and a **discover** search to create new requests.
+- **Plex** — watchlist, shared users, and now-playing sessions, with a server-side image
+  proxy so posters render (Plex token never touches the browser).
+- **Tautulli** — active streams (direct-play/transcode, bandwidth), history, statistics,
+  and graphs.
 - **SABnzbd** — live queue with **pause/resume**, per-item remove, **speed-limit** control,
-  and download **history**.
-- **Connection health** — sidebar dots + polling every 15s.
-- **Responsive dark UI** — works on desktop and mobile; keyboard `r` to refresh.
-- **Optional basic auth** over the whole dashboard.
+  and download history.
+- **qBittorrent** — live torrent list with state, ratio, speeds, and controls.
+- **Bazarr** — subtitle wanted/history management.
+- **Prowlarr** — indexer overview.
+- **Newznab indexer** — search a public/private Usenet indexer directly.
+
+**Appearance & UX**
+- **Light & dark themes** with selectable accent colors and a default library view.
+- **Density toggle** — comfortable or compact rows, tables, and feeds.
+- **Command palette** — press `/` to jump to any service, page, or action.
+- **Scroll-position restore** across Back/Forward navigation.
+- **Responsive UI** — desktop, tablet, and mobile; keyboard `r` to refresh.
+
+**Platform**
+- **PWA** — installable, with **Web Push** notifications (including iOS 16.4+ via Add to
+  Home Screen) for completed downloads, failures, and requests needing approval.
+- **Cloudflare Access** service-token injection on every upstream request (secrets stay
+  server-side).
+- **Optional auth** — built-in basic auth, or sign-in with your **Plex** account.
 
 ---
 
@@ -257,11 +338,19 @@ arr-command-center/
 │   ├── index.js              # Express app: static UI + proxy + status API
 │   ├── config.js             # config.json + env loader (mock config in demo mode)
 │   ├── proxy.js              # injects CF-Access headers + API keys per service type
+│   ├── plex.js, plexAuth.js  # Plex sessions/watchlist/users + login + image proxy
+│   ├── store.js              # JSON data store (custom links, login log, Plex token)
+│   ├── poller.js, push.js    # background poller + Web Push notifications
+│   ├── operations.js, automation.js
 │   └── mock/mockServices.js  # bundled fake services for `npm run demo`
 ├── public/
-│   ├── index.html, styles.css, app.js
-│   ├── lib/{api.js, ui.js}   # proxy client + tiny UI toolkit (no build step)
-│   └── views/{home,sonarr,radarr,overseerr,sabnzbd}.js
+│   ├── index.html, styles.css, app.js, sw.js, manifest.webmanifest
+│   ├── lib/                  # api client, UI toolkit, theme, density, command palette,
+│   │                         #   saved views, url/scroll state (no build step)
+│   └── views/                # home, sonarr, radarr, musicbooks (lidarr/readarr),
+│                             #   overseerr, sabnzbd, qbittorrent, tautulli, bazarr,
+│                             #   prowlarr, indexer, plex, settings, …
+├── docs/                     # README screenshots (see test/generate-screenshots.mjs)
 ├── config.example.json
 ├── .env.example
 ├── Dockerfile
@@ -277,6 +366,7 @@ No build step, no frontend framework — just modern browser ES modules served s
 | `npm start`     | Run with your real `config.json`. |
 | `npm run demo`  | Run with bundled mock services (fake data). |
 | `npm run dev`   | Run with `--watch` for auto-reload during development. |
+| `npm test`      | Run the Node unit tests (`server/test` + `test`). |
 
 ## License
 
