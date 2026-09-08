@@ -1,9 +1,9 @@
-import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast, openModal, closeModal } from '../lib/ui.js';
+import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast } from '../lib/ui.js';
 import { SERVICE_META } from '../app.js';
 import { listFailed, removeFailed } from '../lib/failedRequests.js';
 import { visibleServices } from '../lib/servicePrefs.js';
 import { honeycombRows, isWide } from '../lib/honeycomb.js';
-import { loadDashboards, saveDashboards, activeDashboard, createDashboard, removeDashboard, updateDashboard, moveWidget } from '../lib/dashboardPrefs.js';
+import { loadDashboards, activeDashboard } from '../lib/dashboardPrefs.js';
 
 // ---- Activity source definitions ----
 const ACTIVITY_DEFS = [
@@ -31,12 +31,9 @@ function saveActivityPrefs(prefs) { localStorage.setItem('activity-sources', JSO
 
 export async function renderHome(root, ctx) {
   const { api, state } = ctx;
-  let dashboards = loadDashboards();
+  const dashboards = loadDashboards();
   const dashboard = activeDashboard(dashboards);
-  ctx.setActions(
-    h('span', { class: 'dim', style: { fontSize: '13px' } }, state.config.mock ? 'Showing mock data' : 'Live'),
-    dashboardActions(ctx, dashboards),
-  );
+  ctx.setActions(h('span', { class: 'dim', style: { fontSize: '13px' } }, state.config.mock ? 'Showing mock data' : 'Live'));
 
   mount(root, spinner());
   let status = {};
@@ -53,15 +50,21 @@ export async function renderHome(root, ctx) {
   const content = {
     status: h('div', { class: 'ops-summary', id: 'ops-status-panel' }, h('div', { class: 'dim' }, 'Loading operational status…')),
     inbox: h('div', { class: 'card', id: 'inbox-panel' }, h('div', { class: 'dim' }, 'Loading action inbox…')),
+    seerr: h('div', { class: 'card panel-bare dashboard-feed-panel', id: 'seerr-panel' }, h('div', { class: 'dim' }, 'Loading Seerr requests and issues…')),
     services: honeycomb,
-    activity: h('div', {},
-      h('div', { class: 'timeline-tools' },
+    activity: h('div', { class: 'dashboard-feed' },
+      h('div', { class: 'timeline-tools dashboard-feed-tools' },
         h('input', { class: 'input', id: 'timeline-search', type: 'search', placeholder: 'Filter activity…' }),
         h('select', { class: 'input', id: 'timeline-kind' }, h('option', { value: '' }, 'All events')),
       ),
-      h('div', { class: 'card', id: 'activity-panel' }, h('div', { class: 'dim' }, 'Loading activity…')),
+      h('div', { class: 'card panel-bare dashboard-feed-panel', id: 'activity-panel' }, h('div', { class: 'dim' }, 'Loading activity…')),
     ),
-    upcoming: h('div', { class: 'card', id: 'upcoming-panel' }, h('div', { class: 'dim' }, 'Loading calendar…')),
+    upcoming: h('div', { class: 'dashboard-feed' },
+      h('div', { class: 'upcoming-tools dashboard-feed-tools' },
+        h('div', { class: 'upcoming-window' }, 'Next 14 days'),
+      ),
+      h('div', { class: 'card panel-bare dashboard-feed-panel', id: 'upcoming-panel' }, h('div', { class: 'dim' }, 'Loading calendar…')),
+    ),
     links: h('div', { class: 'card', id: 'links-panel' }, h('div', { class: 'dim' }, 'Loading links…')),
   };
   const widgets = dashboard.widgets.filter((widget) => widget.visible).map((widget) => h('section', {
@@ -76,83 +79,22 @@ export async function renderHome(root, ctx) {
   if (ctx.params.focus) requestAnimationFrame(() => document.querySelector(`.widget-${CSS.escape(ctx.params.focus)}`)?.scrollIntoView({ block: 'start' }));
 }
 
-function dashboardActions(ctx, state) {
-  const select = h('select', { class: 'input dashboard-select', title: 'Active dashboard' },
-    ...state.dashboards.map((dashboard) => h('option', { value: dashboard.id, selected: dashboard.id === state.activeId }, dashboard.name)),
-  );
-  select.value = state.activeId;
-  select.addEventListener('change', () => { saveDashboards({ ...state, activeId: select.value }); ctx.reload(); });
-  return h('div', { class: 'dashboard-actions' },
-    select,
-    h('button', { class: 'btn sm', onclick: () => openDashboardEditor(ctx) }, 'Customize'),
-    h('button', { class: 'btn sm', onclick: () => openNewDashboard(ctx) }, '＋ Dashboard'),
-  );
-}
-
-function openNewDashboard(ctx) {
-  const input = h('input', { class: 'input', maxlength: '60', placeholder: 'Dashboard name' });
-  const create = () => {
-    try { saveDashboards(createDashboard(loadDashboards(), input.value)); closeModal(); ctx.reload(); }
-    catch (error) { toast(error.message, 'error'); }
-  };
-  input.addEventListener('keydown', (event) => { if (event.key === 'Enter') create(); });
-  openModal({ title: 'New dashboard', body: input, footer: h('button', { class: 'btn primary', onclick: create }, 'Create') });
-}
-
-function openDashboardEditor(ctx) {
-  const state = loadDashboards();
-  const dashboard = activeDashboard(state);
-  const rows = dashboard.widgets.map((widget, index) => h('div', {
-    class: 'dashboard-edit-row', draggable: 'true', dataset: { widget: widget.id },
-    ondragstart: (event) => { event.dataTransfer.setData('text/plain', widget.id); event.dataTransfer.effectAllowed = 'move'; },
-    ondragover: (event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; },
-    ondrop: (event) => {
-      event.preventDefault();
-      const source = event.dataTransfer.getData('text/plain');
-      const from = dashboard.widgets.findIndex((entry) => entry.id === source);
-      const to = dashboard.widgets.findIndex((entry) => entry.id === widget.id);
-      if (from >= 0 && to >= 0 && from !== to) {
-        dashboard.widgets = moveWidget(dashboard.widgets, source, to - from);
-        saveDashboards(updateDashboard(state, dashboard.id, { widgets: dashboard.widgets }));
-        openDashboardEditor(ctx);
-      }
-    },
-  },
-    h('label', { class: 'dashboard-visible' }, h('input', {
-      type: 'checkbox', checked: widget.visible,
-      onchange: (event) => { widget.visible = event.target.checked; },
-    }), widget.label),
-    h('select', { class: 'input', onchange: (event) => { widget.size = event.target.value; } },
-      ...['small', 'medium', 'wide', 'full'].map((size) => h('option', { value: size, selected: widget.size === size }, size)),
-    ),
-    h('button', { class: 'btn sm', disabled: index === 0, title: 'Move up', onclick: () => {
-      dashboard.widgets = moveWidget(dashboard.widgets, widget.id, -1); saveDashboards(updateDashboard(state, dashboard.id, { widgets: dashboard.widgets })); openDashboardEditor(ctx);
-    } }, '↑'),
-    h('button', { class: 'btn sm', disabled: index === dashboard.widgets.length - 1, title: 'Move down', onclick: () => {
-      dashboard.widgets = moveWidget(dashboard.widgets, widget.id, 1); saveDashboards(updateDashboard(state, dashboard.id, { widgets: dashboard.widgets })); openDashboardEditor(ctx);
-    } }, '↓'),
-  ));
-  const save = () => { saveDashboards(updateDashboard(state, dashboard.id, { widgets: dashboard.widgets })); closeModal(); ctx.reload(); };
-  const footer = h('div', { class: 'dashboard-editor-foot' },
-    state.dashboards.length > 1 ? h('button', { class: 'btn danger', onclick: () => { saveDashboards(removeDashboard(state, dashboard.id)); closeModal(); ctx.reload(); } }, 'Delete dashboard') : null,
-    h('button', { class: 'btn primary', onclick: save }, 'Save layout'),
-  );
-  openModal({ title: `Customize ${dashboard.name}`, body: h('div', { class: 'dashboard-editor' }, ...rows), footer, wide: true });
-}
-
 let lastOperations = null;
 async function hydrateOperations(ctx, silent = false) {
   const statusPanel = document.getElementById('ops-status-panel');
   const inboxPanel = document.getElementById('inbox-panel');
+  const seerrPanel = document.getElementById('seerr-panel');
   const activityPanel = document.getElementById('activity-panel');
-  if (!statusPanel && !inboxPanel && !activityPanel) return;
+  if (!statusPanel && !inboxPanel && !seerrPanel && !activityPanel) return;
   if (!silent) {
     if (inboxPanel) mount(inboxPanel, h('div', { class: 'dim' }, 'Loading action inbox…'));
+    if (seerrPanel) mount(seerrPanel, h('div', { class: 'dim' }, 'Loading Seerr requests and issues…'));
     if (activityPanel) mount(activityPanel, h('div', { class: 'dim' }, 'Loading activity…'));
   }
   try { lastOperations = await ctx.api.operations({ fresh: !silent }); }
   catch (error) {
     if (inboxPanel) mount(inboxPanel, empty('', 'Could not load action inbox', error.message));
+    if (seerrPanel) mount(seerrPanel, empty('', 'Could not load Seerr requests and issues', error.message));
     if (activityPanel) mount(activityPanel, empty('', 'Could not load activity', error.message));
     return;
   }
@@ -161,7 +103,7 @@ async function hydrateOperations(ctx, silent = false) {
   if (statusPanel) mount(statusPanel,
     summaryCard(summary.total || 0, 'Needs attention', summary.critical ? 'down' : summary.warning ? 'warn' : 'ok'),
     summaryCard(summary.critical || 0, 'Critical', summary.critical ? 'down' : 'muted'),
-    summaryCard(summary.approvals || 0, 'Approvals', summary.approvals ? 'warn' : 'muted'),
+    summaryCard(summary.health || 0, 'Health', summary.health ? 'warn' : 'muted'),
     summaryCard(summary.missing || 0, 'Missing', summary.missing ? 'warn' : 'muted'),
     summaryCard(unavailable, 'Unavailable', unavailable ? 'down' : 'ok'),
   );
@@ -169,6 +111,7 @@ async function hydrateOperations(ctx, silent = false) {
     const entries = lastOperations.inbox || [];
     mount(inboxPanel, entries.length ? h('div', { class: 'ops-inbox-list' }, ...entries.map((entry) => operationRow(entry, ctx, true))) : empty('', 'All clear', 'No actions currently need attention'));
   }
+  if (seerrPanel) renderSeerrWidget(seerrPanel, ctx);
   wireTimeline(ctx);
 }
 
@@ -176,8 +119,36 @@ function summaryCard(value, label, cls) {
   return h('div', { class: `ops-summary-card ${cls}` }, h('strong', {}, String(value)), h('span', {}, label));
 }
 
+function dashboardFeedEmpty(title, detail = '') {
+  return h('div', { class: 'dashboard-feed-list' },
+    h('div', { class: 'row dashboard-feed-row dashboard-feed-empty' },
+      h('div', { class: 'poster dashboard-feed-icon' }, '✓'),
+      h('div', { class: 'row-main' },
+        h('div', { class: 'row-title' }, title),
+        detail ? h('div', { class: 'row-sub' }, detail) : null,
+      ),
+    ),
+  );
+}
+
+function renderSeerrWidget(panel, ctx) {
+  const entries = lastOperations?.seerr || [];
+  const summary = lastOperations?.seerrSummary || { requests: 0, pending: 0, issues: 0 };
+  const badges = h('div', { class: 'seerr-widget-summary' },
+    h('span', { class: 'pill muted' }, `${summary.requests || 0} requests`),
+    h('span', { class: summary.pending ? 'pill warn' : 'pill muted' }, `${summary.pending || 0} pending`),
+    h('span', { class: summary.issues ? 'pill down' : 'pill muted' }, `${summary.issues || 0} open issues`),
+  );
+  if (!entries.length) {
+    mount(panel, badges, dashboardFeedEmpty('No Seerr requests or open issues', 'New requests and reported issues will appear here'));
+    return;
+  }
+  mount(panel, badges, h('div', { class: 'seerr-widget-list dashboard-feed-list' }, ...entries.map((entry) => operationRow(entry, ctx, true))));
+}
+
 function operationRow(entry, ctx, actionable = false) {
   const navigate = () => entry.serviceKey && ctx.go(entry.serviceKey, entry.tab ? { tab: entry.tab } : {});
+  const meta = SERVICE_META[entry.serviceType] || {};
   let actions = null;
   if (actionable && entry.action?.type === 'overseerr-request') {
     const act = async (verb, event) => {
@@ -190,8 +161,8 @@ function operationRow(entry, ctx, actionable = false) {
       h('button', { class: 'btn sm danger', onclick: (event) => act('decline', event) }, 'Decline'),
     );
   }
-  return h('div', { class: `row operation-row severity-${entry.severity || 'info'}${entry.serviceKey ? ' clickable' : ''}`, onclick: navigate },
-    h('span', { class: `operation-marker ${entry.severity || 'info'}` }),
+  return h('div', { class: `row dashboard-feed-row operation-row severity-${entry.severity || 'info'}${entry.serviceKey ? ' clickable' : ''}`, onclick: navigate },
+    h('div', { class: 'poster dashboard-feed-icon' }, svcIcon(meta.logo, meta.emoji || '•', 22)),
     h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, entry.title),
       h('div', { class: 'row-sub' }, `${entry.serviceLabel || ''}${entry.detail ? ` · ${entry.detail}` : ''}`),
       h('div', { class: 'meta-line' }, h('span', { class: 'pill muted' }, entry.kind || 'event'), entry.at ? h('span', {}, fmtRelative(entry.at)) : null)),
@@ -212,7 +183,9 @@ function wireTimeline(ctx) {
     const term = (search?.value || '').trim().toLowerCase();
     const selectedKind = kind?.value || '';
     const shown = events.filter((entry) => (!selectedKind || entry.kind === selectedKind) && (!term || `${entry.title} ${entry.detail} ${entry.serviceLabel}`.toLowerCase().includes(term)));
-    mount(panel, shown.length ? h('div', { class: 'timeline-list' }, ...shown.map((entry) => operationRow(entry, ctx))) : empty('', 'No matching activity'));
+    mount(panel, shown.length
+      ? h('div', { class: 'timeline-list dashboard-feed-list' }, ...shown.map((entry) => operationRow(entry, ctx)))
+      : dashboardFeedEmpty('No matching activity'));
   };
   search?.addEventListener('input', render);
   kind?.addEventListener('change', render);
@@ -255,7 +228,7 @@ async function hydrateUpcoming(ctx) {
       }
     } catch { /* ignore per-service */ }
   }));
-  if (!items.length) { panel.classList.remove('panel-bare'); mount(panel, empty('', 'Nothing upcoming', 'No releases in the next 2 weeks')); return; }
+  if (!items.length) { mount(panel, dashboardFeedEmpty('Nothing upcoming', 'No releases in the next 2 weeks')); return; }
   items.sort((a, b) => new Date(a.when) - new Date(b.when));
   const byDay = new Map();
   for (const it of items) {
@@ -265,11 +238,11 @@ async function hydrateUpcoming(ctx) {
   }
   const blocks = [];
   for (const [day, list] of byDay) {
-    blocks.push(h('div', { class: 'up-day' }, fmtDate(day)));
+    blocks.push(h('div', { class: 'up-day dashboard-feed-day' }, fmtDate(day)));
     for (const it of list) {
       const meta = SERVICE_META[it.svc.type] || {};
-      blocks.push(h('div', { class: 'row up-row' },
-        h('div', { class: 'poster', style: { width: '34px', height: '34px' } }, svcIcon(meta.logo, meta.emoji || '', 22)),
+      blocks.push(h('div', { class: 'row up-row dashboard-feed-row' },
+        h('div', { class: 'poster dashboard-feed-icon' }, svcIcon(meta.logo, meta.emoji || '', 22)),
         h('div', { class: 'row-main' },
           h('div', { class: 'row-title', style: { fontSize: '14px' } }, it.title),
           h('div', { class: 'meta-line', style: { marginTop: '2px' } },
@@ -281,7 +254,7 @@ async function hydrateUpcoming(ctx) {
       ));
     }
   }
-  mount(panel, h('div', { class: 'list' }, ...blocks));
+  mount(panel, h('div', { class: 'list dashboard-feed-list' }, ...blocks));
 }
 
 // Silent refresh used by the auto-refresh interval (no loading flash).

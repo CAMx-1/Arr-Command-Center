@@ -5,6 +5,7 @@ import { globalMode, setGlobalMode } from '../lib/viewMode.js';
 import { isHidden, setHidden, orderServices, setOrder } from '../lib/servicePrefs.js';
 import * as push from '../lib/push.js';
 import { renderQueueCleaner, renderHunting } from '../lib/automationUI.js';
+import { dashboardSettingsCard } from '../lib/dashboardSettings.js';
 
 export async function renderSettings(root, ctx) {
   const { api, state } = ctx;
@@ -111,6 +112,8 @@ export async function renderSettings(root, ctx) {
     general,
     h('div', { class: 'section-title' }, 'Appearance'),
     appearanceCard(root, ctx),
+    h('div', { class: 'section-title' }, 'Overview Layout'),
+    dashboardSettingsCard(ctx),
     h('div', { class: 'section-title' }, 'Notifications'),
     h('div', { class: 'card', id: 'push-panel' }, h('div', { class: 'dim' }, 'Loading…')),
     h('div', { class: 'section-title' }, 'Automation'),

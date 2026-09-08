@@ -58,7 +58,10 @@ export async function renderOverseerr(root, ctx) {
     { id: 'issues', label: 'Issues', render: (c) => tabIssues(c, seerr, ctx) },
     { id: 'recent', label: 'Recently Added', render: (c) => tabRecentlyAdded(c, seerr, ctx) },
     { id: 'discover', label: 'Discover', render: (c) => tabDiscover(c, seerr, ctx) },
-  ], `tabs-${svc.key}`);
+  ], `tabs-${svc.key}`, {
+    activeId: ctx.params.tab,
+    onChange: (id) => ctx.setParams({ tab: id === 'pending' ? '' : id }),
+  });
   mount(root, bar, body);
 }
 

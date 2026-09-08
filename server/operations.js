@@ -76,19 +76,49 @@ async function collectArr(svc, serviceGet, now) {
   return { inbox, activity };
 }
 
+const REQUEST_STATUS = { 1: 'Pending', 2: 'Approved', 3: 'Declined' };
+const ISSUE_TYPE = { 1: 'Video', 2: 'Audio', 3: 'Subtitles', 4: 'Other' };
+
 async function collectOverseerr(svc, serviceGet, now) {
-  const data = await serviceGet(svc, 'api/v1/request?filter=pending&take=30');
-  const inbox = [];
-  for (const r of (data.results || [])) {
+  const results = await Promise.allSettled([
+    serviceGet(svc, 'api/v1/request?filter=pending&take=30'),
+    serviceGet(svc, 'api/v1/request?take=30&sort=added'),
+    serviceGet(svc, 'api/v1/issue?filter=open&take=30'),
+  ]);
+  if (results.every((result) => result.status === 'rejected')) throw results[0].reason;
+  const [pendingData, recentData, issueData] = results.map((result) => result.status === 'fulfilled' ? result.value : { results: [] });
+  const requests = new Map();
+  const addRequest = (r) => {
     const media = r.media || {};
-    inbox.push(item({
-      id: `${svc.key}:approval:${r.id}`, kind: 'approval', severity: 'warning',
+    const pending = Number(r.status) === 1;
+    requests.set(r.id, item({
+      id: `${svc.key}:request:${r.id}`, kind: 'seerr-request', severity: pending ? 'warning' : 'info',
       title: media.title || media.name || `Request #${r.id}`,
-      detail: `Approval requested by ${r.requestedBy?.displayName || r.requestedBy?.email || 'unknown'}`,
-      at: ts(r.createdAt, now), tab: 'pending', action: { type: 'overseerr-request', requestId: r.id },
+      detail: `${REQUEST_STATUS[r.status] || 'Requested'} by ${r.requestedBy?.displayName || r.requestedBy?.email || 'unknown'}`,
+      at: ts(r.createdAt, now), tab: pending ? 'pending' : 'all',
+      action: pending ? { type: 'overseerr-request', requestId: r.id } : null,
     }, svc, now));
-  }
-  return { inbox, activity: [...inbox] };
+  };
+  for (const r of (recentData.results || [])) addRequest(r);
+  for (const r of (pendingData.results || [])) addRequest(r); // pending data wins when lists overlap
+
+  const issues = (issueData.results || []).map((issue) => {
+    const media = issue.media || {};
+    const type = ISSUE_TYPE[issue.issueType] || 'Issue';
+    const episode = issue.problemSeason != null
+      ? ` · S${pad(issue.problemSeason)}${issue.problemEpisode != null ? `E${pad(issue.problemEpisode)}` : ''}`
+      : '';
+    const latestComment = Array.isArray(issue.comments) && issue.comments.length
+      ? issue.comments[issue.comments.length - 1].message
+      : '';
+    return item({
+      id: `${svc.key}:issue:${issue.id}`, kind: 'seerr-issue', severity: 'warning',
+      title: media.title || media.name || `Issue #${issue.id}`,
+      detail: `${type} issue${episode} · reported by ${issue.createdBy?.displayName || 'unknown'}${latestComment ? ` · ${latestComment}` : ''}`,
+      at: ts(issue.createdAt, now), tab: 'issues', action: { type: 'overseerr-issue', issueId: issue.id },
+    }, svc, now);
+  });
+  return { inbox: [], activity: [], seerr: [...requests.values(), ...issues] };
 }
 
 async function collectBazarr(svc, serviceGet, now) {
@@ -110,17 +140,18 @@ async function collectBazarr(svc, serviceGet, now) {
 export async function collectOperations(cfg, { serviceGet = defaultServiceGet, now = Date.now(), limit = 100 } = {}) {
   const inbox = [];
   const activity = [];
+  const seerr = [];
   const errors = [];
   const services = Object.entries(cfg.services || {})
     .filter(([, svc]) => svc.enabled !== false && (svc.baseUrl || svc.sample))
     .map(([key, svc]) => ({ ...svc, key }));
   await Promise.all(services.map(async (svc) => {
     try {
-      let result = { inbox: [], activity: [] };
+      let result = { inbox: [], activity: [], seerr: [] };
       if (svc.type === 'sonarr' || svc.type === 'radarr') result = await collectArr(svc, serviceGet, now);
       else if (svc.type === 'overseerr') result = await collectOverseerr(svc, serviceGet, now);
       else if (svc.type === 'bazarr') result = await collectBazarr(svc, serviceGet, now);
-      inbox.push(...result.inbox); activity.push(...result.activity);
+      inbox.push(...result.inbox); activity.push(...result.activity); seerr.push(...(result.seerr || []));
     } catch (error) {
       errors.push({ serviceKey: svc.key, serviceLabel: svc.label || svc.key, message: error.message || String(error) });
     }
@@ -128,7 +159,22 @@ export async function collectOperations(cfg, { serviceGet = defaultServiceGet, n
   const severityOrder = { critical: 0, warning: 1, info: 2 };
   inbox.sort((a, b) => (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3) || b.at - a.at);
   activity.sort((a, b) => b.at - a.at);
-  return { generatedAt: now, summary: summarizeOperations(inbox, errors), inbox: inbox.slice(0, limit), activity: activity.slice(0, limit), errors };
+  seerr.sort((a, b) => (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3) || b.at - a.at);
+  const seerrSummary = {
+    total: seerr.length,
+    requests: seerr.filter((entry) => entry.kind === 'seerr-request').length,
+    pending: seerr.filter((entry) => entry.action?.type === 'overseerr-request').length,
+    issues: seerr.filter((entry) => entry.kind === 'seerr-issue').length,
+  };
+  return {
+    generatedAt: now,
+    summary: summarizeOperations(inbox, errors),
+    seerrSummary,
+    inbox: inbox.slice(0, limit),
+    activity: activity.slice(0, limit),
+    seerr: seerr.slice(0, limit),
+    errors,
+  };
 }
 
 let cache = null;
