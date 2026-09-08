@@ -11,6 +11,15 @@ const SIZES = [
   { id: 'full', label: 'Full width' },
 ];
 
+// Widgets that can render as a flowing poster-hex honeycomb (like the Services
+// tiles on the Overview). Only these expose the extra "Hexagons" size.
+const HEX_CAPABLE = new Set(['streams', 'seerr']);
+const HEX_SIZE = { id: 'hex', label: 'Hexagons' };
+
+function sizesFor(widgetId) {
+  return HEX_CAPABLE.has(widgetId) ? [...SIZES, HEX_SIZE] : SIZES;
+}
+
 export function dashboardSettingsCard(ctx) {
   const card = h('div', { class: 'card dashboard-settings-card' });
   let state = loadDashboards();
@@ -114,7 +123,7 @@ export function dashboardSettingsCard(ctx) {
       h('select', {
         class: 'input dashboard-size-select', 'aria-label': `${widget.label} size`,
         onchange: (event) => { widget.size = event.target.value; },
-      }, ...SIZES.map((size) => h('option', { value: size.id, selected: widget.size === size.id }, size.label))),
+      }, ...sizesFor(widget.id).map((size) => h('option', { value: size.id, selected: widget.size === size.id }, size.label))),
       h('button', { class: 'btn sm', disabled: index === 0, title: `Move ${widget.label} up`, onclick: () => move(widget.id, -1) }, '↑'),
       h('button', { class: 'btn sm', disabled: index === draftWidgets.length - 1, title: `Move ${widget.label} down`, onclick: () => move(widget.id, 1) }, '↓'),
     ));

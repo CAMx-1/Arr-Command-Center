@@ -5,6 +5,7 @@ import { visibleServices } from '../lib/servicePrefs.js';
 import { honeycombRows, isWide } from '../lib/honeycomb.js';
 import { loadDashboards, activeDashboard } from '../lib/dashboardPrefs.js';
 import { actionGroup } from '../lib/actions.js';
+import { hive, posterHexCard } from '../lib/hive.js';
 
 // ---- Activity source definitions ----
 const ACTIVITY_DEFS = [
@@ -140,6 +141,29 @@ function dashboardFeedEmpty(title, detail = '') {
   );
 }
 
+// A widget renders its flowing poster-hex honeycomb when the user picks the
+// "Hexagons" size in the dashboard builder — matching the Services tiles.
+function isHexWidget(panel) {
+  return !!panel?.closest('.dashboard-widget')?.classList.contains('size-hex');
+}
+
+function severityPillClass(severity) {
+  return severity === 'critical' ? 'down' : severity === 'warning' ? 'warn' : 'muted';
+}
+
+function seerrEntryActions(entry, ctx) {
+  if (entry.action?.type !== 'overseerr-request') return null;
+  const act = async (verb, event) => {
+    event.stopPropagation();
+    try { await ctx.api.seerr(entry.serviceKey).post(`request/${entry.action.requestId}/${verb}`); toast(`Request ${verb}d`, 'success'); await hydrateOperations(ctx); }
+    catch (error) { toast(error.message, 'error'); }
+  };
+  return actionGroup([
+    { label: 'Approve', variant: 'primary', primary: true, onClick: (event) => act('approve', event) },
+    { label: 'Decline', variant: 'danger', onClick: (event) => act('decline', event) },
+  ], { sheetTitle: entry.title });
+}
+
 function renderSeerrWidget(panel, ctx) {
   const entries = lastOperations?.seerr || [];
   const summary = lastOperations?.seerrSummary || { requests: 0, pending: 0, issues: 0 };
@@ -152,12 +176,51 @@ function renderSeerrWidget(panel, ctx) {
     mount(panel, badges, dashboardFeedEmpty('No Seerr requests or open issues', 'New requests and reported issues will appear here'));
     return;
   }
+  // Hexagons size → flowing poster-hex honeycomb; otherwise a list.
+  if (isHexWidget(panel)) {
+    const rendered = entries.map((entry) => {
+      const isRequest = entry.action?.type === 'overseerr-request';
+      const card = posterHexCard({
+        title: entry.title,
+        sub: entry.serviceLabel || '',
+        pills: [isRequest
+          ? { label: 'Pending', cls: 'warn' }
+          : { label: (entry.kind || 'event').replace('seerr-', ''), cls: severityPillClass(entry.severity) }],
+        actions: seerrEntryActions(entry, ctx),
+        onClick: () => entry.serviceKey && ctx.go(entry.serviceKey, entry.tab ? { tab: entry.tab } : {}),
+      });
+      return { entry, el: card };
+    });
+    mount(panel, badges, hive(rendered.map((r) => r.el), panel.clientWidth));
+    enrichSeerrHexes(ctx, rendered);
+    return;
+  }
   // Render immediately with server-provided fallbacks (title or "Request #id"),
   // keeping the element handles so we can patch each row in place once the
   // matching TMDB detail resolves.
   const rendered = entries.map((entry) => ({ entry, el: operationRow(entry, ctx, true) }));
   mount(panel, badges, h('div', { class: 'seerr-widget-list dashboard-feed-list' }, ...rendered.map((r) => r.el)));
   enrichSeerrRequests(ctx, rendered);
+}
+
+// Hex-tile variant of the Seerr enrichment: patch the poster background and
+// title text of each hex once its TMDB detail resolves.
+async function enrichSeerrHexes(ctx, rendered) {
+  const targets = rendered.filter(({ entry }) => entry.media?.tmdbId).slice(0, 8);
+  await Promise.all(targets.map(async ({ entry, el }) => {
+    if (!el.isConnected) return;
+    try {
+      const detail = await seerrDetail(ctx, entry.serviceKey, entry.media.mediaType, entry.media.tmdbId);
+      if (!detail || !el.isConnected) return;
+      const title = detail.title || detail.name || detail.originalTitle || detail.originalName;
+      const titleEl = el.querySelector('.hx-title');
+      if (titleEl && title) titleEl.textContent = title;
+      if (detail.posterPath) {
+        const face = el.querySelector('.hx-face');
+        if (face) face.style.backgroundImage = `url(https://image.tmdb.org/t/p/w300${detail.posterPath})`;
+      }
+    } catch { /* keep fallback */ }
+  }));
 }
 
 // Lazily fetch up to five movie/tv detail records (deduped/cached via
@@ -290,33 +353,54 @@ async function hydrateStreams(ctx) {
       api.tautulli(svc.key).get('get_activity').then((d) => ({ svc, d })).catch(() => null)
     ))).filter(Boolean);
     let streamCount = 0; let directPlay = 0; let bandwidth = 0;
-    const rows = [];
+    const items = [];
     for (const { svc, d } of results) {
       const sessions = d.sessions || [];
       streamCount += Number(d.stream_count ?? sessions.length) || 0;
       directPlay += Number(d.stream_count_direct_play) || 0;
       bandwidth += Number(d.total_bandwidth) || 0;
-      for (const s of sessions) {
-        const state = s.state || 'playing';
-        const isTranscode = (s.transcode_decision || '').toLowerCase().includes('transcode');
-        const thumb = s.grandparent_thumb || s.thumb;
-        const url = thumb
-          ? `/api/proxy/${svc.key}/api/v2?${new URLSearchParams({ cmd: 'pms_image_proxy', img: thumb, width: '80', height: '80', fallback: 'poster' }).toString()}`
-          : null;
-        rows.push(activityRow({
-          posterUrl: url, title: s.full_title || s.title,
-          sub: `${s.friendly_name || s.user || 'unknown'} · ${state} · ${isTranscode ? 'Transcode' : 'Direct Play'}`,
-          progress: Number(s.progress_percent) || 0,
-          nav: { key: svc.key, tab: 'streams' },
-        }));
-      }
+      for (const s of sessions) items.push({ svc, s });
     }
     const badges = h('div', { class: 'seerr-widget-summary' },
       h('span', { class: streamCount ? 'pill ok' : 'pill muted' }, `${streamCount} streaming`),
       h('span', { class: 'pill muted' }, `${directPlay} direct play`),
       h('span', { class: 'pill muted' }, fmtStreamBandwidth(bandwidth)),
     );
-    if (!rows.length) { mount(panel, badges, dashboardFeedEmpty('No active streams', 'Nobody is watching right now')); return; }
+    if (!items.length) { mount(panel, badges, dashboardFeedEmpty('No active streams', 'Nobody is watching right now')); return; }
+
+    const proxyPoster = (svc, s, w, ht) => {
+      const thumb = s.grandparent_thumb || s.thumb;
+      return thumb
+        ? `/api/proxy/${svc.key}/api/v2?${new URLSearchParams({ cmd: 'pms_image_proxy', img: thumb, width: String(w), height: String(ht), fallback: 'poster' }).toString()}`
+        : null;
+    };
+
+    // Hexagons size → flowing poster-hex honeycomb (like the Tautulli page); otherwise a list.
+    if (isHexWidget(panel)) {
+      const cards = items.map(({ svc, s }) => {
+        const isTranscode = (s.transcode_decision || '').toLowerCase().includes('transcode');
+        return posterHexCard({
+          posterUrl: proxyPoster(svc, s, 300, 450),
+          title: s.full_title || s.title,
+          sub: `${s.friendly_name || s.user || 'unknown'} · ${s.state || 'playing'}`,
+          pills: [{ label: isTranscode ? 'Transcode' : 'Direct Play', cls: isTranscode ? 'warn' : 'ok' }],
+          progress: Number(s.progress_percent) || 0,
+          onClick: () => goTo(svc.key, 'streams'),
+        });
+      });
+      mount(panel, badges, hive(cards, panel.clientWidth));
+      return;
+    }
+
+    const rows = items.map(({ svc, s }) => {
+      const isTranscode = (s.transcode_decision || '').toLowerCase().includes('transcode');
+      return activityRow({
+        posterUrl: proxyPoster(svc, s, 80, 80), title: s.full_title || s.title,
+        sub: `${s.friendly_name || s.user || 'unknown'} · ${s.state || 'playing'} · ${isTranscode ? 'Transcode' : 'Direct Play'}`,
+        progress: Number(s.progress_percent) || 0,
+        nav: { key: svc.key, tab: 'streams' },
+      });
+    });
     mount(panel, badges, h('div', { class: 'dashboard-feed-list' }, ...rows));
   } catch (error) {
     mount(panel, empty('', 'Could not load active streams', error.message));

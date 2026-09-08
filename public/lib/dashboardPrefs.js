@@ -31,7 +31,7 @@ export function setDashboardScope(user) {
   const value = user && (user.id || user.uuid || user.username || user.email || user.title || user.displayName);
   dashboardScope = String(value || 'local').replace(/[^a-z0-9@._-]/gi, '_').slice(0, 80);
 }
-const sizes = new Set(['small', 'medium', 'wide', 'full']);
+const sizes = new Set(['small', 'medium', 'wide', 'full', 'hex']);
 const storageFor = (storage) => storage || globalThis.localStorage;
 
 function normalizeWidgets(widgets) {

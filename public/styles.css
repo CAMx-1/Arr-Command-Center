@@ -882,6 +882,11 @@ img.poster { aspect-ratio: 2 / 3; object-fit: cover; background: linear-gradient
 .dashboard-widget.size-medium { grid-column: span 6; }
 .dashboard-widget.size-wide { grid-column: span 8; }
 .dashboard-widget.size-full { grid-column: 1 / -1; }
+/* Hexagons view flows as an interlocking honeycomb (like the Services tiles).
+   Half width so two hex widgets (e.g. Tautulli + Seerr) can sit side by side;
+   each still flows into multiple interlocking columns rather than one column.
+   On narrow screens it falls back to full width (see responsive rules). */
+.dashboard-widget.size-hex { grid-column: span 6; }
 .dashboard-widget-head { display: flex; align-items: center; min-height: 34px; }
 .dashboard-widget-head .section-title { margin: 0 0 8px; }
 .ops-summary { display: grid; grid-template-columns: repeat(5, minmax(100px, 1fr)); gap: 10px; }
@@ -956,7 +961,7 @@ img.poster { aspect-ratio: 2 / 3; object-fit: cover; background: linear-gradient
 .sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
 @media (max-width: 900px) {
-  .dashboard-widget.size-small, .dashboard-widget.size-medium, .dashboard-widget.size-wide { grid-column: span 12; }
+  .dashboard-widget.size-small, .dashboard-widget.size-medium, .dashboard-widget.size-wide, .dashboard-widget.size-hex { grid-column: span 12; }
   .ops-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ops-summary-card:first-child { grid-column: 1 / -1; }
 }
