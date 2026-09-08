@@ -366,7 +366,17 @@ async function hydrateStreams(ctx) {
       h('span', { class: 'pill muted' }, `${directPlay} direct play`),
       h('span', { class: 'pill muted' }, fmtStreamBandwidth(bandwidth)),
     );
-    if (!items.length) { mount(panel, badges, dashboardFeedEmpty('No active streams', 'Nobody is watching right now')); return; }
+    const hex = isHexWidget(panel);
+    if (!items.length) {
+      if (hex) {
+        // Match the hex layout even when idle: a single "no streams" hexagon.
+        const idle = posterHexCard({ title: 'No active streams', sub: 'Nobody is watching right now' });
+        mount(panel, badges, hive([idle], panel.clientWidth));
+      } else {
+        mount(panel, badges, dashboardFeedEmpty('No active streams', 'Nobody is watching right now'));
+      }
+      return;
+    }
 
     const proxyPoster = (svc, s, w, ht) => {
       const thumb = s.grandparent_thumb || s.thumb;
@@ -376,7 +386,7 @@ async function hydrateStreams(ctx) {
     };
 
     // Hexagons size → flowing poster-hex honeycomb (like the Tautulli page); otherwise a list.
-    if (isHexWidget(panel)) {
+    if (hex) {
       const cards = items.map(({ svc, s }) => {
         const isTranscode = (s.transcode_decision || '').toLowerCase().includes('transcode');
         return posterHexCard({
