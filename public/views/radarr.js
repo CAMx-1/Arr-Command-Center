@@ -12,6 +12,8 @@ import { tagEditor, arrCommandBar, loadTags, openManualImport } from '../lib/arr
 import { compactTable } from '../lib/tableView.js';
 import { savedViewsControl } from '../lib/savedViews.js';
 import { comparisonBar } from '../lib/comparisonDrawer.js';
+import { actionGroup } from '../lib/actions.js';
+import { restoreSelection, persistSelection } from '../lib/workflowState.js';
 
 export async function renderRadarr(root, ctx) {
   const svc = ctx.service;
@@ -108,7 +110,10 @@ async function tabMovies(root, arr, ctx) {
     let sortKey = ctx.params.sort || 'title';
     let direction = ctx.params.dir === 'desc' ? 'desc' : 'asc';
     let filteredItems = movies;
-    const selected = new Map();
+    // Restore any service-scoped selection (comparison/bulk) from a prior
+    // visit, intersected with the current library so stale ids are dropped.
+    const selected = restoreSelection(ctx.service.key, movies);
+    const persistSel = () => persistSelection(ctx.service.key, selected);
     const listWrap = h('div', {});
     const compareWrap = h('div', {});
     const fields = [
@@ -117,7 +122,7 @@ async function tabMovies(root, arr, ctx) {
       { label: 'Downloaded', value: (m) => m.hasFile ? 'Yes' : 'No' }, { label: 'Monitored', value: (m) => m.monitored ? 'Yes' : 'No' },
       { label: 'Storage', value: (m) => m.sizeOnDisk || 0, bytes: true }, { label: 'Path', value: (m) => m.path },
     ];
-    const updateCompare = () => mount(compareWrap, comparisonBar(selected, { title: 'Compare movies', fields, onClear: () => { selected.clear(); renderList(filteredItems); updateCompare(); } }));
+    const updateCompare = () => mount(compareWrap, comparisonBar(selected, { title: 'Compare movies', fields, onClear: () => { selected.clear(); persistSel(); renderList(filteredItems); updateCompare(); } }));
     const openInfo = (m) => {
       const img = (m.images || []).find((i) => i.coverType === 'poster');
       const rating = m.ratings && (m.ratings.tmdb?.value || m.ratings.imdb?.value || m.ratings.value);
@@ -138,7 +143,7 @@ async function tabMovies(root, arr, ctx) {
         return mount(listWrap, compactTable(items, {
           columns, sortKey, direction, selected,
           onSort: (key, dir) => { sortKey = key; direction = dir; ctx.setParams({ sort: key === 'title' ? '' : key, dir: dir === 'asc' ? '' : dir }); renderList(filteredItems); },
-          onToggle: (entry) => { selected.has(entry.id) ? selected.delete(entry.id) : selected.set(entry.id, entry); renderList(filteredItems); updateCompare(); },
+          onToggle: (entry) => { selected.has(entry.id) ? selected.delete(entry.id) : selected.set(entry.id, entry); persistSel(); renderList(filteredItems); updateCompare(); },
           onOpen: openInfo,
         }));
       }
@@ -152,7 +157,8 @@ async function tabMovies(root, arr, ctx) {
       }),
       savedViewsControl(ctx),
       h('button', { class: 'btn sm', title: 'Bulk select', onclick: () => bulkLibrary(root, {
-        items: movies, kind: 'movie', arr, invalidateKey: `arr:${ctx.service.key}:movie`, mode, columns, sortKey, direction,
+        items: movies, filteredItems, kind: 'movie', arr, invalidateKey: `arr:${ctx.service.key}:movie`,
+        mode, columns, sortKey, direction, scope: ctx.service.key, initialSelectedIds: [...selected.keys()],
         onExit: () => tabMovies(root, arr, ctx),
       }) }, '☑ Select'),
     );
@@ -167,16 +173,15 @@ function movieHex(m, arr, ctx) {
   const img = (m.images || []).find((i) => i.coverType === 'poster');
   const url = img && (img.remoteUrl || img.url);
   const rating = m.ratings && (m.ratings.tmdb?.value || m.ratings.imdb?.value || m.ratings.value);
-  const actions = h('div', { class: 'row-actions' },
-    h('button', { class: 'btn sm', title: 'Storage & file info', onclick: (e) => { e.stopPropagation(); openArrFileInfo(ctx.service.label, false, m); } }, 'Info'),
-    h('button', { class: 'btn sm', title: 'Interactive search', onclick: (e) => { e.stopPropagation(); openReleaseSearch(ctx, ctx.service.key, `movieId=${m.id}`, `${m.title} (${m.year})`); } }, 'Search'),
-    h('button', { class: 'btn sm', title: 'Automatic search', onclick: async (e) => {
-      e.stopPropagation();
+  const actions = actionGroup([
+    { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, false, m) },
+    { label: 'Search', title: 'Interactive search', primary: true, onClick: () => openReleaseSearch(ctx, ctx.service.key, `movieId=${m.id}`, `${m.title} (${m.year})`) },
+    { label: 'Auto', title: 'Automatic search', onClick: async () => {
       try { await arr.post('command', { name: 'MoviesSearch', movieIds: [m.id] }); toast(`Searching for ${m.title}`, 'success'); }
       catch (e2) { toast(e2.message, 'error'); }
-    } }, 'Auto'),
-    h('button', { class: 'btn sm', title: 'Edit / delete', onclick: (e) => { e.stopPropagation(); openEditMovie(arr, ctx, m); } }, 'Edit'),
-  );
+    } },
+    { label: 'Edit', title: 'Edit / delete', onClick: () => openEditMovie(arr, ctx, m) },
+  ], { sheetTitle: m.title });
   return posterHexCard({
     posterUrl: url,
     title: `${m.title}${m.year ? ` (${m.year})` : ''}`,
@@ -211,16 +216,15 @@ function movieRow(m, arr, ctx) {
         m.monitored ? h('span', { class: 'pill info' }, 'Monitored') : h('span', { class: 'pill muted' }, 'Unmonitored'),
       ),
     ),
-    h('div', { class: 'row-actions' },
-      h('button', { class: 'btn sm', title: 'Storage & file info', onclick: (e) => { e.stopPropagation(); openArrFileInfo(ctx.service.label, false, m); } }, 'Info'),
-      h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); openReleaseSearch(ctx, ctx.service.key, `movieId=${m.id}`, `${m.title} (${m.year})`); } }, 'Interactive'),
-      h('button', { class: 'btn sm', onclick: async (e) => {
-        e.stopPropagation();
+    actionGroup([
+      { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, false, m) },
+      { label: 'Interactive', title: 'Interactive search', primary: true, onClick: () => openReleaseSearch(ctx, ctx.service.key, `movieId=${m.id}`, `${m.title} (${m.year})`) },
+      { label: 'Auto', title: 'Automatic search', onClick: async () => {
         try { await arr.post('command', { name: 'MoviesSearch', movieIds: [m.id] }); toast(`Searching for ${m.title}`, 'success'); }
         catch (e2) { toast(e2.message, 'error'); }
-      } }, 'Auto'),
-      h('button', { class: 'btn sm', title: 'Edit / delete', onclick: (e) => { e.stopPropagation(); openEditMovie(arr, ctx, m); } }, 'Edit'),
-    ),
+      } },
+      { label: 'Edit', title: 'Edit / delete', onClick: () => openEditMovie(arr, ctx, m) },
+    ], { sheetTitle: m.title }),
   );
 }
 
@@ -280,17 +284,17 @@ function queueRow(r, arr, ctx) {
       ),
       h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })),
     ),
-    h('div', { class: 'row-actions' },
-      h('button', { class: 'btn sm', title: 'Manually import completed files', onclick: () => openManualImport(arr, 'movie', { downloadId: r.downloadId, title: r.title }) }, '⇩ Import'),
-      h('button', { class: 'btn sm danger', onclick: remove }, '✕ Remove'),
-      h('button', { class: 'btn sm', title: 'Blocklist this release and search for a replacement', onclick: async () => {
+    actionGroup([
+      { label: '\u21E9 Import', title: 'Manually import completed files', onClick: () => openManualImport(arr, 'movie', { downloadId: r.downloadId, title: r.title }) },
+      { label: '\u2715 Remove', variant: 'danger', primary: true, onClick: remove },
+      { label: '\u26D4 Blocklist & search', title: 'Blocklist this release and search for a replacement', onClick: async () => {
         try {
           await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=true`);
           if (r.movieId) await arr.post('command', { name: 'MoviesSearch', movieIds: [r.movieId] });
           toast('Blocklisted & searching for a replacement', 'success'); ctx.reload();
         } catch (e) { toast(e.message, 'error'); }
-      } }, '⛔ Blocklist & search'),
-    ),
+      } },
+    ], { sheetTitle: r.title }),
   );
   return swipeToAction(row, remove); // swipe left to remove (touch)
 }

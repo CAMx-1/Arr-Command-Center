@@ -23,6 +23,8 @@ import { openDetailModal } from './views/detail.js';
 import { fetchNotifications, getLastSeen, markSeen, notifKind } from './lib/notifications.js';
 import * as push from './lib/push.js';
 import { initAppearance } from './lib/theme.js';
+import { initDensity } from './lib/density.js';
+import { initUpdateBanner } from './lib/updateBanner.js';
 import { openCommandPalette } from './lib/commandPalette.js';
 import { setDashboardScope } from './lib/dashboardPrefs.js';
 import { mergeState, classifyNavigation, targetScrollFor, createScrollStore } from './lib/scrollHistory.js';
@@ -1098,6 +1100,7 @@ async function probeCycle() {
 // ---------- Init ----------
 async function init() {
   initAppearance();
+  initDensity();
   // Own scroll restoration so route/history-aware logic (see navigate) controls
   // it instead of the browser guessing on Back/Forward.
   try { if ('scrollRestoration' in history) history.scrollRestoration = 'manual'; } catch { /* ignore */ }
@@ -1146,6 +1149,10 @@ async function init() {
   // Notifications: initial load + poll every 30s.
   refreshNotifications();
   setInterval(refreshNotifications, 30000);
+
+  // Update banner: watch the backend build identity and prompt a reload when a
+  // new version is deployed.
+  initUpdateBanner();
 
   // Mobile: pull down at the top of any view to refresh.
   initPullToRefresh();

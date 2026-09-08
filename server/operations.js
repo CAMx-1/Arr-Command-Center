@@ -78,6 +78,21 @@ async function collectArr(svc, serviceGet, now) {
 
 const REQUEST_STATUS = { 1: 'Pending', 2: 'Approved', 3: 'Declined' };
 const ISSUE_TYPE = { 1: 'Video', 2: 'Audio', 3: 'Subtitles', 4: 'Other' };
+// Overseerr media availability codes (media.status on a request/media object).
+const MEDIA_AVAILABILITY = { 1: 'Unknown', 2: 'Pending', 3: 'Processing', 4: 'Partially Available', 5: 'Available' };
+
+// Human label for the availability code, defaulting to "Requested" when absent.
+const availabilityLabel = (status) => MEDIA_AVAILABILITY[Number(status)] || 'Requested';
+
+// Where an approved request is routed: Radarr for movies, Sonarr for TV,
+// annotated with a 4K flag and (for TV) the number of requested seasons.
+function requestTarget(r, mediaType) {
+  const parts = [mediaType === 'tv' ? 'Sonarr' : 'Radarr'];
+  if (r.is4k) parts.push('4K');
+  const seasons = Array.isArray(r.seasons) ? r.seasons.length : 0;
+  if (mediaType === 'tv' && seasons) parts.push(`${seasons} season${seasons === 1 ? '' : 's'}`);
+  return parts.join(' · ');
+}
 
 async function collectOverseerr(svc, serviceGet, now) {
   const results = await Promise.allSettled([
@@ -91,13 +106,25 @@ async function collectOverseerr(svc, serviceGet, now) {
   const addRequest = (r) => {
     const media = r.media || {};
     const pending = Number(r.status) === 1;
-    requests.set(r.id, item({
+    const mediaType = r.type || media.mediaType || null;
+    const requester = r.requestedBy?.displayName || r.requestedBy?.username || r.requestedBy?.email || 'unknown';
+    const availability = Number.isFinite(Number(media.status)) ? Number(media.status) : null;
+    const target = requestTarget(r, mediaType);
+    const entry = item({
       id: `${svc.key}:request:${r.id}`, kind: 'seerr-request', severity: pending ? 'warning' : 'info',
       title: media.title || media.name || `Request #${r.id}`,
-      detail: `${REQUEST_STATUS[r.status] || 'Requested'} by ${r.requestedBy?.displayName || r.requestedBy?.email || 'unknown'}`,
+      detail: `${REQUEST_STATUS[r.status] || 'Requested'} by ${requester}`,
       at: ts(r.createdAt, now), tab: pending ? 'pending' : 'all',
       action: pending ? { type: 'overseerr-request', requestId: r.id } : null,
-    }, svc, now));
+    }, svc, now);
+    // Structured fields so the dashboard can lazily fetch TMDB details and
+    // render actual title/year/poster without re-deriving anything client-side.
+    entry.requestId = r.id;
+    entry.media = { tmdbId: media.tmdbId ?? null, mediaType, availability };
+    entry.availabilityLabel = availabilityLabel(availability);
+    entry.requester = requester;
+    entry.target = target;
+    requests.set(r.id, entry);
   };
   for (const r of (recentData.results || [])) addRequest(r);
   for (const r of (pendingData.results || [])) addRequest(r); // pending data wins when lists overlap

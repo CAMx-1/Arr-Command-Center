@@ -2,6 +2,7 @@ import { h, mount, clear, spinner, svcIcon, confirmModal, openModal, closeModal,
 import { SERVICE_META } from '../app.js';
 import { getTheme, getAccent, applyTheme, applyAccent, ACCENTS, ACCENT_NAMES } from '../lib/theme.js';
 import { globalMode, setGlobalMode } from '../lib/viewMode.js';
+import { getDensity, setDensity, DENSITIES } from '../lib/density.js';
 import { isHidden, setHidden, orderServices, setOrder } from '../lib/servicePrefs.js';
 import * as push from '../lib/push.js';
 import { renderQueueCleaner, renderHunting } from '../lib/automationUI.js';
@@ -241,11 +242,17 @@ function appearanceCard(root, ctx) {
     class: `btn sm hex-btn ${gmode === val ? 'primary' : ''}`,
     onclick: () => { setGlobalMode(val); renderSettings(root, ctx); },
   }, label);
+  const density = getDensity();
+  const densityBtn = (val, label) => h('button', {
+    class: `btn sm hex-btn ${density === val ? 'primary' : ''}`,
+    onclick: () => { setDensity(val); renderSettings(root, ctx); },
+  }, label);
   return h('div', { class: 'card' },
     settingRow('Theme', h('span', { style: { display: 'flex', gap: '8px' } }, themeBtn('light', 'Light'), themeBtn('dark', 'Dark'))),
     settingRow('Accent', h('span', { class: 'accent-row' }, ...swatches)),
     settingRow('Default view', h('span', { style: { display: 'flex', gap: '8px' } }, viewBtn('hex', 'Hexagon'), viewBtn('list', 'List'))),
-    h('div', { class: 'dim', style: { fontSize: '12px', marginTop: '8px' } }, 'Each page can override this with its own Hex/List toggle.'),
+    settingRow('Density', h('span', { style: { display: 'flex', gap: '8px' } }, ...DENSITIES.map((d) => densityBtn(d.id, d.label)))),
+    h('div', { class: 'dim', style: { fontSize: '12px', marginTop: '8px' } }, 'Each page can override this with its own Hex/List toggle. Compact density tightens rows, tables and feeds.'),
   );
 }
 

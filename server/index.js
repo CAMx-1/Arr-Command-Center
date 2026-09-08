@@ -2,8 +2,9 @@
 // Serves the dashboard UI and proxies API calls to your services, injecting
 // per-service API keys and Cloudflare Access service-token headers.
 import express from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -51,6 +52,29 @@ try { push.initPush(); } catch (e) { console.error('[push] init failed:', e.mess
 
 const START_TS = Date.now();
 const requestLog = []; // recent /api/* requests (ring buffer) for diagnostics
+
+// Stable build identity for the running server. Used by the frontend's update
+// banner: when this value changes (a new deploy), connected clients are told to
+// reload. It stays constant across mere restarts of the same build so a restart
+// doesn't nag users. Override with BUILD_ID; otherwise derived from the package
+// version plus the mtimes of the primary shipped assets.
+const BUILD_ID = computeBuildId();
+function computeBuildId() {
+  if (process.env.BUILD_ID) return String(process.env.BUILD_ID).slice(0, 64);
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    const files = [
+      path.join(PUBLIC_DIR, 'app.js'),
+      path.join(PUBLIC_DIR, 'styles.css'),
+      path.join(PUBLIC_DIR, 'index.html'),
+      path.join(__dirname, 'index.js'),
+    ];
+    const hash = createHash('sha1');
+    hash.update(String(pkg.version || '0'));
+    for (const f of files) { try { hash.update(String(fs.statSync(f).mtimeMs)); } catch { /* missing file — skip */ } }
+    return `${pkg.version || '0'}-${hash.digest('hex').slice(0, 12)}`;
+  } catch { return 'dev'; }
+}
 
 // Structured request logging with request IDs + timing (for /api/* calls).
 app.use((req, res, next) => {
@@ -119,6 +143,13 @@ if (!localOnly && !anyAuth) {
 
 // Public (secret-free) config for the frontend.
 app.get('/api/config', (req, res) => res.json({ ...publicConfig(cfg), auth: { plexEnabled: plexAuth.enabled, user: req.plexUser || null } }));
+
+// Build identity for the frontend update banner. Never cached so a new deploy
+// is seen promptly by polling clients.
+app.get('/api/version', (req, res) => {
+  res.set('Cache-Control', 'no-store, must-revalidate');
+  res.json({ version: BUILD_ID, startedAt: START_TS });
+});
 
 // Aggregate connection status for all enabled services.
 app.get('/api/status', async (req, res) => {

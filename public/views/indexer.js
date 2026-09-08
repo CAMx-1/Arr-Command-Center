@@ -1,4 +1,5 @@
 import { h, mount, clear, toast, empty, spinner, fmtBytes, fmtRelative, debounce, openModal, closeModal } from '../lib/ui.js';
+import { actionGroup } from '../lib/actions.js';
 
 // Usenet indexer search — LunaSea-style "Search" for public indexers such as
 // NZBGeek (Indexer API Host + Indexer API Key). Public indexers expose the
@@ -160,11 +161,11 @@ function resultRow(it, ctx) {
         it.pubDate ? h('span', {}, fmtRelative(it.pubDate)) : null,
       ),
     ),
-    h('div', { class: 'row-actions' },
-      (it.comments || it.details) ? h('button', { class: 'btn sm hex-btn', title: 'Read comments on the indexer', onclick: () => openLink(it.comments || it.details) }, `💬${it.commentsCount ? ` ${it.commentsCount}` : ''}`) : null,
-      h('button', { class: 'btn sm hex-btn', title: 'View details', onclick: () => openDetailsModal(it, ctx) }, 'Details'),
-      h('button', { class: 'btn sm primary hex-btn', title: 'Send to SABnzbd', disabled: it.url ? null : 'disabled', onclick: () => sendToSab(ctx, it) }, '＋ Send to SAB'),
-    ),
+    actionGroup([
+      (it.comments || it.details) ? { label: `\uD83D\uDCAC${it.commentsCount ? ` ${it.commentsCount}` : ''}`, title: 'Read comments on the indexer', onClick: () => openLink(it.comments || it.details) } : null,
+      { label: 'Details', title: 'View details', onClick: () => openDetailsModal(it, ctx) },
+      { label: '\uFF0B Send to SAB', title: 'Send to SABnzbd', variant: 'primary', primary: true, disabled: !it.url, onClick: () => sendToSab(ctx, it) },
+    ], { sheetTitle: it.title }),
   );
 }
 

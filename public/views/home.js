@@ -4,6 +4,7 @@ import { listFailed, removeFailed } from '../lib/failedRequests.js';
 import { visibleServices } from '../lib/servicePrefs.js';
 import { honeycombRows, isWide } from '../lib/honeycomb.js';
 import { loadDashboards, activeDashboard } from '../lib/dashboardPrefs.js';
+import { actionGroup } from '../lib/actions.js';
 
 // ---- Activity source definitions ----
 const ACTIVITY_DEFS = [
@@ -19,6 +20,9 @@ const ACTIVITY_DEFS = [
 ];
 const ACTIVITY_DEFAULTS = { failed: true, streams: true, sab: true, sonarr: true, radarr: true, 'seerr-approval': true, 'seerr-requests': false, bazarr: false, qbittorrent: true };
 const REQ_STATUS = { 1: 'Pending', 2: 'Approved', 3: 'Declined' };
+// Overseerr media availability codes (media.status).
+const MEDIA_AVAILABILITY = { 1: 'Unknown', 2: 'Pending', 3: 'Processing', 4: 'Partial', 5: 'Available' };
+const TMDB_POSTER_BASE = 'https://image.tmdb.org/t/p/w154';
 
 function loadActivityPrefs() {
   try {
@@ -143,7 +147,59 @@ function renderSeerrWidget(panel, ctx) {
     mount(panel, badges, dashboardFeedEmpty('No Seerr requests or open issues', 'New requests and reported issues will appear here'));
     return;
   }
-  mount(panel, badges, h('div', { class: 'seerr-widget-list dashboard-feed-list' }, ...entries.map((entry) => operationRow(entry, ctx, true))));
+  // Render immediately with server-provided fallbacks (title or "Request #id"),
+  // keeping the element handles so we can patch each row in place once the
+  // matching TMDB detail resolves.
+  const rendered = entries.map((entry) => ({ entry, el: operationRow(entry, ctx, true) }));
+  mount(panel, badges, h('div', { class: 'seerr-widget-list dashboard-feed-list' }, ...rendered.map((r) => r.el)));
+  enrichSeerrRequests(ctx, rendered);
+}
+
+// Lazily fetch up to five movie/tv detail records (deduped/cached via
+// seerrDetail) and update the dashboard rows with real title/year/poster and
+// the structured media-type/requester/target line. Failed lookups gracefully
+// retain the server "Request #id" fallback already on screen.
+async function enrichSeerrRequests(ctx, rendered) {
+  const targets = rendered
+    .filter(({ entry }) => entry.kind === 'seerr-request' && entry.media?.tmdbId)
+    .slice(0, 5);
+  await Promise.all(targets.map(async ({ entry, el }) => {
+    if (!el.isConnected) return;
+    try {
+      const detail = await seerrDetail(ctx, entry.serviceKey, entry.media.mediaType, entry.media.tmdbId);
+      if (detail && el.isConnected) applySeerrDetail(el, entry, detail);
+    } catch { /* keep fallback */ }
+  }));
+}
+
+function applySeerrDetail(el, entry, detail) {
+  const title = detail.title || detail.name || detail.originalTitle || detail.originalName;
+  const date = detail.releaseDate || detail.firstAirDate || '';
+  const year = date && Number.isFinite(new Date(date).getFullYear()) ? new Date(date).getFullYear() : '';
+  const titleEl = el.querySelector('.row-title');
+  if (titleEl && title) {
+    clear(titleEl);
+    titleEl.appendChild(document.createTextNode(title));
+    if (year) titleEl.appendChild(h('span', { class: 'dim nowrap' }, ` (${year})`));
+  }
+  const posterEl = el.querySelector('.poster');
+  if (posterEl && detail.posterPath) {
+    const fallback = posterEl.firstChild ? posterEl.firstChild.cloneNode(true) : document.createTextNode('•');
+    const img = h('img', {
+      src: `${TMDB_POSTER_BASE}${detail.posterPath}`, loading: 'lazy', alt: '',
+      style: { width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' },
+      onerror: function () { this.replaceWith(fallback); },
+    });
+    clear(posterEl);
+    posterEl.appendChild(img);
+  }
+  const subEl = el.querySelector('.row-sub');
+  if (subEl) {
+    const mt = entry.media.mediaType === 'tv' ? 'TV' : 'Movie';
+    const availability = entry.availabilityLabel || MEDIA_AVAILABILITY[entry.media.availability] || '';
+    const parts = [mt, availability, entry.requester ? `by ${entry.requester}` : null, entry.target].filter(Boolean);
+    subEl.textContent = parts.join(' · ');
+  }
 }
 
 function operationRow(entry, ctx, actionable = false) {
@@ -156,10 +212,10 @@ function operationRow(entry, ctx, actionable = false) {
       try { await ctx.api.seerr(entry.serviceKey).post(`request/${entry.action.requestId}/${verb}`); toast(`Request ${verb}d`, 'success'); await hydrateOperations(ctx); }
       catch (error) { toast(error.message, 'error'); }
     };
-    actions = h('div', { class: 'row-actions' },
-      h('button', { class: 'btn sm primary', onclick: (event) => act('approve', event) }, 'Approve'),
-      h('button', { class: 'btn sm danger', onclick: (event) => act('decline', event) }, 'Decline'),
-    );
+    actions = actionGroup([
+      { label: 'Approve', variant: 'primary', primary: true, onClick: (event) => act('approve', event) },
+      { label: 'Decline', variant: 'danger', onClick: (event) => act('decline', event) },
+    ], { sheetTitle: entry.title });
   }
   return h('div', { class: `row dashboard-feed-row operation-row severity-${entry.severity || 'info'}${entry.serviceKey ? ' clickable' : ''}`, onclick: navigate },
     h('div', { class: 'poster dashboard-feed-icon' }, svcIcon(meta.logo, meta.emoji || '•', 22)),
@@ -370,7 +426,7 @@ function buildActivityToggles(ctx) {
 const detailCache = new Map();
 async function seerrDetail(ctx, key, mediaType, tmdbId) {
   if (!tmdbId) return null;
-  const ck = `${mediaType}:${tmdbId}`;
+  const ck = `${key}:${mediaType}:${tmdbId}`;
   if (detailCache.has(ck)) return detailCache.get(ck);
   const p = ctx.api.seerr(key).get(`${mediaType === 'tv' ? 'tv' : 'movie'}/${tmdbId}`).catch(() => null);
   detailCache.set(ck, p);
@@ -489,12 +545,11 @@ function approvalActions(ctx, key, id) {
     try { await ctx.api.seerr(key).post(`request/${id}/${action}`); toast(`Request ${action}d`, 'success'); hydrateActivity(ctx); }
     catch (e) { toast(e.message, 'error'); }
   };
-  return h('div', { class: 'row-actions' },
-    h('button', { class: 'btn sm primary', title: 'Approve', onclick: (e) => doAct('approve', e) }, '✓'),
-    h('button', { class: 'btn sm danger', title: 'Decline', onclick: (e) => doAct('decline', e) }, '✕'),
-  );
+  return actionGroup([
+    { label: '\u2713', title: 'Approve', variant: 'primary', primary: true, onClick: (e) => doAct('approve', e) },
+    { label: '\u2715', title: 'Decline', variant: 'danger', onClick: (e) => doAct('decline', e) },
+  ], { sheetTitle: 'Request' });
 }
-
 function failedRows(ctx) {
   const list = listFailed();
   return list.map((e) => {

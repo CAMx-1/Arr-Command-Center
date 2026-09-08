@@ -517,6 +517,11 @@ kbd { display: inline-block; min-width: 20px; padding: 2px 7px; text-align: cent
 .bulk-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
 .bulk-check { display: inline-flex; align-items: center; padding: 0 4px; }
 .bulk-check input, .bulk-all input { width: 18px; height: 18px; accent-color: var(--accent); }
+.bulk-scope { display: inline-flex; align-items: center; gap: 6px; }
+.bulk-scope select.input { width: auto; padding: 6px 10px; font-size: 13px; }
+.bulk-summary { font-weight: 700; }
+.bulk-failure-list { max-height: 44vh; overflow: auto; }
+.bulk-failure-list .row-title { font-size: 13px; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 
 /* toast */
@@ -972,3 +977,68 @@ img.poster { aspect-ratio: 2 / 3; object-fit: cover; background: linear-gradient
   .compare-drawer { width: 100vw; }
   .compare-bar { top: calc(56px + env(safe-area-inset-top)); }
 }
+
+/* ============================================================
+   Reusable action groups + mobile action sheet (lib/actions.js)
+   ============================================================ */
+.action-group { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+/* The "More" affordance is desktop-hidden; all actions show inline. */
+.action-group .ag-more { display: none; padding: 6px 14px; }
+
+@media (max-width: 720px) {
+  /* Mobile: keep one primary action inline, collapse the rest into a sheet. */
+  .action-group .ag-extra { display: none; }
+  .action-group .ag-more { display: inline-flex; align-items: center; justify-content: center; }
+}
+
+/* Bottom-sheet listing overflow actions (opened by .ag-more). */
+.action-sheet-backdrop { position: fixed; inset: 0; z-index: 95; display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(15, 17, 23, 0.5); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  opacity: 0; transition: opacity 0.22s var(--ease); padding: 0 10px; }
+.action-sheet-backdrop.show { opacity: 1; }
+.action-sheet { width: 100%; max-width: 520px; background: var(--surface); border: 1px solid var(--border);
+  border-top-left-radius: 20px; border-top-right-radius: 20px; box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.4);
+  padding: 10px 14px calc(18px + env(safe-area-inset-bottom)); max-height: 80vh; overflow-y: auto; overscroll-behavior: contain;
+  transform: translateY(110%); transition: transform 0.26s var(--ease); }
+.action-sheet.show { transform: none; }
+.action-sheet-grip { width: 42px; height: 4px; border-radius: 2px; background: var(--border-strong); margin: 6px auto 12px; }
+.action-sheet-title { font-weight: 800; font-size: 15px; text-align: center; margin-bottom: 12px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.action-sheet-list { display: flex; flex-direction: column; gap: 8px; }
+.action-sheet-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 14px 16px; font-size: 15px; font-weight: 600; color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; transition: background 0.15s var(--ease); }
+.action-sheet-item:hover { background: var(--surface-hover); }
+.action-sheet-item.primary { color: var(--accent); }
+.action-sheet-item.danger { color: var(--red); }
+.action-sheet-item:disabled { opacity: 0.5; cursor: not-allowed; }
+.action-sheet-ico { width: 22px; text-align: center; flex: 0 0 auto; }
+.action-sheet-cancel { width: 100%; margin-top: 12px; }
+
+/* ============================================================
+   Compact / comfortable density (lib/density.js -> data-density)
+   ============================================================ */
+[data-density="compact"] .list { gap: 8px; }
+[data-density="compact"] .row { padding: 10px 30px; contain-intrinsic-size: auto 64px; }
+[data-density="compact"] .row .poster { width: 40px; height: 58px; }
+[data-density="compact"] .row .row-title { margin-bottom: 0; }
+[data-density="compact"] .row .meta-line { gap: 10px; }
+[data-density="compact"] .action-group { gap: 6px; }
+[data-density="compact"] .arr-table th,
+[data-density="compact"] .arr-table td { padding: 4px 8px; }
+[data-density="compact"] .dashboard-feed-list,
+[data-density="compact"] .timeline-list,
+[data-density="compact"] .seerr-widget-list { gap: 8px; }
+[data-density="compact"] .dashboard-feed-row { min-height: 56px; }
+[data-density="compact"] .dashboard-feed-row .dashboard-feed-icon { width: 34px; height: 34px; font-size: 17px; }
+
+/* ============================================================
+   Update banner (lib/updateBanner.js) — new-build reload prompt
+   ============================================================ */
+.update-banner { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 10px); z-index: 1200;
+  transform: translate(-50%, -140%); display: flex; align-items: center; gap: 12px;
+  padding: 9px 10px 9px 16px; background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 999px; box-shadow: var(--shadow-lg); opacity: 0;
+  transition: transform 0.28s var(--ease), opacity 0.28s var(--ease); max-width: 92vw; }
+.update-banner.show { transform: translate(-50%, 0); opacity: 1; }
+.update-banner-text { font-size: 13px; font-weight: 600; color: var(--text); }

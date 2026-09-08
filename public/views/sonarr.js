@@ -12,6 +12,8 @@ import { compactTable } from '../lib/tableView.js';
 import { savedViewsControl } from '../lib/savedViews.js';
 import { comparisonBar } from '../lib/comparisonDrawer.js';
 import { reconcileQueueIssues } from '../lib/queueIssues.js';
+import { actionGroup } from '../lib/actions.js';
+import { restoreSelection, persistSelection } from '../lib/workflowState.js';
 
 export async function renderSonarr(root, ctx) {
   const svc = ctx.service;
@@ -76,7 +78,10 @@ async function tabSeries(root, arr, ctx) {
     let sortKey = ctx.params.sort || 'title';
     let direction = ctx.params.dir === 'desc' ? 'desc' : 'asc';
     let filteredItems = series;
-    const selected = new Map();
+    // Restore any service-scoped selection (comparison/bulk) from a prior
+    // visit, intersected with the current library so stale ids are dropped.
+    const selected = restoreSelection(ctx.service.key, series);
+    const persistSel = () => persistSelection(ctx.service.key, selected);
     const listWrap = h('div', {});
     const compareWrap = h('div', {});
     const fields = [
@@ -85,7 +90,7 @@ async function tabSeries(root, arr, ctx) {
       { label: 'Episodes', value: (s) => `${s.statistics?.episodeFileCount ?? 0}/${s.statistics?.episodeCount ?? 0}` },
       { label: 'Storage', value: (s) => s.statistics?.sizeOnDisk || 0, bytes: true }, { label: 'Path', value: (s) => s.path },
     ];
-    const updateCompare = () => mount(compareWrap, comparisonBar(selected, { title: 'Compare series', fields, onClear: () => { selected.clear(); renderList(filteredItems); updateCompare(); } }));
+    const updateCompare = () => mount(compareWrap, comparisonBar(selected, { title: 'Compare series', fields, onClear: () => { selected.clear(); persistSel(); renderList(filteredItems); updateCompare(); } }));
     const openInfo = (s) => {
       const img = (s.images || []).find((i) => i.coverType === 'poster');
       openDetailModal(ctx, { mediaType: 'tv', tmdbId: s.tmdbId, fallback: { title: s.title, year: s.year, overview: s.overview, genres: s.genres, rating: s.ratings?.value, posterUrl: img && (img.remoteUrl || img.url) } });
@@ -105,7 +110,7 @@ async function tabSeries(root, arr, ctx) {
         return mount(listWrap, compactTable(items, {
           columns, sortKey, direction, selected,
           onSort: (key, dir) => { sortKey = key; direction = dir; ctx.setParams({ sort: key === 'title' ? '' : key, dir: dir === 'asc' ? '' : dir }); renderList(filteredItems); },
-          onToggle: (entry) => { selected.has(entry.id) ? selected.delete(entry.id) : selected.set(entry.id, entry); renderList(filteredItems); updateCompare(); },
+          onToggle: (entry) => { selected.has(entry.id) ? selected.delete(entry.id) : selected.set(entry.id, entry); persistSel(); renderList(filteredItems); updateCompare(); },
           onOpen: openInfo,
         }));
       }
@@ -119,7 +124,8 @@ async function tabSeries(root, arr, ctx) {
       }),
       savedViewsControl(ctx),
       h('button', { class: 'btn sm', title: 'Bulk select', onclick: () => bulkLibrary(root, {
-        items: series, kind: 'series', arr, invalidateKey: `arr:${ctx.service.key}:series`, mode, columns, sortKey, direction,
+        items: series, filteredItems, kind: 'series', arr, invalidateKey: `arr:${ctx.service.key}:series`,
+        mode, columns, sortKey, direction, scope: ctx.service.key, initialSelectedIds: [...selected.keys()],
         onExit: () => tabSeries(root, arr, ctx),
       }) }, '☑ Select'),
     );
@@ -135,17 +141,16 @@ function seriesHex(s, arr, ctx) {
   const img = (s.images || []).find((i) => i.coverType === 'poster');
   const url = img && (img.remoteUrl || img.url);
   const rating = s.ratings && s.ratings.value;
-  const actions = h('div', { class: 'row-actions' },
-    h('button', { class: 'btn sm', title: 'Storage & file info', onclick: (e) => { e.stopPropagation(); openArrFileInfo(ctx.service.label, true, s, arr); } }, 'Info'),
-    h('button', { class: 'btn sm', title: 'Seasons & episodes', onclick: (e) => { e.stopPropagation(); openSeasonBrowser(arr, ctx, s); } }, 'Seasons'),
-    h('button', { class: 'btn sm', title: 'Interactive search', onclick: (e) => { e.stopPropagation(); openInteractive(ctx, arr, s); } }, 'Search'),
-    h('button', { class: 'btn sm', title: 'Automatic search', onclick: async (e) => {
-      e.stopPropagation();
+  const actions = actionGroup([
+    { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, true, s, arr) },
+    { label: 'Seasons', title: 'Seasons & episodes', onClick: () => openSeasonBrowser(arr, ctx, s) },
+    { label: 'Search', title: 'Interactive search', primary: true, onClick: () => openInteractive(ctx, arr, s) },
+    { label: 'Auto', title: 'Automatic search', onClick: async () => {
       try { await arr.post('command', { name: 'SeriesSearch', seriesId: s.id }); toast(`Searching for ${s.title}`, 'success'); }
       catch (e2) { toast(e2.message, 'error'); }
-    } }, 'Auto'),
-    h('button', { class: 'btn sm', title: 'Edit / delete', onclick: (e) => { e.stopPropagation(); openEditSeries(arr, ctx, s); } }, 'Edit'),
-  );
+    } },
+    { label: 'Edit', title: 'Edit / delete', onClick: () => openEditSeries(arr, ctx, s) },
+  ], { sheetTitle: s.title });
   return posterHexCard({
     posterUrl: url,
     title: `${s.title}${s.year ? ` (${s.year})` : ''}`,
@@ -183,17 +188,16 @@ function seriesRow(s, arr, ctx) {
       ),
       stats.episodeCount ? h('div', { class: 'progress' }, h('span', { style: { width: pct(stats.percentOfEpisodes ?? 0) } })) : null,
     ),
-    h('div', { class: 'row-actions' },
-      h('button', { class: 'btn sm', title: 'Storage & file info', onclick: (e) => { e.stopPropagation(); openArrFileInfo(ctx.service.label, true, s, arr); } }, 'Info'),
-      h('button', { class: 'btn sm', title: 'Seasons & episodes', onclick: (e) => { e.stopPropagation(); openSeasonBrowser(arr, ctx, s); } }, 'Seasons'),
-      h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); openInteractive(ctx, arr, s); } }, 'Interactive'),
-      h('button', { class: 'btn sm', onclick: async (e) => {
-        e.stopPropagation();
+    actionGroup([
+      { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, true, s, arr) },
+      { label: 'Seasons', title: 'Seasons & episodes', onClick: () => openSeasonBrowser(arr, ctx, s) },
+      { label: 'Interactive', title: 'Interactive search', primary: true, onClick: () => openInteractive(ctx, arr, s) },
+      { label: 'Auto', title: 'Automatic search', onClick: async () => {
         try { await arr.post('command', { name: 'SeriesSearch', seriesId: s.id }); toast(`Searching for ${s.title}`, 'success'); }
         catch (e2) { toast(e2.message, 'error'); }
-      } }, 'Auto'),
-      h('button', { class: 'btn sm', title: 'Edit / delete', onclick: (e) => { e.stopPropagation(); openEditSeries(arr, ctx, s); } }, 'Edit'),
-    ),
+      } },
+      { label: 'Edit', title: 'Edit / delete', onClick: () => openEditSeries(arr, ctx, s) },
+    ], { sheetTitle: s.title }),
   );
 }
 
@@ -290,18 +294,18 @@ function queueRow(r, arr, ctx) {
       ),
       h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })),
     ),
-    h('div', { class: 'row-actions' },
-      h('button', { class: 'btn sm', title: 'Manually import completed files', onclick: () => openManualImport(arr, 'series', { downloadId: r.downloadId, title: r.title }) }, '⇩ Import'),
-      h('button', { class: 'btn sm danger', onclick: remove }, '✕ Remove'),
-      h('button', { class: 'btn sm', title: 'Blocklist this release and search for a replacement', onclick: async () => {
+    actionGroup([
+      { label: '\u21E9 Import', title: 'Manually import completed files', onClick: () => openManualImport(arr, 'series', { downloadId: r.downloadId, title: r.title }) },
+      { label: '\u2715 Remove', variant: 'danger', primary: true, onClick: remove },
+      { label: '\u26D4 Blocklist & search', title: 'Blocklist this release and search for a replacement', onClick: async () => {
         try {
           await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=true`);
           if (r.episodeId) await arr.post('command', { name: 'EpisodeSearch', episodeIds: [r.episodeId] });
           else if (r.seriesId) await arr.post('command', { name: 'SeriesSearch', seriesId: r.seriesId });
           toast('Blocklisted & searching for a replacement', 'success'); ctx.reload();
         } catch (e) { toast(e.message, 'error'); }
-      } }, '⛔ Blocklist & search'),
-    ),
+      } },
+    ], { sheetTitle: r.title }),
   );
   return swipeToAction(row, remove); // swipe left to remove (touch)
 }

@@ -222,7 +222,7 @@ async function tabIssues(root, seerr, ctx) {
   try {
     const data = await seerr.get('issue?take=50&skip=0&sort=added&filter=all');
     const results = data.results || [];
-    if (!results.length) return mount(root, empty('🐞', 'No issues', 'No reported media issues.'));
+    if (!results.length) return mount(root, empty('✅', 'No issues', 'No reported media issues.'));
     mount(root, h('div', { class: 'list' }, ...results.map((is) => issueRow(is, seerr, ctx))));
   } catch (e) {
     mount(root, empty('⚠️', 'Failed to load issues', e.message, { label: 'Retry', onClick: () => tabIssues(root, seerr, ctx) }));

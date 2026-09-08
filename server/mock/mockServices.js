@@ -296,7 +296,7 @@ function makeOverseerr() {
   app.use(express.json());
   let requests = [
     { id: 11, status: 1, type: 'movie', createdAt: new Date(Date.now() - 3600000).toISOString(), media: { tmdbId: 533535, status: 3, title: 'Deadpool & Wolverine', mediaType: 'movie' }, requestedBy: { displayName: 'cameron', email: 'cameron@example.com' } },
-    { id: 12, status: 1, type: 'tv', createdAt: new Date(Date.now() - 7200000).toISOString(), media: { tmdbId: 94997, status: 2, title: 'House of the Dragon', mediaType: 'tv' }, requestedBy: { displayName: 'guest', email: 'guest@example.com' } },
+    { id: 12, status: 1, type: 'tv', createdAt: new Date(Date.now() - 7200000).toISOString(), seasons: [{ seasonNumber: 1 }, { seasonNumber: 2 }], media: { tmdbId: 94997, status: 2, title: 'House of the Dragon', mediaType: 'tv' }, requestedBy: { displayName: 'guest', email: 'guest@example.com' } },
     { id: 13, status: 2, type: 'movie', createdAt: new Date(Date.now() - 172800000).toISOString(), media: { tmdbId: 786892, status: 5, title: 'Furiosa', mediaType: 'movie' }, requestedBy: { displayName: 'cameron', email: 'cameron@example.com' } },
   ];
 
@@ -323,10 +323,19 @@ function makeOverseerr() {
     { id: 3, name: 'Alex Rivera', character: 'Antagonist', profilePath: null, order: 2 },
     { id: 4, name: 'Sam Chen', character: 'Sidekick', profilePath: null, order: 3 },
   ];
+  // TMDB-style detail overrides keyed by tmdbId so the dashboard/detail popout
+  // can render real titles, years and posters for the seeded requests/issues.
+  const tmdbDetails = {
+    533535: { title: 'Deadpool & Wolverine', releaseDate: '2024-07-24', posterPath: '/kqjL17yufvn9OVLyXYpvtyrFfak.jpg' },
+    786892: { title: 'Furiosa: A Mad Max Saga', releaseDate: '2024-05-22', posterPath: '/iADOJ8Zymht2JPMoy3R7xceZprc.jpg' },
+    94997: { name: 'House of the Dragon', firstAirDate: '2022-08-21', posterPath: '/z2yahl2uefxDCl0nogcRBstwruJ.jpg' },
+    95396: { name: 'Severance', firstAirDate: '2022-02-18', posterPath: '/lFf6LLrQjYldcZItzOkGmMMigP7.jpg' },
+  };
   app.get('/api/v1/movie/:id', (req, res) => res.json({
     id: Number(req.params.id), title: 'Mock Movie', overview: 'A thrilling mock movie used to demonstrate the details popout with description, ratings, genres and cast.',
     voteAverage: 7.8, voteCount: 4213, genres: [{ name: 'Action' }, { name: 'Sci-Fi' }], runtime: 132, releaseDate: '2024-05-01',
     tagline: 'Every demo has its hero.', status: 'Released', posterPath: null, backdropPath: null, credits: { cast: mockCast },
+    ...(tmdbDetails[Number(req.params.id)] || {}),
   }));
   app.get('/api/v1/tv/:id', (req, res) => res.json({
     id: Number(req.params.id), name: 'Mock Show', overview: 'A gripping mock series used to demonstrate the details popout including seasons and cast.',
@@ -335,6 +344,7 @@ function makeOverseerr() {
     seasons: [{ seasonNumber: 1, name: 'Season 1', episodeCount: 8 }, { seasonNumber: 2, name: 'Season 2', episodeCount: 10 }],
     mediaInfo: { status: 4, seasons: [{ seasonNumber: 1, status: 5 }] },
     credits: { cast: mockCast },
+    ...(tmdbDetails[Number(req.params.id)] || {}),
   }));
   app.get('/api/v1/request', (req, res) => {
     const filter = req.query.filter;
