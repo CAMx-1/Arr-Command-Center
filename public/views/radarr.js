@@ -151,7 +151,10 @@ async function tabMovies(root, arr, ctx) {
         onStateChange: ({ term, status }) => ctx.setParams({ q: term, status: status === 'all' ? '' : status }),
       }),
       savedViewsControl(ctx),
-      h('button', { class: 'btn sm', title: 'Bulk select', onclick: () => bulkLibrary(root, { items: movies, kind: 'movie', arr, invalidateKey: `arr:${ctx.service.key}:movie`, onExit: () => tabMovies(root, arr, ctx) }) }, '☑ Select'),
+      h('button', { class: 'btn sm', title: 'Bulk select', onclick: () => bulkLibrary(root, {
+        items: movies, kind: 'movie', arr, invalidateKey: `arr:${ctx.service.key}:movie`, mode, columns, sortKey, direction,
+        onExit: () => tabMovies(root, arr, ctx),
+      }) }, '☑ Select'),
     );
     mount(root, libHead, compareWrap, listWrap);
     updateCompare();

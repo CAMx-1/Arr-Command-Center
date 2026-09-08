@@ -118,7 +118,10 @@ async function tabSeries(root, arr, ctx) {
         onStateChange: ({ term, status }) => ctx.setParams({ q: term, status: status === 'all' ? '' : status }),
       }),
       savedViewsControl(ctx),
-      h('button', { class: 'btn sm', title: 'Bulk select', onclick: () => bulkLibrary(root, { items: series, kind: 'series', arr, invalidateKey: `arr:${ctx.service.key}:series`, onExit: () => tabSeries(root, arr, ctx) }) }, '☑ Select'),
+      h('button', { class: 'btn sm', title: 'Bulk select', onclick: () => bulkLibrary(root, {
+        items: series, kind: 'series', arr, invalidateKey: `arr:${ctx.service.key}:series`, mode, columns, sortKey, direction,
+        onExit: () => tabSeries(root, arr, ctx),
+      }) }, '☑ Select'),
     );
     mount(root, libHead, compareWrap, listWrap);
     updateCompare();

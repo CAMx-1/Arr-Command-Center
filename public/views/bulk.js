@@ -1,16 +1,24 @@
 // Multi-select bulk actions for a Sonarr series / Radarr movie library.
 import { h, mount, toast, poster, confirmModal, openModal, closeModal } from '../lib/ui.js';
 import { invalidate } from '../lib/cache.js';
+import { compactTable } from '../lib/tableView.js';
 
 export function bulkLibrary(root, opts) {
-  const { items, kind, arr, onExit, invalidateKey } = opts;
+  const { items, kind, arr, onExit, invalidateKey, mode = 'list', columns = [], sortKey = 'title', direction = 'asc' } = opts;
   const isSeries = kind === 'series';
+  const tableMode = mode === 'table' && columns.length > 0;
+  let tableSortKey = sortKey;
+  let tableDirection = direction;
   const idOf = (it) => it.id;
   const posterUrl = (it) => { const img = (it.images || []).find((i) => i.coverType === 'poster'); return img && (img.remoteUrl || img.url); };
   const selected = new Set();
-
+  const selectAll = h('input', { type: 'checkbox', 'aria-label': `Select all ${isSeries ? 'series' : 'movies'}` });
   const countEl = h('span', { class: 'dim' }, '0 selected');
-  const refresh = () => { countEl.textContent = `${selected.size} selected`; };
+  const refresh = () => {
+    countEl.textContent = `${selected.size} selected`;
+    selectAll.checked = items.length > 0 && selected.size === items.length;
+    selectAll.indeterminate = selected.size > 0 && selected.size < items.length;
+  };
 
   const doAction = async (fn, label) => {
     const ids = [...selected];
@@ -99,14 +107,39 @@ export function bulkLibrary(root, opts) {
     });
   };
 
-  const selectAll = h('input', { type: 'checkbox' });
-  const listEl = h('div', { class: 'list' });
-  const renderRows = () => mount(listEl, ...items.slice(0, 500).map(rowFor));
-  selectAll.addEventListener('change', () => { selected.clear(); if (selectAll.checked) items.forEach((it) => selected.add(idOf(it))); renderRows(); refresh(); });
+  const listEl = h('div', { class: tableMode ? 'bulk-table-view' : 'list' });
+  const toggleSelected = (it) => {
+    const id = idOf(it);
+    if (selected.has(id)) selected.delete(id); else selected.add(id);
+    refresh();
+    renderRows();
+  };
+  const renderRows = () => {
+    const visibleItems = items.slice(0, 500);
+    if (tableMode) {
+      return mount(listEl, compactTable(visibleItems, {
+        columns,
+        sortKey: tableSortKey,
+        direction: tableDirection,
+        selected,
+        selectionLabel: 'Select',
+        onSort: (key, nextDirection) => { tableSortKey = key; tableDirection = nextDirection; renderRows(); },
+        onToggle: toggleSelected,
+        onOpen: toggleSelected,
+      }));
+    }
+    mount(listEl, ...visibleItems.map(rowFor));
+  };
+  selectAll.addEventListener('change', () => {
+    selected.clear();
+    if (selectAll.checked) items.forEach((it) => selected.add(idOf(it)));
+    renderRows();
+    refresh();
+  });
 
   function rowFor(it) {
     const id = idOf(it);
-    const cb = h('input', { type: 'checkbox' });
+    const cb = h('input', { type: 'checkbox', 'aria-label': `Select ${it.title || 'item'}` });
     cb.checked = selected.has(id);
     cb.addEventListener('change', () => { if (cb.checked) selected.add(id); else selected.delete(id); refresh(); });
     const downloaded = isSeries ? (it.statistics && it.statistics.episodeFileCount > 0) : it.hasFile;

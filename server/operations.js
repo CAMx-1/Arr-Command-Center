@@ -166,13 +166,17 @@ export async function collectOperations(cfg, { serviceGet = defaultServiceGet, n
     pending: seerr.filter((entry) => entry.action?.type === 'overseerr-request').length,
     issues: seerr.filter((entry) => entry.kind === 'seerr-issue').length,
   };
+  const dashboardSeerr = [
+    ...seerr.filter((entry) => entry.kind === 'seerr-request').sort((a, b) => b.at - a.at).slice(0, 5),
+    ...seerr.filter((entry) => entry.kind === 'seerr-issue').sort((a, b) => b.at - a.at),
+  ];
   return {
     generatedAt: now,
     summary: summarizeOperations(inbox, errors),
     seerrSummary,
     inbox: inbox.slice(0, limit),
     activity: activity.slice(0, limit),
-    seerr: seerr.slice(0, limit),
+    seerr: dashboardSeerr.slice(0, limit),
     errors,
   };
 }
