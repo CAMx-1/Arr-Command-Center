@@ -8,6 +8,7 @@
   --surface-hover: #eef1fb;
   --border: #e4e8f3;
   --border-strong: #d3d9ec;
+  --scroll-shadow: rgba(2, 6, 23, 0.18);
 
   --text: #1b2137;
   --text-dim: #5c6580;
@@ -45,6 +46,7 @@ html[data-theme="dark"] {
   --surface-hover: #384158;
   --border: #394052;
   --border-strong: #4d576c;
+  --scroll-shadow: rgba(0, 0, 0, 0.55);
   --text: #eceef4;
   --text-dim: #b0b7c8;
   --text-faint: #7f8798;
@@ -318,7 +320,11 @@ button { font-family: inherit; cursor: pointer; }
   margin: 0 5px; cursor: pointer;
   filter: drop-shadow(0 6px 14px rgba(79, 70, 229, 0.14));
   transition: transform 0.18s var(--ease), filter 0.2s var(--ease);
+  /* Reserve long-press for the app's quick-actions sheet instead of the native
+     image/text callout, and stop the icon from being draggable/selectable. */
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
 }
+.hex-cell img { -webkit-user-drag: none; pointer-events: none; }
 .hex-cell:hover { transform: translateY(-4px) scale(1.03); filter: drop-shadow(0 14px 28px rgba(124, 58, 237, 0.4)); z-index: 3; }
 .hex-border, .hex-face {
   position: absolute; inset: 0;
@@ -374,25 +380,26 @@ button { font-family: inherit; cursor: pointer; }
 .toggle-chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .toggle-chip img { width: 16px; height: 16px; object-fit: contain; }
 
-/* buttons */
-.btn { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 9px 15px; font-size: 13px; font-weight: 600; box-shadow: var(--shadow-sm); transition: background 0.18s var(--ease), border-color 0.18s var(--ease), transform 0.12s var(--ease), box-shadow 0.18s var(--ease); }
-.btn:hover { background: var(--surface-hover); transform: translateY(-1px); box-shadow: var(--shadow); }
-.btn:active { transform: translateY(0); }
-.btn.primary { background: var(--grad-primary); background-size: 160% 100%; border: none; color: #fff; box-shadow: 0 6px 16px rgba(124, 58, 237, 0.32); }
-.btn.primary:hover { background-position: 100% 0; filter: brightness(1.03); }
-.btn.danger { color: var(--red); border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.04); }
-.btn.danger:hover { background: rgba(239, 68, 68, 0.12); }
-.btn.sm { padding: 6px 11px; font-size: 12px; }
-/* Elongated-hexagon button variant (Add service, Light/Dark, Hexagon/List). */
-.btn.hex-btn {
+/* buttons — all buttons are elongated hexagons (clip-path removes the border,
+   so depth comes from a drop-shadow; extra horizontal padding + min-width keep
+   labels clear of the angled left/right tips). */
+.btn {
+  background: var(--surface-2, var(--surface)); color: var(--text);
   border: none; border-radius: 0;
-  padding: 8px 22px;
-  box-shadow: none;
+  padding: 9px 22px; min-width: 44px; font-size: 13px; font-weight: 600;
   clip-path: polygon(12px 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 12px 100%, 0 50%);
+  filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.12));
+  transition: background 0.18s var(--ease), color 0.18s var(--ease), transform 0.12s var(--ease), filter 0.18s var(--ease);
 }
-.btn.hex-btn:not(.primary) { background: var(--surface-2, var(--surface)); }
-.btn.hex-btn:hover { transform: translateY(-1px); }
-.btn.primary.hex-btn { filter: drop-shadow(0 4px 11px rgba(124, 58, 237, 0.32)); }
+.btn:hover { background: var(--surface-hover); transform: translateY(-1px); }
+.btn:active { transform: translateY(0) scale(0.98); }
+.btn.primary { background: var(--grad-primary); background-size: 160% 100%; color: #fff; filter: drop-shadow(0 4px 11px rgba(124, 58, 237, 0.32)); }
+.btn.primary:hover { background-position: 100% 0; filter: brightness(1.04) drop-shadow(0 4px 11px rgba(124, 58, 237, 0.32)); }
+.btn.danger { color: var(--red); background: rgba(239, 68, 68, 0.12); }
+.btn.danger:hover { background: rgba(239, 68, 68, 0.2); }
+.btn.sm { padding: 7px 18px; font-size: 12px; min-width: 40px; }
+/* .hex-btn is now the default look; kept as a no-op alias for the many call
+   sites that request it explicitly. */
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* inputs */
@@ -440,6 +447,9 @@ button { font-family: inherit; cursor: pointer; }
 .seerr-hive { position: relative; margin: 0 auto; }
 .seerr-hex { position: absolute; cursor: pointer; filter: drop-shadow(0 4px 10px rgba(79, 70, 229, 0.18)); transition: transform 0.16s var(--ease), filter 0.2s var(--ease); content-visibility: auto; contain-intrinsic-size: 300px 290px; }
 .seerr-hex:hover { transform: translateY(-3px) scale(1.02); filter: drop-shadow(0 12px 24px rgba(124, 58, 237, 0.4)); z-index: 3; }
+/* Non-interactive hex (e.g. an empty-state tile): no pointer, no hover lift. */
+.seerr-hex.seerr-hex-static { cursor: default; }
+.seerr-hex.seerr-hex-static:hover { transform: none; filter: drop-shadow(0 4px 10px rgba(79, 70, 229, 0.18)); }
 .hx-border, .hx-face { position: absolute; inset: 0; clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
 .hx-border { background: linear-gradient(150deg, var(--accent), var(--accent-2) 55%, var(--accent-3)); }
 .hx-face { inset: 3px; background: var(--surface-2) center / cover no-repeat; }
@@ -846,13 +856,20 @@ img.poster { aspect-ratio: 2 / 3; object-fit: cover; background: linear-gradient
 .conn-banner[data-mode="reconnecting"] { background: linear-gradient(160deg, #f59e0b, #d97706); }
 
 /* ---------- #8 Long-press quick-actions sheet ---------- */
-.qa-list { display: flex; flex-direction: column; gap: 8px; }
-.qa-item { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
-  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
-  padding: 14px 16px; font-size: 15px; font-weight: 600; color: var(--text); cursor: pointer;
-  box-shadow: var(--shadow-sm); transition: transform 0.12s var(--ease), background 0.16s var(--ease), filter 0.16s var(--ease); }
-.qa-item.qa-open { background: var(--grad-primary); border: none; color: #fff; box-shadow: 0 6px 16px rgba(124, 58, 237, 0.32); }
-.qa-item:active { transform: scale(0.98); filter: brightness(0.96); }
+.qa-list { display: flex; flex-direction: column; gap: 10px; }
+/* Quick-action buttons are elongated hexagons (pointed left/right ends) to
+   match the app's hex language. clip-path removes the border, so depth comes
+   from a drop-shadow and the resting tile uses surface-2 to stand off the
+   sheet. Extra horizontal padding keeps the label clear of the angled tips. */
+.qa-item { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; text-align: center;
+  background: var(--surface-2); color: var(--text); cursor: pointer;
+  border: none; border-radius: 0;
+  padding: 16px 34px; font-size: 15px; font-weight: 700;
+  clip-path: polygon(18px 0, calc(100% - 18px) 0, 100% 50%, calc(100% - 18px) 100%, 18px 100%, 0 50%);
+  filter: drop-shadow(0 3px 8px rgba(30, 33, 55, 0.16));
+  transition: transform 0.12s var(--ease), background 0.16s var(--ease), filter 0.16s var(--ease); }
+.qa-item.qa-open { background: var(--grad-primary); color: #fff; filter: drop-shadow(0 6px 16px rgba(124, 58, 237, 0.42)); }
+.qa-item:active { transform: scale(0.97); filter: brightness(0.96) drop-shadow(0 3px 8px rgba(30, 33, 55, 0.16)); }
 .allsvc-search-ic { display: inline-flex; color: #fff; }
 
 /* ---------- #15 Stronger pressed feedback ---------- */
@@ -868,7 +885,7 @@ img.poster { aspect-ratio: 2 / 3; object-fit: cover; background: linear-gradient
 /* On touch devices, don't let :hover transforms/filters "stick" after a tap. */
 @media (hover: none) {
   .btn:hover, .btn.primary:hover { transform: none; }
-  .btn.primary:hover { filter: none; background-position: 0 0; }
+  .btn.primary:hover { background-position: 0 0; filter: drop-shadow(0 4px 11px rgba(124, 58, 237, 0.32)); }
   .topbar-icon-btn:hover { transform: none; }
   .row:hover { transform: none; filter: drop-shadow(0 3px 8px rgba(30, 33, 55, 0.12)); z-index: auto; }
 }
@@ -902,6 +919,40 @@ img.poster { aspect-ratio: 2 / 3; object-fit: cover; background: linear-gradient
 .dashboard-feed-list, .timeline-list, .seerr-widget-list { display: flex; flex-direction: column; gap: 12px; }
 .dashboard-feed-tools { display: flex; align-items: stretch; gap: 8px; min-height: 42px; margin-bottom: 10px; }
 .upcoming-window { display: flex; align-items: center; width: 100%; min-height: 42px; padding: 10px 13px; color: var(--text-dim); font-size: 14px; font-weight: 600; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); }
+/* When the List/Calendar toggle is present, let the label flex and keep the
+   toggle at its intrinsic width. */
+.upcoming-tools .upcoming-window { width: auto; flex: 1 1 auto; }
+.upcoming-toggle { flex-shrink: 0; align-self: stretch; }
+
+/* ---------- Upcoming widget: month calendar view ---------- */
+.up-cal-head, .up-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.up-cal-head { margin-bottom: 4px; }
+.up-cal-wd { text-align: center; font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 0; }
+.up-cal-day { min-height: 78px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 5px 5px 4px; display: flex; flex-direction: column; gap: 3px; overflow: hidden; }
+.up-cal-day.is-empty { background: transparent; border-color: transparent; }
+.up-cal-day.is-today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+/* Days with releases open an expanded day list on click/tap. */
+.up-cal-day.is-clickable { cursor: pointer; transition: border-color 0.14s var(--ease), box-shadow 0.14s var(--ease), transform 0.12s var(--ease); }
+.up-cal-day.is-clickable:hover { border-color: var(--accent); box-shadow: 0 6px 16px rgba(124, 58, 237, 0.18); }
+.up-cal-day.is-clickable:active { transform: scale(0.98); }
+.up-cal-day.is-clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.up-cal-daynum { font-size: 12px; font-weight: 700; color: var(--text-dim); line-height: 1; }
+.up-cal-day.is-today .up-cal-daynum { color: var(--accent); }
+/* Chips are visual only — clicks pass through to the day cell. */
+.up-cal-ev { display: flex; align-items: center; gap: 5px; width: 100%; text-align: left; pointer-events: none;
+  background: var(--surface); border-radius: 6px; padding: 3px 5px; font-size: 11px; font-weight: 600; color: var(--text); box-shadow: var(--shadow-sm); }
+.up-cal-ev-ico { display: inline-flex; flex-shrink: 0; }
+.up-cal-ev-ico img, .up-cal-ev-ico .svc-logo, .up-cal-ev-ico .hive-logo { width: 14px; height: 14px; object-fit: contain; }
+.up-cal-ev-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.up-cal-more { font-size: 10px; color: var(--text-dim); font-weight: 700; padding-left: 4px; }
+@media (max-width: 720px) {
+  .up-cal-head, .up-cal-grid { gap: 3px; }
+  .up-cal-day { min-height: 52px; padding: 4px 3px; border-radius: 8px; }
+  /* Cells get tight on phones — show a service icon per release, hide titles. */
+  .up-cal-ev { justify-content: center; padding: 3px; gap: 0; }
+  .up-cal-ev-t { display: none; }
+  .up-cal-more { font-size: 9px; padding-left: 2px; text-align: center; }
+}
 .seerr-widget-summary { display: flex; flex-wrap: wrap; align-items: center; min-height: 42px; gap: 8px; margin-bottom: 10px; }
 .dashboard-feed-row { min-height: 72px; }
 .dashboard-feed-row .dashboard-feed-icon { width: 40px; height: 40px; border-radius: 10px; font-size: 20px; }
@@ -925,7 +976,22 @@ img.poster { aspect-ratio: 2 / 3; object-fit: cover; background: linear-gradient
 .dashboard-editor-foot { display: flex; width: 100%; justify-content: space-between; gap: 10px; }
 
 /* Dense sortable library table */
-.arr-table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); -webkit-overflow-scrolling: touch; }
+.arr-table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background-color: var(--surface); -webkit-overflow-scrolling: touch;
+  /* Horizontal scroll affordance: the "cover" gradients scroll with the content
+     (background-attachment: local) and sit over the shadow gradients (fixed to
+     the scroll viewport), so an edge shadow only shows while there's more table
+     to scroll toward — and disappears once you reach that end. Hints on phones
+     that the wide table scrolls sideways. */
+  background-image:
+    linear-gradient(90deg, var(--surface) 30%, rgba(0, 0, 0, 0)),
+    linear-gradient(90deg, rgba(0, 0, 0, 0), var(--surface) 70%),
+    radial-gradient(farthest-side at 0 50%, var(--scroll-shadow), rgba(0, 0, 0, 0)),
+    radial-gradient(farthest-side at 100% 50%, var(--scroll-shadow), rgba(0, 0, 0, 0));
+  background-position: left center, right center, left center, right center;
+  background-size: 34px 100%, 34px 100%, 16px 100%, 16px 100%;
+  background-repeat: no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
 .arr-table { width: 100%; min-width: 760px; border-collapse: separate; border-spacing: 0; font-size: 12px; }
 .arr-table th, .arr-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
 .arr-table thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2); color: var(--text-dim); text-transform: uppercase; font-size: 10px; letter-spacing: .05em; }

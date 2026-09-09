@@ -335,7 +335,7 @@ async function openSeasonBrowser(arr, ctx, series) {
   const render = () => {
     const allCollapsed = seasons.every((sn) => collapsed.has(sn));
     const toolbar = h('div', { class: 'season-toolbar' },
-      h('button', { class: 'btn sm', onclick: () => { if (allCollapsed) collapsed.clear(); else seasons.forEach((sn) => collapsed.add(sn)); render(); } },
+      h('button', { class: 'btn sm hex-btn', onclick: () => { if (allCollapsed) collapsed.clear(); else seasons.forEach((sn) => collapsed.add(sn)); render(); } },
         allCollapsed ? 'Expand all' : 'Collapse all'),
     );
     mount(body, toolbar, ...seasons.map((sn) => seasonBlock(sn, bySeason.get(sn), fileById, arr, series, render, collapsed)));
@@ -367,8 +367,8 @@ function seasonBlock(sn, eps, fileById, arr, series, reload, collapsed) {
     h('span', { class: 'season-caret' }, isCollapsed ? '\u25b8' : '\u25be'),
     h('div', { class: 'season-title' }, sn === 0 ? 'Specials' : `Season ${sn}`),
     h('span', { class: 'dim' }, `${withFile}/${eps.length} · ${fmtBytes(totalSize)}`),
-    h('button', { class: `btn sm ${seasonObj && seasonObj.monitored ? 'primary' : ''}`, style: { marginLeft: 'auto' }, title: 'Toggle season monitoring', onclick: (e) => { e.stopPropagation(); toggleSeason(e); } }, seasonObj && seasonObj.monitored ? 'Monitored' : 'Unmonitored'),
-    h('button', { class: 'btn sm', title: 'Search season', onclick: async (e) => {
+    h('button', { class: `btn sm hex-btn ${seasonObj && seasonObj.monitored ? 'primary' : ''}`, style: { marginLeft: 'auto' }, title: 'Toggle season monitoring', onclick: (e) => { e.stopPropagation(); toggleSeason(e); } }, seasonObj && seasonObj.monitored ? 'Monitored' : 'Unmonitored'),
+    h('button', { class: 'btn sm hex-btn', title: 'Search season', onclick: async (e) => {
       e.stopPropagation();
       try { await arr.post('command', { name: 'SeasonSearch', seriesId: series.id, seasonNumber: sn }); toast(`Searching Season ${sn}`, 'success'); }
       catch (err) { toast(err.message, 'error'); }
@@ -389,11 +389,11 @@ function seasonEpisodeRow(e, file, arr, reload) {
       ),
     ),
     h('div', { class: 'row-actions' },
-      h('button', { class: `btn sm ${e.monitored ? 'primary' : ''}`, title: 'Toggle monitored', onclick: async () => {
+      h('button', { class: `btn sm hex-btn ${e.monitored ? 'primary' : ''}`, title: 'Toggle monitored', onclick: async () => {
         try { await arr.put('episode/monitor', { episodeIds: [e.id], monitored: !e.monitored }); e.monitored = !e.monitored; reload(); }
         catch (err) { toast(err.message, 'error'); }
       } }, e.monitored ? 'Monitored' : 'Unmonitored'),
-      h('button', { class: 'btn sm', title: 'Search episode', onclick: async () => {
+      h('button', { class: 'btn sm hex-btn', title: 'Search episode', onclick: async () => {
         try { await arr.post('command', { name: 'EpisodeSearch', episodeIds: [e.id] }); toast('Searching…', 'success'); }
         catch (err) { toast(err.message, 'error'); }
       } }, '⌕'),

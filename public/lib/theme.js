@@ -15,10 +15,21 @@ export const ACCENT_NAMES = Object.keys(ACCENTS);
 export function getTheme() { return localStorage.getItem(THEME_KEY) || 'light'; }
 export function getAccent() { return localStorage.getItem(ACCENT_KEY) || 'violet'; }
 
+// Keep the browser chrome / iOS status-bar tint in sync with the active theme's
+// background (index.html only ships a static value). Matches --bg per theme.
+const THEME_COLORS = { light: '#eef1fa', dark: '#171a24' };
+function applyThemeColor(t) {
+  if (typeof document === 'undefined') return;
+  let meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) { meta = document.createElement('meta'); meta.setAttribute('name', 'theme-color'); document.head.appendChild(meta); }
+  meta.setAttribute('content', THEME_COLORS[t] || THEME_COLORS.light);
+}
+
 export function applyTheme(theme = getTheme()) {
   const t = theme === 'dark' ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', t);
   localStorage.setItem(THEME_KEY, t);
+  applyThemeColor(t);
 }
 
 export function applyAccent(name = getAccent()) {

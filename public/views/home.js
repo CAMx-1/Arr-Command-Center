@@ -1,5 +1,5 @@
-import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast } from '../lib/ui.js';
-import { SERVICE_META } from '../app.js';
+import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast, openModal } from '../lib/ui.js';
+import { SERVICE_META, attachLongPress, openServiceQuickActions, openInArr } from '../app.js';
 import { listFailed, removeFailed } from '../lib/failedRequests.js';
 import { visibleServices } from '../lib/servicePrefs.js';
 import { honeycombRows, isWide } from '../lib/honeycomb.js';
@@ -65,9 +65,7 @@ export async function renderHome(root, ctx) {
       h('div', { class: 'card panel-bare dashboard-feed-panel', id: 'activity-panel' }, h('div', { class: 'dim' }, 'Loading activity…')),
     ),
     upcoming: h('div', { class: 'dashboard-feed' },
-      h('div', { class: 'upcoming-tools dashboard-feed-tools' },
-        h('div', { class: 'upcoming-window' }, 'Next 14 days'),
-      ),
+      upcomingHeader(ctx),
       h('div', { class: 'card panel-bare dashboard-feed-panel', id: 'upcoming-panel' }, h('div', { class: 'dim' }, 'Loading calendar…')),
     ),
     links: h('div', { class: 'card', id: 'links-panel' }, h('div', { class: 'dim' }, 'Loading links…')),
@@ -417,12 +415,115 @@ async function hydrateStreams(ctx) {
   }
 }
 
+// Upcoming widget view mode: a chronological list (default) or a month calendar.
+function getUpcomingView() { try { return localStorage.getItem('upcoming-view') === 'calendar' ? 'calendar' : 'list'; } catch { return 'list'; } }
+function setUpcomingView(v) { try { localStorage.setItem('upcoming-view', v === 'calendar' ? 'calendar' : 'list'); } catch { /* ignore */ } }
+
+// Header: a window label + a List/Calendar segmented toggle. Switching re-runs
+// hydrateUpcoming (which refetches for the mode's date range) without a reload.
+function upcomingHeader(ctx) {
+  const mode = getUpcomingView();
+  const label = h('div', { class: 'upcoming-window', id: 'upcoming-window' }, mode === 'calendar' ? '' : 'Next 14 days');
+  const seg = (id, text) => {
+    const b = h('button', { class: `view-seg ${mode === id ? 'active' : ''}`, dataset: { v: id } }, text);
+    b.addEventListener('click', () => {
+      if (getUpcomingView() === id) return;
+      setUpcomingView(id);
+      for (const x of toggle.children) x.classList.toggle('active', x.dataset.v === id);
+      hydrateUpcoming(ctx);
+    });
+    return b;
+  };
+  const toggle = h('div', { class: 'view-toggle upcoming-toggle' }, seg('list', 'List'), seg('calendar', 'Calendar'));
+  return h('div', { class: 'upcoming-tools dashboard-feed-tools' }, label, toggle);
+}
+
+// Month grid for the current month with per-day release chips. Days outside the
+// month are blank; today is highlighted; a chip deep-links to the service's
+// Calendar tab.
+function renderUpcomingCalendar(panel, items, { year, month, today }) {
+  const byDay = new Map();
+  for (const it of items) {
+    const d = new Date(it.when);
+    if (d.getFullYear() !== year || d.getMonth() !== month) continue;
+    const k = d.getDate();
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k).push(it);
+  }
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDow = new Date(year, month, 1).getDay();
+  const todayDate = (today.getFullYear() === year && today.getMonth() === month) ? today.getDate() : -1;
+  const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const head = h('div', { class: 'up-cal-head' }, ...WD.map((d) => h('div', { class: 'up-cal-wd' }, d)));
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(h('div', { class: 'up-cal-day is-empty' }));
+  for (let day = 1; day <= daysInMonth; day++) {
+    const evs = byDay.get(day) || [];
+    const attrs = { class: `up-cal-day${day === todayDate ? ' is-today' : ''}${evs.length ? ' has-events is-clickable' : ''}` };
+    if (evs.length) {
+      const open = () => openUpcomingDayModal(new Date(year, month, day), evs);
+      attrs.role = 'button';
+      attrs.tabindex = '0';
+      attrs.title = `${evs.length} release${evs.length > 1 ? 's' : ''} — tap to view`;
+      attrs.onclick = open;
+      attrs.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+    }
+    cells.push(h('div', attrs,
+      h('div', { class: 'up-cal-daynum' }, String(day)),
+      ...evs.slice(0, 3).map((it) => {
+        const meta = SERVICE_META[it.svc.type] || {};
+        return h('div', { class: 'up-cal-ev', title: `${it.title}${it.sub ? ` — ${it.sub}` : ''}` },
+          h('span', { class: 'up-cal-ev-ico' }, svcIcon(meta.logo, meta.emoji || '', 14)),
+          h('span', { class: 'up-cal-ev-t' }, it.title),
+        );
+      }),
+      evs.length > 3 ? h('div', { class: 'up-cal-more' }, `+${evs.length - 3} more`) : null,
+    ));
+  }
+  while (cells.length % 7 !== 0) cells.push(h('div', { class: 'up-cal-day is-empty' }));
+  mount(panel, h('div', { class: 'up-cal' }, head, h('div', { class: 'up-cal-grid' }, ...cells)));
+}
+
+// Expanded day view: lists every release on a given day (full titles, service,
+// sub-line and air time), each row deep-linking to that service's Calendar tab.
+function openUpcomingDayModal(date, evs) {
+  const sorted = [...evs].sort((a, b) => new Date(a.when) - new Date(b.when));
+  const rows = sorted.map((it) => {
+    const meta = SERVICE_META[it.svc.type] || {};
+    return h('div', { class: 'row up-row dashboard-feed-row clickable', onclick: () => openInArr({ svc: it.svc, title: it.filterTitle || it.title }) },
+      h('div', { class: 'poster dashboard-feed-icon' }, svcIcon(meta.logo, meta.emoji || '', 22)),
+      h('div', { class: 'row-main' },
+        h('div', { class: 'row-title', style: { fontSize: '14px' } }, it.title),
+        h('div', { class: 'meta-line', style: { marginTop: '2px' } },
+          h('span', { class: 'pill muted' }, it.svc.label),
+          it.sub ? h('span', { class: 'dim' }, it.sub) : null,
+          h('span', {}, new Date(it.when).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })),
+        ),
+      ),
+    );
+  });
+  const title = date.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+  openModal({ title, body: h('div', { class: 'list dashboard-feed-list' }, ...rows) });
+}
+
 // Merged upcoming calendar across all configured Sonarr + Radarr instances.
 async function hydrateUpcoming(ctx) {
   const panel = document.getElementById('upcoming-panel');
   if (!panel) return;
-  const start = new Date();
-  const end = new Date(); end.setDate(end.getDate() + 14);
+  const mode = getUpcomingView();
+  const label = document.getElementById('upcoming-window');
+  const today = new Date();
+  let start; let end;
+  if (mode === 'calendar') {
+    // Whole current month, so the grid shows the full month's releases.
+    start = new Date(today.getFullYear(), today.getMonth(), 1);
+    end = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    if (label) label.textContent = today.toLocaleDateString([], { month: 'long', year: 'numeric' });
+  } else {
+    start = new Date();
+    end = new Date(); end.setDate(end.getDate() + 14);
+    if (label) label.textContent = 'Next 14 days';
+  }
   const s = start.toISOString(), e = end.toISOString();
   const arrs = (ctx.state.services || []).filter((x) => (x.type === 'sonarr' || x.type === 'radarr') && x.configured);
   const items = [];
@@ -430,13 +531,16 @@ async function hydrateUpcoming(ctx) {
     try {
       if (svc.type === 'sonarr') {
         const eps = await ctx.api.arr(svc.key).get(`calendar?start=${s}&end=${e}&includeSeries=true`);
-        for (const ep of (eps || [])) if (ep.airDateUtc) items.push({ when: ep.airDateUtc, title: `${(ep.series && ep.series.title) || 'Unknown'} · S${pad2(ep.seasonNumber)}E${pad2(ep.episodeNumber)}`, sub: ep.title || '', svc });
+        for (const ep of (eps || [])) if (ep.airDateUtc) items.push({ when: ep.airDateUtc, title: `${(ep.series && ep.series.title) || 'Unknown'} · S${pad2(ep.seasonNumber)}E${pad2(ep.episodeNumber)}`, filterTitle: (ep.series && ep.series.title) || '', sub: ep.title || '', svc });
       } else {
         const movies = await ctx.api.arr(svc.key).get(`calendar?start=${s}&end=${e}`);
-        for (const m of (movies || [])) { const when = m.digitalRelease || m.physicalRelease || m.inCinemas; if (when) items.push({ when, title: `${m.title}${m.year ? ` (${m.year})` : ''}`, sub: 'Release', svc }); }
+        for (const m of (movies || [])) { const when = m.digitalRelease || m.physicalRelease || m.inCinemas; if (when) items.push({ when, title: `${m.title}${m.year ? ` (${m.year})` : ''}`, filterTitle: m.title || '', sub: 'Release', svc }); }
       }
     } catch { /* ignore per-service */ }
   }));
+  if (mode === 'calendar') {
+    return renderUpcomingCalendar(panel, items, { year: today.getFullYear(), month: today.getMonth(), today });
+  }
   if (!items.length) { mount(panel, dashboardFeedEmpty('Nothing upcoming', 'No releases in the next 2 weeks')); return; }
   items.sort((a, b) => new Date(a.when) - new Date(b.when));
   const byDay = new Map();
@@ -478,7 +582,7 @@ function hexCell(svc, st, ctx) {
   const online = st && st.ok;
   const dotClass = online ? 'ok' : (st ? 'down' : '');
   const statsEl = h('div', { class: 'hex-stats', id: `stats-${svc.key}` });
-  return h('div', { class: 'hex-cell', title: svc.label, onclick: () => { location.hash = `#/${svc.key}`; } },
+  const cell = h('div', { class: 'hex-cell', title: svc.label, onclick: () => { location.hash = `#/${svc.key}`; } },
     h('div', { class: 'hex-border' }),
     h('div', { class: 'hex-face' },
       h('div', { class: 'hex-inner' },
@@ -489,6 +593,9 @@ function hexCell(svc, st, ctx) {
       ),
     ),
   );
+  // Long-press (touch) / long-click (mouse) opens the same quick-actions sheet
+  // as the bottom nav, deep-linking to a service tab.
+  return attachLongPress(cell, () => openServiceQuickActions(svc));
 }
 
 function stat(value, label) {

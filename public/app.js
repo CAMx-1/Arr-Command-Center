@@ -419,27 +419,33 @@ const QUICK_ACTIONS = {
   plex: [['watchlist', 'Watchlist'], ['duplicates', 'Duplicates'], ['users', 'Users'], ['friends', 'Friends'], ['sessions', 'Now Playing']],
 };
 
-// Attach a press-and-hold gesture (touch): fires `onLongPress` after ~550ms if
-// the finger hasn't moved, cancels on movement/lift, suppresses the synthetic
-// click that follows, and blocks the context menu. Normal taps are unaffected.
-function attachLongPress(el, onLongPress, { ms = 550, moveTol = 10 } = {}) {
-  let timer = 0; let sx = 0; let sy = 0; let fired = false;
+// Attach a press-and-hold gesture: fires `onLongPress` after ~550ms if the
+// pointer hasn't moved, cancels on movement/lift/scroll, suppresses the click
+// that follows, and blocks the context menu. Normal taps/clicks are unaffected.
+// Uses Pointer Events so mouse ("long click") and touch (long-press) share one
+// code path with no touch/mouse double-firing.
+export function attachLongPress(el, onLongPress, { ms = 550, moveTol = 10 } = {}) {
+  let timer = 0; let sx = 0; let sy = 0; let fired = false; let active = false;
   const clearTimer = () => { if (timer) { clearTimeout(timer); timer = 0; } };
-  el.addEventListener('touchstart', (e) => {
-    if (e.touches.length !== 1) { clearTimer(); return; }
-    const t = e.touches[0]; sx = t.clientX; sy = t.clientY; fired = false;
+  const cancel = () => { active = false; clearTimer(); };
+  el.addEventListener('pointerdown', (e) => {
+    // Primary pointer only; ignore right/middle mouse buttons.
+    if (!e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) { cancel(); return; }
+    sx = e.clientX; sy = e.clientY; fired = false; active = true;
     clearTimer();
-    timer = setTimeout(() => { fired = true; haptic(20); try { onLongPress(); } catch { /* ignore */ } }, ms);
-  }, { passive: true });
-  el.addEventListener('touchmove', (e) => {
-    const t = e.touches[0]; if (!t) return;
-    if (Math.abs(t.clientX - sx) > moveTol || Math.abs(t.clientY - sy) > moveTol) clearTimer();
-  }, { passive: true });
-  el.addEventListener('touchend', clearTimer, { passive: true });
-  el.addEventListener('touchcancel', clearTimer, { passive: true });
+    timer = setTimeout(() => { if (!active) return; fired = true; haptic(20); try { onLongPress(); } catch { /* ignore */ } }, ms);
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!active) return;
+    if (Math.abs(e.clientX - sx) > moveTol || Math.abs(e.clientY - sy) > moveTol) cancel();
+  });
+  el.addEventListener('pointerup', cancel);
+  el.addEventListener('pointercancel', cancel);
+  el.addEventListener('pointerleave', cancel);
   el.addEventListener('contextmenu', (e) => { e.preventDefault(); });
   // Capture-phase so we can swallow the post-long-press click before the
-  // element's own onclick (bubble phase) navigates.
+  // element's own onclick (bubble phase) navigates. `fired` persists from the
+  // timer through pointerup until this consumes it.
   el.addEventListener('click', (e) => { if (fired) { e.preventDefault(); e.stopPropagation(); fired = false; } }, true);
   return el;
 }
@@ -448,7 +454,7 @@ function attachLongPress(el, onLongPress, { ms = 550, moveTol = 10 } = {}) {
 // one stores the target tab then navigates/re-renders so it deep-links even if
 // we're already on that service (mirrors openInArr). Uses the overlay
 // controller (via openModal) so Back/history stays consistent with Search.
-function openServiceQuickActions(svc) {
+export function openServiceQuickActions(svc) {
   const go = (tab) => {
     if (tab) { try { localStorage.setItem(`tabs-${svc.key}`, tab); } catch { /* ignore */ } }
     const nav = () => { _pendingIntent = 'new'; if (currentRoute() === svc.key) navigate(); else location.hash = `#/${svc.key}`; };
@@ -884,17 +890,20 @@ function discoverSearchRow(r, seerrSvc) {
 // route, but if we're ALREADY on that app's route the hash assignment fires no
 // `hashchange`, so navigate() wouldn't re-run and the filter would be dropped.
 // In that case we invoke navigate() directly so the deep-link filter applies.
-function openInArr(m) {
+export function openInArr(m) {
   setPendingFilter(m.svc.key, m.title);
   // The filter lives on the Library tab, but tabs() restores whatever tab the
   // app was last left on. Pin the Library tab so the deep-link always lands
   // there (matters most when we're already in the app on another tab).
   const libTab = m.svc.type === 'sonarr' ? 'series' : 'movies';
   try { localStorage.setItem(`tabs-${m.svc.key}`, libTab); } catch { /* ignore */ }
-  closeModal();
   _pendingIntent = 'new'; // deep-linked filter: land at the top of the results
-  if (currentRoute() === m.svc.key) navigate();
-  else location.hash = `#/${m.svc.key}`;
+  const nav = () => { if (currentRoute() === m.svc.key) navigate(); else location.hash = `#/${m.svc.key}`; };
+  // If a modal overlay is open (e.g. the Upcoming day view), closing it pops a
+  // history entry asynchronously; defer navigation a frame so the hash change
+  // isn't reverted by that pop.
+  if (overlayOpen('modal')) { closeOverlay('modal'); requestAnimationFrame(nav); }
+  else { closeModal(); nav(); }
 }
 
 function searchRow(m) {

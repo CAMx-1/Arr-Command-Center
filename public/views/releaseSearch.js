@@ -68,7 +68,7 @@ function fmtAge(hours) {
 function releaseRow(rel, arr) {
   const isTorrent = rel.protocol === 'torrent';
   const rejections = rel.rejections || [];
-  const grabBtn = h('button', { class: 'btn sm primary', onclick: async (ev) => {
+  const grabBtn = h('button', { class: 'btn sm primary hex-btn', onclick: async (ev) => {
     const btn = ev.currentTarget; btn.disabled = true; btn.textContent = '…';
     try {
       await arr.post('release', { guid: rel.guid, indexerId: rel.indexerId });

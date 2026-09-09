@@ -31,23 +31,30 @@ export function pagedLibrary(items, { isHex, makeCard, makeRow, pageSize = 100 }
 // `gap` adds breathing room between hexes so dense views feel less cluttered.
 // The layout re-measures after mount (first render width may be 0) and on resize.
 export function hive(cards, viewWidth, { W = 300, H = 290, gap = 18 } = {}) {
-  const colStep = Math.round(0.75 * W) + gap;
-  const rowStep = H + gap;
   const container = h('div', { class: 'seerr-hive', style: { position: 'relative' } });
   for (const el of cards) container.appendChild(el);
 
   const layout = (avail) => {
-    const width = avail || viewWidth || (colStep + W);
-    const cols = Math.max(1, Math.floor((width - W) / colStep) + 1);
+    const width = avail || viewWidth || W;
+    // Shrink tiles to fit when the container is narrower than one full hex
+    // (e.g. a Hexagons widget or any hex page on a phone) so the honeycomb
+    // never overflows horizontally. Wider containers keep the full size, so
+    // desktop layouts are unchanged. Height scales with width to keep the
+    // hexagon's aspect ratio.
+    const w = width > 0 ? Math.min(W, Math.floor(width)) : W;
+    const hgt = Math.round(H * (w / W));
+    const colStep = Math.round(0.75 * w) + gap;
+    const rowStep = hgt + gap;
+    const cols = Math.max(1, Math.floor((width - w) / colStep) + 1);
     let maxBottom = 0;
     cards.forEach((el, i) => {
       const c = i % cols, k = Math.floor(i / cols);
       const x = c * colStep, y = k * rowStep + (c % 2) * (rowStep / 2);
-      el.style.width = `${W}px`; el.style.height = `${H}px`;
+      el.style.width = `${w}px`; el.style.height = `${hgt}px`;
       el.style.left = `${x}px`; el.style.top = `${y}px`;
-      maxBottom = Math.max(maxBottom, y + H);
+      maxBottom = Math.max(maxBottom, y + hgt);
     });
-    container.style.width = `${(cols - 1) * colStep + W}px`;
+    container.style.width = `${(cols - 1) * colStep + w}px`;
     container.style.height = `${maxBottom + 8}px`;
   };
   // Available width comes from the parent (independent of the container's own
@@ -183,7 +190,9 @@ export function posterHexCard({ posterUrl, gradient, title, sub, pills = [], pro
   }
   if (actions) overlay.appendChild(actions);
   const face = h('div', { class: 'hx-face' }, overlay);
-  const card = h('div', { class: 'seerr-hex', title: title || '', onclick: onClick }, h('div', { class: 'hx-border' }), face);
+  // Tiles with no click handler (e.g. an empty-state hex) shouldn't look
+  // clickable — flag them so the CSS drops the pointer cursor + hover lift.
+  const card = h('div', { class: `seerr-hex${onClick ? '' : ' seerr-hex-static'}`, title: title || '', onclick: onClick }, h('div', { class: 'hx-border' }), face);
   if (posterUrl) {
     const io = lazyObserver();
     if (io) { card.dataset.bg = posterUrl; io.observe(card); }
