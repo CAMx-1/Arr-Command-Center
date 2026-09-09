@@ -18,6 +18,7 @@ import * as push from './push.js';
 import { startPoller, pollOnce } from './poller.js';
 import * as automation from './automation.js';
 import { getOperations } from './operations.js';
+import { getSystemStats } from './system.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -200,7 +201,26 @@ app.get('/api/diagnostics', (req, res) => {
   });
 });
 
-// ---- Custom links (Organizr-style tabs/bookmarks). Stored in data/store.json. ----
+// Host system stats (CPU / memory / disks / network) for the optional Overview
+// "system monitor" hexes. Disk paths come from config.system.disks or the
+// SYSTEM_DISKS env (comma-separated), defaulting to the filesystem root.
+function systemDiskPaths() {
+  const fromCfg = cfg.system && Array.isArray(cfg.system.disks) ? cfg.system.disks : null;
+  const fromEnv = process.env.SYSTEM_DISKS ? process.env.SYSTEM_DISKS.split(',').map((s) => s.trim()).filter(Boolean) : null;
+  const list = (fromCfg && fromCfg.length ? fromCfg : null) || (fromEnv && fromEnv.length ? fromEnv : null);
+  if (list && list.length) return list.map((p) => String(p)).slice(0, 12);
+  return [path.parse(ROOT).root || '/'];
+}
+app.get('/api/system', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await getSystemStats({ disks: systemDiskPaths() }));
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Could not read system stats' });
+  }
+});
+
+
 app.get('/api/links', (req, res) => res.json(store.get('links', [])));
 app.post('/api/links', express.json({ limit: '16kb' }), (req, res) => {
   const { label, url, icon, category, embed } = req.body || {};

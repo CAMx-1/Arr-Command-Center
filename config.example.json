@@ -78,5 +78,9 @@
       "apiKey": "YOUR_PROWLARR_API_KEY",
       "_comment": "Set \"sample\": true (and omit baseUrl/apiKey) to render built-in demo data instead of a live server."
     }
+  },
+  "system": {
+    "_comment": "Optional. Paths shown as disk-usage hexes when the System monitor is enabled in Settings. Defaults to the filesystem root. Can also be set via the SYSTEM_DISKS env (comma-separated).",
+    "disks": ["/", "/media"]
   }
 }

@@ -7,6 +7,7 @@ import { isHidden, setHidden, orderServices, setOrder } from '../lib/servicePref
 import * as push from '../lib/push.js';
 import { renderQueueCleaner, renderHunting } from '../lib/automationUI.js';
 import { dashboardSettingsCard } from '../lib/dashboardSettings.js';
+import { getSysmonPrefs, setSysmonPrefs } from '../lib/systemMonitor.js';
 
 export async function renderSettings(root, ctx) {
   const { api, state } = ctx;
@@ -113,6 +114,8 @@ export async function renderSettings(root, ctx) {
     general,
     h('div', { class: 'section-title' }, 'Appearance'),
     appearanceCard(root, ctx),
+    h('div', { class: 'section-title' }, 'System monitor'),
+    systemMonitorCard(root, ctx),
     h('div', { class: 'section-title' }, 'Overview Layout'),
     dashboardSettingsCard(ctx),
     h('div', { class: 'section-title' }, 'Notifications'),
@@ -261,6 +264,30 @@ function settingRow(label, value) {
     h('span', { class: 'dim' }, label),
     h('span', { class: 'right' }, value),
   );
+}
+
+// System monitor: opt-in hexes (CPU/memory, per-disk, network) that attach to
+// the Overview services honeycomb. Toggles persist in localStorage; the
+// Overview reads them on its next render/refresh.
+function systemMonitorCard(root, ctx) {
+  const prefs = getSysmonPrefs();
+  const toggleBtn = (key, on, label) => h('button', {
+    class: `btn sm hex-btn ${prefs[key] === on ? 'primary' : ''}`,
+    onclick: () => { setSysmonPrefs({ [key]: on }); renderSettings(root, ctx); },
+  }, label);
+  const onOff = (key) => h('span', { style: { display: 'flex', gap: '8px' } }, toggleBtn(key, false, 'Off'), toggleBtn(key, true, 'On'));
+  const rows = [settingRow('System hexes', onOff('enabled'))];
+  if (prefs.enabled) {
+    rows.push(
+      settingRow('CPU', onOff('cpu')),
+      settingRow('Memory', onOff('memory')),
+      settingRow('Disk usage', onOff('disk')),
+      settingRow('Network usage', onOff('network')),
+    );
+  }
+  rows.push(h('div', { class: 'dim', style: { fontSize: '12px', marginTop: '8px' } },
+    'Host CPU and memory each get a hex with a live 60-second graph; disks and network throughput show as hexes attached to the Overview services. Disk paths are set server-side (config.json “system.disks” or the SYSTEM_DISKS env); network throughput requires Linux.'));
+  return h('div', { class: 'card' }, ...rows);
 }
 
 // Queue Cleaner + Hunting, split into tabs (elongated-hexagon inputs preserved

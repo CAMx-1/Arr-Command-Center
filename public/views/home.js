@@ -2,10 +2,10 @@ import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, s
 import { SERVICE_META, attachLongPress, openServiceQuickActions, openInArr } from '../app.js';
 import { listFailed, removeFailed } from '../lib/failedRequests.js';
 import { visibleServices } from '../lib/servicePrefs.js';
-import { honeycombRows, isWide } from '../lib/honeycomb.js';
 import { loadDashboards, activeDashboard } from '../lib/dashboardPrefs.js';
 import { actionGroup } from '../lib/actions.js';
 import { hive, posterHexCard } from '../lib/hive.js';
+import { getSysmonPrefs } from '../lib/systemMonitor.js';
 
 // ---- Activity source definitions ----
 const ACTIVITY_DEFS = [
@@ -42,15 +42,23 @@ export async function renderHome(root, ctx) {
 
   mount(root, spinner());
   let status = {};
-  try { status = await api.status(); state.status = status; } catch { /* ignore */ }
+  const wantSys = getSysmonPrefs().enabled;
+  const [st, sysInit] = await Promise.all([
+    api.status().catch(() => ({})),
+    wantSys ? api.system().catch(() => null) : Promise.resolve(null),
+  ]);
+  status = st || {};
+  state.status = status;
+  if (sysInit) pushSysSample(sysInit);
 
   const shown = visibleServices(state.services);
-  const rows = honeycombRows(shown);
-  const wide = isWide(shown.length);
-  const evenSplit = wide && rows.length === 2 && rows[0].length === rows[1].length;
-  const hcClass = 'honeycomb' + (wide ? ' hc-wide' : '') + (evenSplit ? ' hc-wide-even' : '');
-  const honeycomb = h('div', { class: hcClass }, ...rows.map((rowItems) =>
-    h('div', { class: 'hc-row' }, ...rowItems.map((svc) => hexCell(svc, status[svc.key], ctx)))));
+  // Build every tile once (service hexes + optional system-monitor hexes), then
+  // lay them into as-wide-as-fits rows via layoutHoneycomb so the honeycomb
+  // fills the width before wrapping to another row. The live sampler patches the
+  // system hexes in place (by id) without rebuilding the service tiles.
+  const sysCells = (sysInit && getSysmonPrefs().enabled) ? buildSystemCells(sysInit, getSysmonPrefs()) : [];
+  const tileEls = [...shown.map((svc) => hexCell(svc, status[svc.key], ctx)), ...sysCells];
+  const honeycomb = h('div', { class: 'honeycomb', id: 'services-hive' });
 
   const content = {
     status: h('div', { class: 'ops-summary', id: 'ops-status-panel' }, h('div', { class: 'dim' }, 'Loading operational status…')),
@@ -79,11 +87,13 @@ export async function renderHome(root, ctx) {
     }, h('div', { class: 'dashboard-widget-head' }, h('h2', { class: 'section-title' }, widget.label)), content[widget.id]));
   mount(root, h('div', { class: 'dashboard-grid', dataset: { dashboard: dashboard.id } }, ...widgets));
 
+  layoutHoneycomb(honeycomb, tileEls);
   for (const svc of shown) hydrateCardStats(svc, ctx);
   hydrateOperations(ctx);
   hydrateUpcoming(ctx);
   hydrateLinks(ctx);
   hydrateStreams(ctx);
+  hydrateSystem(ctx);
   if (ctx.params.focus) requestAnimationFrame(() => document.querySelector(`.widget-${CSS.escape(ctx.params.focus)}`)?.scrollIntoView({ block: 'start' }));
 }
 
@@ -574,7 +584,233 @@ async function hydrateUpcoming(ctx) {
 export function refreshHome(ctx) {
   hydrateOperations(ctx, true);
   hydrateStreams(ctx);
+  hydrateSystem(ctx);
   for (const svc of ctx.state.services) hydrateCardStats(svc, ctx);
+}
+
+// ---- Optional system-monitor hexes (attach to the services honeycomb) ----
+function usageDot(pct) { const n = Number(pct) || 0; return n >= 90 ? 'down' : n >= 70 ? 'warn' : 'ok'; }
+function diskName(p) {
+  const s = String(p || '');
+  if (s === '/' || s === '\\') return 'Root';
+  return s.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || s;
+}
+function netRate(v) { return v == null ? '—' : `${fmtBytes(v)}/s`; }
+function dotColor(cls) { return cls === 'down' ? '#ef4444' : cls === 'warn' ? '#f59e0b' : 'var(--accent)'; }
+
+// Rolling ~60s history of CPU% and memory% for the sparkline graphs.
+const SYS_WINDOW_MS = 60000;
+const SYS_SAMPLE_MS = 3000;
+const sysHistory = { cpu: [], mem: [] };
+function pushSysSample(sys) {
+  const t = Date.now();
+  if (sys.cpu) sysHistory.cpu.push({ t, v: Number(sys.cpu.percent) || 0 });
+  if (sys.mem) sysHistory.mem.push({ t, v: Number(sys.mem.percent) || 0 });
+  const cutoff = t - SYS_WINDOW_MS - SYS_SAMPLE_MS;
+  sysHistory.cpu = sysHistory.cpu.filter((p) => p.t >= cutoff);
+  sysHistory.mem = sysHistory.mem.filter((p) => p.t >= cutoff);
+}
+
+// A small SVG sparkline built as an HTML string (so it lands in the SVG
+// namespace via innerHTML). The wrapper sets `color`, so `currentColor` tints
+// the line/fill by severity.
+function sparkline(points, cls) {
+  const W = 116; const H = 30; const pad = 2;
+  const vals = (points || []).map((p) => Math.max(0, Math.min(100, Number(p.v) || 0)));
+  let inner;
+  if (vals.length < 2) {
+    inner = `<line x1="0" y1="${H - pad}" x2="${W}" y2="${H - pad}" stroke="currentColor" stroke-opacity="0.4" stroke-width="1.5"/>`;
+  } else {
+    const n = vals.length;
+    const xs = (i) => (pad + (i / (n - 1)) * (W - pad * 2));
+    const ys = (v) => (H - pad - (v / 100) * (H - pad * 2));
+    let line = '';
+    vals.forEach((v, i) => { line += `${i ? 'L' : 'M'}${xs(i).toFixed(1)} ${ys(v).toFixed(1)} `; });
+    const area = `${line}L${xs(n - 1).toFixed(1)} ${H} L${xs(0).toFixed(1)} ${H} Z`;
+    inner = `<path d="${area}" fill="currentColor" fill-opacity="0.16"/>`
+      + `<path d="${line.trim()}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }
+  return h('div', { class: 'hex-spark', style: { color: dotColor(cls) }, html: `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" width="100%" height="${H}">${inner}</svg>` });
+}
+
+// Stat-style system hex (disk / network): icon, name, two stats.
+function systemHex({ icon, name, stats, dotClass, title }) {
+  return h('div', { class: 'hex-cell hex-static hex-system', title: title || name },
+    h('div', { class: 'hex-border' }),
+    h('div', { class: 'hex-face' },
+      h('div', { class: 'hex-inner' },
+        h('span', { class: `hex-dot ${dotClass || ''}` }),
+        h('span', { class: 'hex-sys-ico' }, icon),
+        h('div', { class: 'hex-name' }, name),
+        h('div', { class: 'hex-stats' }, ...stats.map(([v, l]) => stat(v, l))),
+      ),
+    ),
+  );
+}
+
+// Graph-style system hex (CPU / memory): name, big value, 60s sparkline.
+function systemGraphHex({ icon, name, value, dotClass, history, title }) {
+  return h('div', { class: 'hex-cell hex-static hex-system hex-graph', title: title || name },
+    h('div', { class: 'hex-border' }),
+    h('div', { class: 'hex-face' },
+      h('div', { class: 'hex-inner' },
+        h('span', { class: `hex-dot ${dotClass || ''}` }),
+        h('div', { class: 'hex-name' }, `${icon} ${name}`),
+        h('div', { class: 'hex-graph-val' }, `${value}%`),
+        sparkline(history, dotClass),
+      ),
+    ),
+  );
+}
+
+function systemCpuHex(sys) {
+  const cpu = (sys.cpu && sys.cpu.percent) || 0;
+  return systemGraphHex({
+    icon: '🖥', name: 'CPU', value: cpu, dotClass: usageDot(cpu), history: sysHistory.cpu,
+    title: `CPU ${cpu}%${sys.cpu && sys.cpu.cores ? ` · ${sys.cpu.cores} cores` : ''} · last 60s`,
+  });
+}
+function systemMemHex(sys) {
+  const mem = (sys.mem && sys.mem.percent) || 0;
+  const detail = sys.mem ? ` · ${fmtBytes(sys.mem.used)} / ${fmtBytes(sys.mem.total)}` : '';
+  return systemGraphHex({
+    icon: '🧠', name: 'Memory', value: mem, dotClass: usageDot(mem), history: sysHistory.mem,
+    title: `Memory ${mem}%${detail} · last 60s`,
+  });
+}
+
+function systemDiskHex(d) {
+  if (d.error) {
+    return systemHex({ icon: '💾', name: diskName(d.path), stats: [['—', 'Used'], ['error', d.error]], dotClass: 'down', title: `${d.path}: ${d.error}` });
+  }
+  return systemHex({
+    icon: '💾', name: diskName(d.path),
+    stats: [[`${d.percent}%`, 'Used'], [fmtBytes(d.free), 'Free']],
+    dotClass: usageDot(d.percent),
+    title: `${d.path} · ${fmtBytes(d.used)} / ${fmtBytes(d.total)} used`,
+  });
+}
+
+function systemNetHex(net) {
+  return systemHex({
+    icon: '🌐', name: 'Network',
+    stats: [[netRate(net.rxSec), '↓ Down'], [netRate(net.txSec), '↑ Up']],
+    dotClass: 'ok',
+    title: 'Network throughput',
+  });
+}
+
+function buildSystemCells(sys, prefs) {
+  const cells = [];
+  if (prefs.cpu) { const el = systemCpuHex(sys); el.id = 'sys-hex-cpu'; cells.push(el); }
+  if (prefs.memory) { const el = systemMemHex(sys); el.id = 'sys-hex-mem'; cells.push(el); }
+  if (prefs.disk) (sys.disks || []).forEach((d, i) => { const el = systemDiskHex(d); el.id = `sys-hex-disk-${i}`; cells.push(el); });
+  if (prefs.network && sys.net) { const el = systemNetHex(sys.net); el.id = 'sys-hex-net'; cells.push(el); }
+  return cells;
+}
+
+// Patch a CPU/memory graph hex (dot severity + value + sparkline) in place.
+function patchGraphHex(id, value, history) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const cls = usageDot(value);
+  const dot = el.querySelector('.hex-dot'); if (dot) dot.className = `hex-dot ${cls}`;
+  const val = el.querySelector('.hex-graph-val'); if (val) val.textContent = `${value}%`;
+  const spark = el.querySelector('.hex-spark'); if (spark) spark.replaceWith(sparkline(history, cls));
+}
+
+// Update the folded-in system hexes in place from a stats payload (no row
+// rebuild, so the service tiles and their hydration are never disturbed).
+function updateSystemHexes(sys) {
+  patchGraphHex('sys-hex-cpu', (sys.cpu && sys.cpu.percent) || 0, sysHistory.cpu);
+  patchGraphHex('sys-hex-mem', (sys.mem && sys.mem.percent) || 0, sysHistory.mem);
+  (sys.disks || []).forEach((d, i) => {
+    const el = document.getElementById(`sys-hex-disk-${i}`);
+    if (!el) return;
+    const dot = el.querySelector('.hex-dot');
+    const vals = el.querySelectorAll('.stat-value');
+    if (d.error) { if (dot) dot.className = 'hex-dot down'; return; }
+    if (dot) dot.className = `hex-dot ${usageDot(d.percent)}`;
+    if (vals[0]) vals[0].textContent = `${d.percent}%`;
+    if (vals[1]) vals[1].textContent = fmtBytes(d.free);
+  });
+  if (sys.net) {
+    const el = document.getElementById('sys-hex-net');
+    if (el) { const vals = el.querySelectorAll('.stat-value'); if (vals[0]) vals[0].textContent = netRate(sys.net.rxSec); if (vals[1]) vals[1].textContent = netRate(sys.net.txSec); }
+  }
+}
+
+// Dedicated fast sampler (only while the Overview + monitor are active) so the
+// CPU/memory graphs trace a live last-60s window. Self-stops when the system
+// hexes leave the DOM (navigation) or the feature is turned off.
+let sysTimer = null;
+function stopSystemSampler() { if (sysTimer) { clearInterval(sysTimer); sysTimer = null; } }
+function startSystemSampler(ctx) {
+  if (sysTimer) return;
+  sysTimer = setInterval(async () => {
+    const hive = document.getElementById('services-hive');
+    if (!hive || !getSysmonPrefs().enabled || !hive.querySelector('.hex-system')) { stopSystemSampler(); return; }
+    let sys; try { sys = await ctx.api.system(); } catch { return; }
+    pushSysSample(sys);
+    updateSystemHexes(sys);
+  }, SYS_SAMPLE_MS);
+}
+
+// The system hexes are built into the honeycomb by renderHome (folded into the
+// 2-row band); here we just keep the live sampler running while they're shown.
+function hydrateSystem(ctx) {
+  const hive = document.getElementById('services-hive');
+  if (!hive || !getSysmonPrefs().enabled || !hive.querySelector('.hex-system')) { stopSystemSampler(); return; }
+  startSystemSampler(ctx);
+}
+
+const HEX_STEP = 186; // .hex-cell width (176) + horizontal margin (2 * 5)
+
+// Lay the honeycomb tiles into as-wide-as-fits rows with a 2-row minimum: pack
+// each row to the available width and only add a 3rd+ row once two full rows
+// can't hold everything, balancing tiles across the rows. Fills the width first
+// (no side dead space). Pointy-top nesting is kept via alternating row offsets
+// (.hc-fill). Existing tile elements are moved between rows (never rebuilt) so
+// hydrated stats/graphs are preserved. A ResizeObserver re-runs it as the width
+// settles/changes; it self-detaches once the honeycomb leaves the DOM.
+function layoutHoneycomb(hiveEl, tileEls) {
+  let ro = null;
+  let lastKey = '';
+  const cleanup = () => { if (ro) { try { ro.disconnect(); } catch { /* ignore */ } ro = null; } window.removeEventListener('resize', apply); };
+  const apply = () => {
+    if (!hiveEl.isConnected) { cleanup(); return; }
+    const total = tileEls.length;
+    const mobile = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 760px)').matches;
+    let perRow;
+    if (mobile) {
+      perRow = Math.max(1, total); // one row; CSS flex-wrap handles wrapping
+    } else {
+      const avail = (hiveEl.parentElement && hiveEl.parentElement.clientWidth) || hiveEl.clientWidth || 0;
+      const maxPerRow = avail ? Math.max(1, Math.floor((avail - HEX_STEP / 2) / HEX_STEP)) : total;
+      const rowCount = total >= 2 ? Math.max(2, Math.ceil(total / maxPerRow)) : 1;
+      perRow = Math.max(1, Math.ceil(total / rowCount));
+    }
+    const key = `${mobile ? 'm' : 'd'}:${perRow}:${total}`;
+    if (key === lastKey) return; // width didn't change the layout — avoid RO loops
+    lastKey = key;
+    clear(hiveEl); // detaches rows; tileEls refs survive so state is preserved
+    hiveEl.classList.toggle('hc-fill', !mobile && Math.ceil(total / perRow) > 1);
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < total; i += perRow) {
+      const row = h('div', { class: 'hc-row' });
+      for (const el of tileEls.slice(i, i + perRow)) row.appendChild(el);
+      frag.appendChild(row);
+    }
+    hiveEl.appendChild(frag);
+  };
+  apply();
+  const parent = hiveEl.parentElement;
+  if (parent && typeof ResizeObserver !== 'undefined') {
+    ro = new ResizeObserver(() => apply());
+    ro.observe(parent);
+  } else {
+    window.addEventListener('resize', apply);
+  }
 }
 
 function hexCell(svc, st, ctx) {

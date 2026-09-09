@@ -20,6 +20,7 @@ export const api = {
   async version() { return parse(await fetch('/api/version', { cache: 'no-store' })); },
   async status() { return parse(await fetch('/api/status')); },
   async diagnostics() { return parse(await fetch('/api/diagnostics')); },
+  async system() { return parse(await fetch('/api/system', { cache: 'no-store' })); },
   async operations({ limit = 100, fresh = false } = {}) { return parse(await fetch(`/api/operations?limit=${encodeURIComponent(limit)}${fresh ? `&fresh=${Date.now()}` : ''}`)); },
   // Plex API (server holds the token)
   plex: {
