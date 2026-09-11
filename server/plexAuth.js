@@ -113,7 +113,22 @@ export function createPlexAuth(cfg, { root, publicDir }) {
       const r = await fetch(`${PLEX_API}/pins?strong=true`, { method: 'POST', headers: plexHeaders(clientId, product) });
       const data = await r.json();
       if (!data || !data.id) return res.status(502).json({ error: 'Could not create Plex PIN' });
-      const authUrl = `https://app.plex.tv/auth#?clientID=${encodeURIComponent(clientId)}&code=${encodeURIComponent(data.code)}&context%5Bdevice%5D%5Bproduct%5D=${encodeURIComponent(product)}`;
+      let authUrl = `https://app.plex.tv/auth#?clientID=${encodeURIComponent(clientId)}&code=${encodeURIComponent(data.code)}&context%5Bdevice%5D%5Bproduct%5D=${encodeURIComponent(product)}`;
+      // Optional forwardUrl: after the user authorizes, Plex redirects the
+      // top-level page back here. This is what makes the flow work inside the
+      // native WKWebView (and Safari), where popups/new tabs are unreliable —
+      // login.js navigates the whole WebView to Plex and resumes on return.
+      // Only accept same-origin http(s) forward targets to avoid open-redirects.
+      const fwd = (req.body && req.body.forwardUrl) || '';
+      if (fwd && /^https?:\/\//i.test(fwd)) {
+        try {
+          const u = new URL(fwd);
+          const host = (req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+          if (!host || u.host === host) {
+            authUrl += `&forwardUrl=${encodeURIComponent(fwd)}`;
+          }
+        } catch { /* ignore malformed forwardUrl */ }
+      }
       res.json({ pinId: data.id, code: data.code, authUrl });
     } catch (e) {
       res.status(502).json({ error: 'Plex request failed: ' + e.message });

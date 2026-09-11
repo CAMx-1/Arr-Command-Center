@@ -1126,6 +1126,21 @@ async function init() {
   try {
     state.config = await api.config();
   } catch (err) {
+    // Auth layers: when running on the server origin (native app after the
+    // WebView navigated there, or the web/PWA build), an unauthenticated boot
+    // means a session expired or was never established. Send the user back
+    // through the interactive login instead of showing a dead "Could not load
+    // config" screen.
+    //   • 401 from our server  → Plex "Sign in with Plex" gate  → /login.html
+    //   • Cloudflare Access has expired → a top-level reload of "/" makes
+    //     Cloudflare render its email-code page before our server is reached.
+    const sameOrigin = !window.__ACC_NATIVE__; // false only on capacitor://localhost
+    if (sameOrigin && err && err.status === 401) {
+      // Our Plex gate serves login.html with a 401 for page loads; hitting it
+      // directly renders the "Sign in with Plex" screen.
+      location.href = '/login.html';
+      return;
+    }
     _bootBlocked = true;
     setConnBanner(navigator.onLine ? 'reconnecting' : 'offline');
     startProbing();
