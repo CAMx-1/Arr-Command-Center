@@ -80,7 +80,7 @@
     }
   },
   "system": {
-    "_comment": "Optional. Restricts which disk paths the system monitor can offer. When omitted, the server auto-discovers mounted disks (Linux) or falls back to the filesystem root. Can also be set via the SYSTEM_DISKS env (comma-separated). Choose which of the reported disks to actually show from Settings → System monitor.",
-    "disks": ["/", "/media"]
+    "_comment": "Optional. Leave disks empty to auto-discover mounted disks (Linux and macOS). Add paths to restrict which disks the system monitor can offer. SYSTEM_DISKS provides the same restriction as a comma-separated environment variable. Choose which reported disks to show from Settings → System monitor.",
+    "disks": []
   }
 }

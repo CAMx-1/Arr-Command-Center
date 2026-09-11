@@ -75,12 +75,11 @@ async function networkThroughput() {
 }
 
 // Default filesystem root for the current platform (fallback when we can't
-// enumerate mounts, e.g. macOS/Windows).
+// enumerate mounts, e.g. unsupported platforms).
 function defaultRoot() { return process.platform === 'win32' ? `${process.env.SystemDrive || 'C:'}\\` : '/'; }
 
-// Enumerate real (non-pseudo) mount points from /proc/mounts. Linux-only; other
-// platforms return null (callers fall back to the configured list or root).
-async function listMounts() {
+// Enumerate real (non-pseudo) Linux mount points from /proc/mounts.
+async function listLinuxMounts() {
   let txt;
   try { txt = await fsp.readFile('/proc/mounts', 'utf8'); }
   catch { return null; }
@@ -99,6 +98,40 @@ async function listMounts() {
   }
   mounts.sort((a, b) => a.length - b.length || a.localeCompare(b));
   return mounts;
+}
+
+// macOS exposes user-visible mounted disks and disk images beneath /Volumes.
+// A plain directory (and the usual "Macintosh HD" symlink back to /) has the
+// same device id as /Volumes; a real mount boundary has a different id. This
+// avoids shelling out to `mount` and excludes stale/ordinary directories while
+// retaining external disks, network volumes, and mounted images.
+async function listMacMounts() {
+  const volumesDir = '/Volumes';
+  let entries; let parent;
+  try {
+    [entries, parent] = await Promise.all([
+      fsp.readdir(volumesDir, { withFileTypes: true }),
+      fsp.stat(volumesDir),
+    ]);
+  } catch { return null; }
+
+  const mounts = ['/'];
+  await Promise.all(entries.map(async (entry) => {
+    if (!entry.name || entry.name.startsWith('.')) return;
+    const mountPath = `${volumesDir}/${entry.name}`;
+    try {
+      const stat = await fsp.stat(mountPath);
+      if (stat.isDirectory() && stat.dev !== parent.dev) mounts.push(mountPath);
+    } catch { /* volume may have been unmounted while enumerating */ }
+  }));
+  mounts.sort((a, b) => a.length - b.length || a.localeCompare(b));
+  return mounts;
+}
+
+async function listMounts() {
+  if (process.platform === 'linux') return listLinuxMounts();
+  if (process.platform === 'darwin') return listMacMounts();
+  return null;
 }
 
 // Resolve which disk paths to report: an explicit list when provided (config /
