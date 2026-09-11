@@ -7,6 +7,7 @@ import { actionGroup } from '../lib/actions.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { getSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
 import { persistentSWR } from '../lib/cache.js';
+import { seerrRequestBadge } from '../lib/seerrStatus.js';
 
 // ---- Activity source definitions ----
 const ACTIVITY_DEFS = [
@@ -230,13 +231,14 @@ function renderSeerrWidget(panel, ctx) {
   // Hexagons size → flowing poster-hex honeycomb; otherwise a list.
   if (isHexWidget(panel)) {
     const rendered = entries.map((entry) => {
-      const isRequest = entry.action?.type === 'overseerr-request';
+      const requestBadge = seerrRequestBadge(entry);
       const card = posterHexCard({
         title: entry.title,
         sub: entry.serviceLabel || '',
-        pills: [isRequest
-          ? { label: 'Pending', cls: 'warn' }
-          : { label: (entry.kind || 'event').replace('seerr-', ''), cls: severityPillClass(entry.severity) }],
+        pills: [requestBadge || {
+          label: (entry.kind || 'event').replace('seerr-', ''),
+          cls: severityPillClass(entry.severity),
+        }],
         actions: seerrEntryActions(entry, ctx),
         onClick: () => entry.serviceKey && ctx.go(entry.serviceKey, entry.tab ? { tab: entry.tab } : {}),
       });
@@ -324,6 +326,7 @@ function applySeerrDetail(el, entry, detail) {
 function operationRow(entry, ctx, actionable = false) {
   const navigate = () => entry.serviceKey && ctx.go(entry.serviceKey, entry.tab ? { tab: entry.tab } : {});
   const meta = SERVICE_META[entry.serviceType] || {};
+  const requestBadge = seerrRequestBadge(entry);
   let actions = null;
   if (actionable && entry.action?.type === 'overseerr-request') {
     const act = async (verb, event) => {
@@ -340,7 +343,7 @@ function operationRow(entry, ctx, actionable = false) {
     h('div', { class: 'poster dashboard-feed-icon' }, svcIcon(meta.logo, meta.emoji || '•', 22)),
     h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, entry.title),
       h('div', { class: 'row-sub' }, `${entry.serviceLabel || ''}${entry.detail ? ` · ${entry.detail}` : ''}`),
-      h('div', { class: 'meta-line' }, h('span', { class: 'pill muted' }, entry.kind || 'event'), entry.at ? h('span', {}, fmtRelative(entry.at)) : null)),
+      h('div', { class: 'meta-line' }, h('span', { class: `pill ${requestBadge?.cls || 'muted'}` }, requestBadge?.label || entry.kind || 'event'), entry.at ? h('span', {}, fmtRelative(entry.at)) : null)),
     actions,
   );
 }
