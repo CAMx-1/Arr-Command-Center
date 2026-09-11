@@ -4,14 +4,10 @@ const btn = document.getElementById('plex-btn');
 const statusEl = document.getElementById('login-status');
 let busy = false;
 
-// Native app (Capacitor WKWebView) or a small-screen/mobile browser where
-// popups and new tabs are unreliable. In those cases we drive Plex sign-in via
-// a top-level navigation + forwardUrl round-trip instead of window.open().
-function isNativeOrMobile() {
-  try {
-    if (window.Capacitor && (window.Capacitor.isNativePlatform ? window.Capacitor.isNativePlatform() : window.Capacitor.isNative)) return true;
-  } catch (e) { /* ignore */ }
-  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '');
+// Clear any persisted pending-PIN state (both stores).
+function clearPending() {
+  try { sessionStorage.removeItem(PENDING_KEY); } catch (e) {}
+  try { localStorage.removeItem(PENDING_KEY); } catch (e) {}
 }
 
 const PENDING_KEY = 'acc:plex-pending';
@@ -43,7 +39,7 @@ function pollForAuth(pinId, code, popup) {
     if (finished || checking) return;
     if (Date.now() - start > 180000) { // 3 min timeout
       cleanup(); busy = false; btn.disabled = false;
-      try { sessionStorage.removeItem(PENDING_KEY); } catch (e) {}
+      clearPending();
       setStatus('Sign-in timed out. Please try again.', true);
       return;
     }
@@ -53,14 +49,14 @@ function pollForAuth(pinId, code, popup) {
       const cd = await cr.json();
       if (cr.status === 403) {
         cleanup(); busy = false; btn.disabled = false;
-        try { sessionStorage.removeItem(PENDING_KEY); } catch (e) {}
+        clearPending();
         setStatus(cd.error || 'This Plex account is not permitted.', true);
         if (popup && !popup.closed) popup.close();
         return;
       }
       if (cd.authorized) {
         cleanup();
-        try { sessionStorage.removeItem(PENDING_KEY); } catch (e) {}
+        clearPending();
         setStatus('Signed in! Redirecting…');
         if (popup && !popup.closed) popup.close();
         location.href = '/';
@@ -84,10 +80,15 @@ function pollForAuth(pinId, code, popup) {
 (function resumePendingPlex() {
   let pending = null;
   try { pending = JSON.parse(sessionStorage.getItem(PENDING_KEY) || 'null'); } catch (e) { pending = null; }
+  // Fall back to localStorage in case sessionStorage was dropped across the
+  // external Plex round-trip (some in-app browsers reset session storage).
+  if (!pending) {
+    try { pending = JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); } catch (e) { pending = null; }
+  }
   if (!pending || !pending.pinId || !pending.code) return;
   // Stale guard: PINs expire (~30 min); don't resume ancient attempts.
   if (pending.at && Date.now() - pending.at > 30 * 60 * 1000) {
-    try { sessionStorage.removeItem(PENDING_KEY); } catch (e) {}
+    clearPending();
     return;
   }
   busy = true;
@@ -102,17 +103,21 @@ btn.addEventListener('click', async () => {
   btn.disabled = true;
   setStatus('Opening Plex…');
 
-  const nativeOrMobile = isNativeOrMobile();
-  // For the popup path we must open the window synchronously (Safari blocks
-  // window.open after an await), so open a blank one now and point it later.
-  const popup = nativeOrMobile ? null : window.open('', 'plexAuth', 'width=800,height=720');
+  // Try to open a popup synchronously from the user gesture (Safari blocks
+  // window.open after an await). If the environment blocks popups — native
+  // WKWebView, in-app Safari (SFSafariViewController), or a mobile browser —
+  // window.open returns null (or an immediately-closed window). In that case we
+  // fall back to a top-level navigation + forwardUrl round-trip, which is the
+  // only reliable way to run Plex OAuth in those contexts. This detection is
+  // environment-based, so it doesn't depend on user-agent sniffing.
+  let popup = null;
+  try { popup = window.open('', 'plexAuth', 'width=800,height=720'); } catch (e) { popup = null; }
+  const popupOk = !!popup && !popup.closed;
+  // If we can't use a popup, do the redirect flow (needs a same-origin forwardUrl).
+  const useRedirect = !popupOk;
 
   try {
-    // Ask the server for a PIN. On native/mobile, pass a same-origin forwardUrl
-    // so Plex sends the top-level page back to us after authorization.
-    const forwardUrl = nativeOrMobile
-      ? `${location.origin}/login.html?plexReturn=1`
-      : undefined;
+    const forwardUrl = useRedirect ? `${location.origin}/login.html?plexReturn=1` : undefined;
     const r = await fetch('/api/auth/plex/pin', {
       method: 'POST',
       headers: forwardUrl ? { 'content-type': 'application/json' } : undefined,
@@ -121,17 +126,19 @@ btn.addEventListener('click', async () => {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Could not start Plex sign-in');
 
-    if (nativeOrMobile) {
+    if (useRedirect) {
       // Persist the pending PIN so we can resume when Plex forwards us back.
       try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ pinId: d.pinId, code: d.code, at: Date.now() })); } catch (e) {}
+      // Also mirror to localStorage in case sessionStorage is dropped across the
+      // external round-trip in some in-app browser contexts.
+      try { localStorage.setItem(PENDING_KEY, JSON.stringify({ pinId: d.pinId, code: d.code, at: Date.now() })); } catch (e) {}
       setStatus('Redirecting to Plex…');
-      // Top-level navigation of the WebView — reliable inside WKWebView.
-      window.location.href = d.authUrl;
+      window.location.href = d.authUrl; // top-level navigation — reliable everywhere
       return;
     }
 
-    // Desktop: use the popup we opened synchronously above.
-    if (popup) { try { popup.location.href = d.authUrl; } catch (e) { /* ignore */ } }
+    // Desktop with a working popup.
+    try { popup.location.href = d.authUrl; } catch (e) { /* ignore */ }
     setStatus('Waiting for Plex sign-in… (complete it in the Plex tab)');
     pollForAuth(d.pinId, d.code, popup);
   } catch (e) {
