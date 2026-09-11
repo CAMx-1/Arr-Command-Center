@@ -373,6 +373,12 @@ html[data-theme="dark"] .hex-cell.hex-system .hex-face { background: linear-grad
 .sysmon-disk-path { font-weight: 600; font-family: var(--mono, ui-monospace, monospace); }
 /* Greyed placeholder for features unavailable in local (direct) mode. */
 .server-only-card { opacity: 0.6; border-style: dashed; }
+/* Local-mode connection manager list. */
+.local-conn-rows { display: flex; flex-direction: column; gap: 8px; }
+.local-conn-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.local-conn-name { font-weight: 700; }
+.local-conn-url { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.local-conn-actions { margin-left: auto; display: flex; gap: 8px; }
 
 @media (max-width: 760px) {
   /* Wrap the honeycomb instead of overlapping/overflowing, size hexes for

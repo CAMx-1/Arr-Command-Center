@@ -8,7 +8,7 @@ import * as push from '../lib/push.js';
 import { renderQueueCleaner, renderHunting } from '../lib/automationUI.js';
 import { dashboardSettingsCard } from '../lib/dashboardSettings.js';
 import { getSysmonPrefs, setSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
-import { getAppMode, setAppMode, isLocalMode, getConnection, setConnection, removeConnection } from '../lib/connections.js';
+import { getAppMode, setAppMode, isLocalMode, getConnection, getConnections, setConnection, removeConnection, LOCAL_SERVICE_DEFS, localServiceDef } from '../lib/connections.js';
 
 export async function renderSettings(root, ctx) {
   const { api, state } = ctx;
@@ -296,65 +296,117 @@ function connectionModeCard(root, ctx) {
         ? 'Local mode talks directly to your services from this device — no backend proxy. Enter each service below. Server-only features (system monitor, notifications, automation) are unavailable.'
         : 'Server mode routes everything through the Arr Command Center backend (API keys + Cloudflare Access injected server-side).'),
   ];
-  if (mode === 'local') rows.push(sonarrConnectionForm(root, ctx));
+  if (mode === 'local') rows.push(localConnectionsPanel(root, ctx));
   return h('div', { class: 'card' }, ...rows);
 }
 
-function sonarrConnectionForm(root, ctx) {
-  const conn = getConnection('sonarr') || {};
-  const label = h('input', { class: 'input', value: conn.label || 'Sonarr', placeholder: 'Sonarr' });
-  const url = h('input', { class: 'input', type: 'url', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', value: conn.baseUrl || '', placeholder: 'https://sonarr.example.com' });
-  const key = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', value: conn.apiKey || '', placeholder: 'Sonarr API key (Settings → General)' });
-  const cfId = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', value: conn.cfClientId || '', placeholder: 'CF-Access-Client-Id (optional)' });
-  const cfSecret = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', value: conn.cfClientSecret || '', placeholder: 'CF-Access-Client-Secret (optional)' });
-  const status = h('div', { class: 'dim', style: { fontSize: '12px', minHeight: '16px', margin: '2px 0' } });
+// Generic local-connection manager: lists configured connections and provides
+// a single add/edit form with a service-type picker. Covers every service type
+// supported in local mode (all *arr + download/indexer/subtitle/analytics).
+function localConnectionsPanel(root, ctx) {
+  const defs = LOCAL_SERVICE_DEFS;
 
-  const collect = () => ({
-    type: 'sonarr',
-    label: (label.value || 'Sonarr').trim(),
-    baseUrl: (url.value || '').trim().replace(/\/+$/, ''),
-    apiKey: (key.value || '').trim(),
-    cfClientId: (cfId.value || '').trim(),
-    cfClientSecret: (cfSecret.value || '').trim(),
-  });
+  const label = h('input', { class: 'input' });
+  const url = h('input', { class: 'input', type: 'url', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' });
+  const key = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' });
+  const cfId = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'CF-Access-Client-Id (optional)' });
+  const cfSecret = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'CF-Access-Client-Secret (optional)' });
+  const status = h('div', { class: 'dim', style: { fontSize: '12px', minHeight: '16px', margin: '2px 0' } });
+  const typeSel = h('select', { class: 'input' }, ...defs.map((d) => h('option', { value: d.type }, d.name)));
+
+  const fill = (t) => {
+    const d = localServiceDef(t) || defs[0];
+    const c = getConnection(t) || {};
+    label.value = c.label || d.name;
+    url.value = c.baseUrl || '';
+    url.placeholder = d.urlPlaceholder;
+    key.value = c.apiKey || '';
+    key.placeholder = d.keyHint || `${d.name} API key`;
+    cfId.value = c.cfClientId || '';
+    cfSecret.value = c.cfClientSecret || '';
+    status.textContent = '';
+  };
+  const selectType = (t) => { typeSel.value = t; fill(t); typeSel.scrollIntoView({ block: 'nearest' }); };
+  typeSel.addEventListener('change', () => fill(typeSel.value));
+
+  const collect = () => {
+    const t = typeSel.value;
+    const d = localServiceDef(t) || defs[0];
+    return {
+      type: t,
+      label: (label.value || d.name).trim(),
+      baseUrl: (url.value || '').trim().replace(/\/+$/, ''),
+      apiKey: (key.value || '').trim(),
+      cfClientId: (cfId.value || '').trim(),
+      cfClientSecret: (cfSecret.value || '').trim(),
+    };
+  };
   const save = () => {
     const c = collect();
     if (!/^https?:\/\/.+/i.test(c.baseUrl)) { status.textContent = 'Enter a valid URL (http(s)://…)'; return; }
     if (!c.apiKey) { status.textContent = 'API key is required'; return; }
-    setConnection('sonarr', c);
+    setConnection(c.type, c);
     location.reload();
   };
   const test = async () => {
     const c = collect();
     if (!/^https?:\/\/.+/i.test(c.baseUrl) || !c.apiKey) { status.textContent = 'Enter URL and API key first'; return; }
-    setConnection('sonarr', c);
+    setConnection(c.type, c);
     status.textContent = 'Testing…';
     try {
       const r = await ctx.api.status();
-      const s = r && r.sonarr;
+      const s = r && r[c.type];
       status.textContent = s && s.ok ? `Connected${s.version ? ` · v${s.version}` : ''}` : `Failed: ${(s && s.error) || 'unreachable'}`;
     } catch (e) { status.textContent = `Failed: ${e.message}`; }
   };
-  const remove = () => { removeConnection('sonarr'); location.reload(); };
+
+  // Configured-connections list (live-rendered so Remove updates immediately).
+  const listWrap = h('div', { class: 'local-conn-list' });
+  const renderList = () => {
+    const all = getConnections();
+    const keys = Object.keys(all);
+    mount(listWrap, keys.length
+      ? h('div', { class: 'local-conn-rows' }, ...keys.map((k) => {
+        const c = all[k];
+        return h('div', { class: 'local-conn-row' },
+          h('span', { class: 'local-conn-name' }, c.label || k),
+          h('span', { class: 'pill muted' }, c.type),
+          h('span', { class: 'dim local-conn-url' }, c.baseUrl || ''),
+          h('span', { class: 'local-conn-actions' },
+            h('button', { class: 'btn sm hex-btn', onclick: () => selectType(c.type) }, 'Edit'),
+            h('button', { class: 'btn sm danger hex-btn', onclick: () => { removeConnection(k); location.reload(); } }, 'Remove'),
+          ),
+        );
+      }))
+      : h('div', { class: 'dim', style: { fontSize: '13px' } }, 'No services configured yet — add one below.'));
+  };
 
   const field = (lbl, input) => h('label', { class: 'pw-field', style: { display: 'block', margin: '8px 0' } },
     h('span', { class: 'dim', style: { fontSize: '12px', display: 'block', marginBottom: '4px' } }, lbl), input);
 
+  fill(typeSel.value);
+  renderList();
+
   return h('div', { class: 'local-conn', style: { marginTop: '12px', borderTop: '1px solid var(--border)', paddingTop: '12px' } },
-    h('div', { style: { fontWeight: '700', marginBottom: '4px' } }, 'Sonarr'),
-    field('Label', label),
-    field('Server URL', url),
-    field('API key', key),
-    field('Cloudflare Access — Client Id', cfId),
-    field('Cloudflare Access — Client Secret', cfSecret),
-    status,
-    h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
-      h('button', { class: 'btn sm primary hex-btn', onclick: save }, 'Save'),
-      h('button', { class: 'btn sm hex-btn', onclick: test }, 'Test'),
-      conn.baseUrl ? h('button', { class: 'btn sm danger hex-btn', onclick: remove }, 'Remove') : null,
+    h('div', { style: { fontWeight: '700', marginBottom: '6px' } }, 'Connected services'),
+    listWrap,
+    h('div', { style: { marginTop: '14px', borderTop: '1px dashed var(--border)', paddingTop: '12px' } },
+      h('div', { style: { fontWeight: '700', marginBottom: '4px' } }, 'Add / edit a service'),
+      field('Service', typeSel),
+      field('Label', label),
+      field('Server URL', url),
+      field('API key', key),
+      field('Cloudflare Access — Client Id', cfId),
+      field('Cloudflare Access — Client Secret', cfSecret),
+      status,
+      h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+        h('button', { class: 'btn sm primary hex-btn', onclick: save }, 'Save'),
+        h('button', { class: 'btn sm hex-btn', onclick: test }, 'Test'),
+      ),
     ),
   );
 }
+
 
 // System monitor: opt-in hexes (CPU/memory, per-disk, network) that attach to
 // the Overview services honeycomb. Toggles persist in localStorage; the

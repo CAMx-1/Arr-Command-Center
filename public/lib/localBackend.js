@@ -55,8 +55,8 @@ export function classifyLocalPath(pathname) {
   return 'passthrough';
 }
 
-// Per-type health endpoint for status pings (Sonarr/Radarr use v3).
-function statusPath(type) {
+// Per-type health endpoint for status pings.
+export function statusPath(type) {
   switch (type) {
     case 'lidarr': case 'readarr': return 'api/v1/system/status';
     case 'overseerr': return 'api/v1/status';

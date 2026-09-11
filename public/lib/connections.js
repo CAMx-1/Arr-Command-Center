@@ -1,7 +1,8 @@
 // Local ("direct") mode: the app talks straight to your services from the
-// device — credentials stored locally, no backend proxy. Scoped to Sonarr for
-// now, but structured (authFor / buildDirectRequest handle every service type)
-// to extend to the rest.
+// device — credentials stored locally, no backend proxy. Supports every
+// single-API-key service (all *arr apps, Overseerr/Seerr, SABnzbd, qBittorrent,
+// Tautulli, Bazarr, Prowlarr, Newznab indexers). Plex is excluded (interactive
+// OAuth token + server-side image proxy).
 //
 // All state is in localStorage; every reader accepts an injectable storage so
 // the pure logic is unit-testable off-DOM.
@@ -12,8 +13,25 @@ const CONN_KEY = 'acc:connections';  // { <key>: { key, type, label, baseUrl, ap
 const storageFor = (s) => s || globalThis.localStorage;
 const trimSlash = (u) => String(u || '').replace(/\/+$/, '');
 
-// Service types that can currently run in local mode.
-export const LOCAL_SUPPORTED = ['sonarr'];
+// Service types that can run in local (direct) mode, with UI metadata. Every
+// type here authenticates with a single API key (or query apikey / Bearer),
+// which the device can inject directly. Plex is intentionally excluded — it
+// uses an interactive OAuth token and server-side image proxy.
+export const LOCAL_SERVICE_DEFS = [
+  { type: 'sonarr', name: 'Sonarr', urlPlaceholder: 'https://sonarr.example.com' },
+  { type: 'radarr', name: 'Radarr', urlPlaceholder: 'https://radarr.example.com' },
+  { type: 'lidarr', name: 'Lidarr', urlPlaceholder: 'https://lidarr.example.com' },
+  { type: 'readarr', name: 'Readarr', urlPlaceholder: 'https://readarr.example.com' },
+  { type: 'overseerr', name: 'Overseerr / Seerr', urlPlaceholder: 'https://requests.example.com' },
+  { type: 'prowlarr', name: 'Prowlarr', urlPlaceholder: 'https://prowlarr.example.com' },
+  { type: 'bazarr', name: 'Bazarr', urlPlaceholder: 'https://bazarr.example.com' },
+  { type: 'sabnzbd', name: 'SABnzbd', urlPlaceholder: 'https://sabnzbd.example.com' },
+  { type: 'qbittorrent', name: 'qBittorrent', urlPlaceholder: 'https://qbit.example.com', keyHint: 'WebUI API key (qBittorrent 5.2+)' },
+  { type: 'tautulli', name: 'Tautulli', urlPlaceholder: 'https://tautulli.example.com' },
+  { type: 'indexer', name: 'Indexer (Newznab)', urlPlaceholder: 'https://indexer.example.com' },
+];
+export const LOCAL_SUPPORTED = LOCAL_SERVICE_DEFS.map((d) => d.type);
+export function localServiceDef(type) { return LOCAL_SERVICE_DEFS.find((d) => d.type === type) || null; }
 
 export function getAppMode(storage) {
   try { return storageFor(storage).getItem(MODE_KEY) === 'local' ? 'local' : 'server'; }
@@ -58,6 +76,10 @@ export function authFor(conn) {
     if (conn.apiKey) headers['X-API-KEY'] = conn.apiKey;
   } else if (type === 'qbittorrent') {
     if (conn.apiKey) headers['Authorization'] = `Bearer ${conn.apiKey}`;
+    // qBittorrent verifies Referer/Origin match its host. Native HTTP can set
+    // these (browsers can't); harmless where the WebUI doesn't check.
+    const qb = trimSlash(conn.baseUrl);
+    if (qb) { headers['Referer'] = qb; headers['Origin'] = qb; }
   } else {
     // sonarr / radarr / lidarr / readarr / overseerr / prowlarr
     if (conn && conn.apiKey) headers['X-Api-Key'] = conn.apiKey;
