@@ -1108,6 +1108,9 @@ async function probeCycle() {
 
 // ---------- Init ----------
 async function init() {
+  // Native app first-run: the Capacitor bridge shows a "connect to server"
+  // screen when no server is configured — don't boot the app into a no-API state.
+  if (window.__ACC_SETUP_REQUIRED__) return;
   initAppearance();
   initDensity();
   // Own scroll restoration so route/history-aware logic (see navigate) controls

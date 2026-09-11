@@ -1,0 +1,13 @@
+{
+  "appId": "app.arrcommandcenter.mobile",
+  "appName": "Arr Command Center",
+  "webDir": "public",
+  "server": {
+    "iosScheme": "capacitor",
+    "cleartext": true
+  },
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#0f1117"
+  }
+}
