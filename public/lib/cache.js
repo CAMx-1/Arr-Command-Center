@@ -38,8 +38,73 @@ export async function cachedList(key, fetcher, ttl = 300000, label = 'Service') 
 
 export function invalidate(key) { store.delete(key); }
 
-// Background ticker: refresh any stale registered entry so data is updated behind
-// the scenes (~every ttl) even if the user doesn't revisit the page.
+// Persistent stale-while-revalidate cache for dashboard data that should survive
+// reloads. Values are scoped by the caller (for example, by authenticated user)
+// and stored as versioned envelopes so the format can evolve safely.
+const persistentInflight = new Map();
+const PERSISTENT_CACHE_VERSION = 1;
+
+function persistentStorage(storage) { return storage || globalThis.localStorage; }
+
+export function readPersistentCache(key, { storage, maxAge = Infinity, now = Date.now() } = {}) {
+  try {
+    const target = persistentStorage(storage);
+    const parsed = JSON.parse(target?.getItem(key) || 'null');
+    if (!parsed || parsed.v !== PERSISTENT_CACHE_VERSION || !Number.isFinite(parsed.at)) return null;
+    if (now - parsed.at > maxAge) { target?.removeItem(key); return null; }
+    return { data: parsed.data, at: parsed.at };
+  } catch { return null; }
+}
+
+export function writePersistentCache(key, data, { storage, now = Date.now() } = {}) {
+  try {
+    persistentStorage(storage)?.setItem(key, JSON.stringify({ v: PERSISTENT_CACHE_VERSION, at: now, data }));
+    return true;
+  } catch { return false; }
+}
+
+function refreshPersistent(key, fetcher, { storage, now, validate } = {}) {
+  if (persistentInflight.has(key)) return persistentInflight.get(key);
+  const request = Promise.resolve().then(fetcher).then((data) => {
+    if (validate && !validate(data)) throw new TypeError('Invalid cache response');
+    writePersistentCache(key, data, { storage, now: now() });
+    return data;
+  }).finally(() => persistentInflight.delete(key));
+  persistentInflight.set(key, request);
+  return request;
+}
+
+// Returns cached data immediately when available. Once `ttl` elapses, `refresh`
+// contains a background request that callers may use to patch the live UI. On a
+// cold cache (or force=true), this waits for the fetch and returns fresh data.
+export async function persistentSWR(key, fetcher, {
+  ttl = 60000,
+  maxAge = 86400000,
+  storage,
+  now = Date.now,
+  validate,
+  force = false,
+} = {}) {
+  let cached = readPersistentCache(key, { storage, maxAge, now: now() });
+  if (cached && validate && !validate(cached.data)) {
+    invalidatePersistentCache(key, { storage });
+    cached = null;
+  }
+  if (cached && !force) {
+    const refresh = now() - cached.at >= ttl
+      ? refreshPersistent(key, fetcher, { storage, now, validate })
+      : null;
+    return { data: cached.data, cached: true, refresh };
+  }
+  const data = await refreshPersistent(key, fetcher, { storage, now, validate });
+  return { data, cached: false, refresh: null };
+}
+
+export function invalidatePersistentCache(key, { storage } = {}) {
+  try { persistentStorage(storage)?.removeItem(key); } catch { /* unavailable */ }
+}
+// Background ticker: refresh any stale registered entry behind the scenes
+// (~every ttl) even if the user doesn't revisit the page.
 if (typeof window !== 'undefined') {
   setInterval(() => {
     const now = Date.now();
