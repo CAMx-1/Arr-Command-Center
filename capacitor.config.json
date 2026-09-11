@@ -6,6 +6,8 @@
     "iosScheme": "capacitor",
     "cleartext": true,
     "allowNavigation": [
+      "arrcc.arr-matey.com",
+      "*.arr-matey.com",
       "*.cloudflareaccess.com",
       "*.plex.tv",
       "plex.tv",

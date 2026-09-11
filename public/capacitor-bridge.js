@@ -34,10 +34,13 @@
 (function () {
   var SERVER_KEY = 'acc:server-base';
 
-  function isNative() {
-    try {
-      if (window.Capacitor && (window.Capacitor.isNativePlatform ? window.Capacitor.isNativePlatform() : window.Capacitor.isNative)) return true;
-    } catch (e) { /* ignore */ }
+  // The "bootstrap" context is ONLY the local Capacitor shell loaded from
+  // capacitor://localhost (or ionic://). On the real server origin (http/https)
+  // the Capacitor JS bridge is still injected because the server domain is in
+  // allowNavigation — so we must NOT rely on window.Capacitor here. Detect the
+  // bootstrap purely by URL scheme; on http(s) this is the normal web app and
+  // the bridge is a no-op.
+  function isBootstrap() {
     var p = (location.protocol || '').toLowerCase();
     return p === 'capacitor:' || p === 'ionic:';
   }
@@ -46,7 +49,7 @@
     try { return (localStorage.getItem(SERVER_KEY) || '').replace(/\/+$/, ''); } catch (e) { return ''; }
   }
 
-  var native = isNative();
+  var native = isBootstrap();
   var base = native ? storedBase() : '';
 
   // Public helpers (kept for API compatibility; used only in the native
