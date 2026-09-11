@@ -1,5 +1,5 @@
 import { api } from './lib/api.js';
-import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, debounce, spinner, empty, poster, fmtBytes, copyable, registerOverlay, closeOverlay, overlayOpen } from './lib/ui.js';
+import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, debounce, spinner, empty, poster, fmtBytes, copyable, registerOverlay, closeOverlay, unregisterOverlay, overlayOpen } from './lib/ui.js';
 // Local (direct) mode: installs a fetch shim that services /api/* on-device
 // when enabled. Imported first so it wraps fetch before any request is made.
 import './lib/localBackend.js';
@@ -63,6 +63,7 @@ let hiveExpanded = false;
 const HIVE_CAP = 10;
 let notifications = [];
 let errorLog = [];
+
 // Signature of the last full hive build. A status poll compares against this to
 // decide whether it can repaint dots in place (see refreshStatus).
 let _lastHiveSig = null;
@@ -537,8 +538,17 @@ function dismissAllServices() {
 // Selecting a service: close the sheet (consuming its history state), then
 // navigate on the next frame so the back-navigation settles first.
 function selectAllService(go) {
-  if (overlayOpen('allsvc')) { closeOverlay('allsvc'); requestAnimationFrame(go); }
-  else { closeAllServices(); go(); }
+  // Tear down the sheet WITHOUT history.back(): closeOverlay() pops history,
+  // which races against (and cancels) the hash navigation we're about to do —
+  // that race left Settings/service taps bouncing back to Overview. Instead we
+  // tear down the DOM, drop the overlay from the registry (no history.back),
+  // and navigate. The overlay's pushed history entry is harmlessly reused by
+  // the hash change.
+  if (overlayOpen('allsvc')) {
+    closeAllServices();          // history-free DOM teardown
+    unregisterOverlay('allsvc'); // forget it without triggering history.back()
+  }
+  go();
 }
 
 // Lock/unlock background scrolling while the all-services sheet is open. Uses

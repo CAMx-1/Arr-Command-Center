@@ -111,6 +111,15 @@ export function closeOverlay(id) {
   try { history.back(); } catch { _cleanupBacks--; }
 }
 
+// Forget an overlay WITHOUT popping history. Use when the caller is about to
+// perform its own navigation (e.g. selecting an item from the sheet) and a
+// history.back() would race against / cancel that navigation. The overlay's
+// pushed history entry is left in place to be reused by the pending navigation.
+export function unregisterOverlay(id) {
+  if (!_overlays.has(id)) return;
+  _teardownOverlay(id);
+}
+
 // ---- Modal ----
 export function openModal({ title, body, footer, wide = false }) {
   const root = document.getElementById('modal-root');
