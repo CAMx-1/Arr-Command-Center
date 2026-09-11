@@ -6,6 +6,7 @@ import { loadDashboards, activeDashboard } from '../lib/dashboardPrefs.js';
 import { actionGroup } from '../lib/actions.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { getSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
+import { persistentSWR } from '../lib/cache.js';
 
 // ---- Activity source definitions ----
 const ACTIVITY_DEFS = [
@@ -41,14 +42,9 @@ export async function renderHome(root, ctx) {
   ctx.setActions(h('span', { class: 'dim', style: { fontSize: '13px' } }, state.config.mock ? 'Showing mock data' : 'Live'));
 
   mount(root, spinner());
-  let status = {};
+  const status = state.status || {};
   const wantSys = getSysmonPrefs().enabled;
-  const [st, sysInit] = await Promise.all([
-    api.status().catch(() => ({})),
-    wantSys ? api.system().catch(() => null) : Promise.resolve(null),
-  ]);
-  status = st || {};
-  state.status = status;
+  const sysInit = wantSys ? await api.system().catch(() => null) : null;
   if (sysInit) pushSysSample(sysInit);
 
   const shown = visibleServices(state.services);
@@ -97,25 +93,37 @@ export async function renderHome(root, ctx) {
   if (ctx.params.focus) requestAnimationFrame(() => document.querySelector(`.widget-${CSS.escape(ctx.params.focus)}`)?.scrollIntoView({ block: 'start' }));
 }
 
+const OVERVIEW_OPERATIONS_TTL = 60000;
+const OVERVIEW_OPERATIONS_MAX_AGE = 86400000;
 let lastOperations = null;
-async function hydrateOperations(ctx, silent = false) {
+let lastOperationsKey = '';
+
+function overviewScope(ctx) {
+  const user = ctx.state.config?.auth?.user;
+  const userId = typeof user === 'string'
+    ? user
+    : user && (user.id || user.uuid || user.username || user.email || user.title || user.displayName);
+  const services = (ctx.state.services || []).map((svc) => `${svc.key}:${svc.type}`).sort().join(',');
+  const clean = (value) => String(value || 'local').replace(/[^a-z0-9@._,-]/gi, '_').slice(0, 240);
+  return `${clean(userId)}:${clean(services)}`;
+}
+
+function operationsCacheKey(ctx) { return `acc:overview:v1:${overviewScope(ctx)}:operations`; }
+function operationsFingerprint(value) {
+  if (!value || typeof value !== 'object') return '';
+  const { generatedAt, ...content } = value;
+  return JSON.stringify(content);
+}
+
+function renderOperations(ctx, key, data) {
+  if (operationsCacheKey(ctx) !== key || !data || typeof data !== 'object') return;
+  lastOperations = data;
+  lastOperationsKey = key;
   const statusPanel = document.getElementById('ops-status-panel');
   const inboxPanel = document.getElementById('inbox-panel');
   const seerrPanel = document.getElementById('seerr-panel');
   const activityPanel = document.getElementById('activity-panel');
   if (!statusPanel && !inboxPanel && !seerrPanel && !activityPanel) return;
-  if (!silent) {
-    if (inboxPanel) mount(inboxPanel, h('div', { class: 'dim' }, 'Loading action inbox…'));
-    if (seerrPanel) mount(seerrPanel, h('div', { class: 'dim' }, 'Loading Seerr requests and issues…'));
-    if (activityPanel) mount(activityPanel, h('div', { class: 'dim' }, 'Loading activity…'));
-  }
-  try { lastOperations = await ctx.api.operations({ fresh: !silent }); }
-  catch (error) {
-    if (inboxPanel) mount(inboxPanel, empty('', 'Could not load action inbox', error.message));
-    if (seerrPanel) mount(seerrPanel, empty('', 'Could not load Seerr requests and issues', error.message));
-    if (activityPanel) mount(activityPanel, empty('', 'Could not load activity', error.message));
-    return;
-  }
   const summary = lastOperations.summary || {};
   const unavailable = Object.values(ctx.state.status || {}).filter((entry) => entry && !entry.ok).length || summary.serviceErrors || 0;
   if (statusPanel) mount(statusPanel,
@@ -131,6 +139,41 @@ async function hydrateOperations(ctx, silent = false) {
   }
   if (seerrPanel) renderSeerrWidget(seerrPanel, ctx);
   wireTimeline(ctx);
+}
+
+async function hydrateOperations(ctx, silent = false, force = false) {
+  const hasPanel = document.getElementById('ops-status-panel')
+    || document.getElementById('inbox-panel')
+    || document.getElementById('seerr-panel')
+    || document.getElementById('activity-panel');
+  if (!hasPanel) return;
+  const key = operationsCacheKey(ctx);
+  try {
+    const result = await persistentSWR(key, () => ctx.api.operations({ fresh: force }), {
+      ttl: OVERVIEW_OPERATIONS_TTL,
+      maxAge: OVERVIEW_OPERATIONS_MAX_AGE,
+      force,
+      validate: (value) => !!value && typeof value === 'object' && Array.isArray(value.seerr) && Array.isArray(value.activity),
+    });
+    const renderedFingerprint = operationsFingerprint(result.data);
+    renderOperations(ctx, key, result.data);
+    if (result.refresh) {
+      result.refresh.then((fresh) => {
+        if (operationsFingerprint(fresh) !== renderedFingerprint) renderOperations(ctx, key, fresh);
+        else if (operationsCacheKey(ctx) === key) { lastOperations = fresh; lastOperationsKey = key; }
+      }).catch(() => { /* keep the last good Overview data */ });
+    }
+  } catch (error) {
+    // A failed background/forced check must not replace previously rendered
+    // cached data. Only show an error when this browser has no usable snapshot.
+    if (lastOperationsKey === key && lastOperations) return;
+    const inboxPanel = document.getElementById('inbox-panel');
+    const seerrPanel = document.getElementById('seerr-panel');
+    const activityPanel = document.getElementById('activity-panel');
+    if (!silent && inboxPanel) mount(inboxPanel, empty('', 'Could not load action inbox', error.message));
+    if (!silent && seerrPanel) mount(seerrPanel, empty('', 'Could not load Seerr requests and issues', error.message));
+    if (!silent && activityPanel) mount(activityPanel, empty('', 'Could not load activity', error.message));
+  }
 }
 
 function summaryCard(value, label, cls) {
@@ -163,7 +206,7 @@ function seerrEntryActions(entry, ctx) {
   if (entry.action?.type !== 'overseerr-request') return null;
   const act = async (verb, event) => {
     event.stopPropagation();
-    try { await ctx.api.seerr(entry.serviceKey).post(`request/${entry.action.requestId}/${verb}`); toast(`Request ${verb}d`, 'success'); await hydrateOperations(ctx); }
+    try { await ctx.api.seerr(entry.serviceKey).post(`request/${entry.action.requestId}/${verb}`); toast(`Request ${verb}d`, 'success'); await hydrateOperations(ctx, false, true); }
     catch (error) { toast(error.message, 'error'); }
   };
   return actionGroup([
@@ -285,7 +328,7 @@ function operationRow(entry, ctx, actionable = false) {
   if (actionable && entry.action?.type === 'overseerr-request') {
     const act = async (verb, event) => {
       event.stopPropagation();
-      try { await ctx.api.seerr(entry.serviceKey).post(`request/${entry.action.requestId}/${verb}`); toast(`Request ${verb}d`, 'success'); await hydrateOperations(ctx); }
+      try { await ctx.api.seerr(entry.serviceKey).post(`request/${entry.action.requestId}/${verb}`); toast(`Request ${verb}d`, 'success'); await hydrateOperations(ctx, false, true); }
       catch (error) { toast(error.message, 'error'); }
     };
     actions = actionGroup([
@@ -872,8 +915,18 @@ async function hydrateCardStats(svc, ctx) {
       const q = (queue && queue.records) ? queue.records.length : 0;
       mount(el, stat(count, svc.type === 'lidarr' ? 'Artists' : 'Authors'), stat(q, 'Queue'));
     } else if (svc.type === 'overseerr') {
-      const counts = await api.seerr(svc.key).get('request/count');
-      mount(el, stat(counts.pending ?? 0, 'Pending'), stat(counts.total ?? 0, 'Requests'));
+      const cacheKey = `acc:overview:v1:${overviewScope(ctx)}:seerr-count:${svc.key}`;
+      const renderCounts = (counts) => {
+        if (!el.isConnected || !counts) return;
+        mount(el, stat(counts.pending ?? 0, 'Pending'), stat(counts.total ?? 0, 'Requests'));
+      };
+      const result = await persistentSWR(cacheKey, () => api.seerr(svc.key).get('request/count'), {
+        ttl: 2 * 60 * 1000,
+        maxAge: 86400000,
+        validate: (value) => !!value && typeof value === 'object',
+      });
+      renderCounts(result.data);
+      result.refresh?.then(renderCounts).catch(() => { /* retain cached counts */ });
     } else if (svc.type === 'sabnzbd') {
       const data = await api.sab(svc.key, { mode: 'queue' });
       const q = data.queue || {};
@@ -930,14 +983,17 @@ function buildActivityToggles(ctx) {
 }
 
 // ---- Activity list ----
-const detailCache = new Map();
 async function seerrDetail(ctx, key, mediaType, tmdbId) {
   if (!tmdbId) return null;
-  const ck = `${key}:${mediaType}:${tmdbId}`;
-  if (detailCache.has(ck)) return detailCache.get(ck);
-  const p = ctx.api.seerr(key).get(`${mediaType === 'tv' ? 'tv' : 'movie'}/${tmdbId}`).catch(() => null);
-  detailCache.set(ck, p);
-  return p;
+  const cacheKey = `acc:overview:v1:${overviewScope(ctx)}:seerr-detail:${key}:${mediaType}:${tmdbId}`;
+  const result = await persistentSWR(cacheKey,
+    () => ctx.api.seerr(key).get(`${mediaType === 'tv' ? 'tv' : 'movie'}/${tmdbId}`), {
+      ttl: 24 * 60 * 60 * 1000,
+      maxAge: 30 * 86400000,
+      validate: (value) => !!value && typeof value === 'object',
+    });
+  result.refresh?.catch(() => { /* keep cached title/poster details */ });
+  return result.data;
 }
 
 async function hydrateActivity(ctx, silent = false) {
