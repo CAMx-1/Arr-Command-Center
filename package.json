@@ -21,6 +21,7 @@
     "@capacitor/browser": "^6.0.6",
     "@capacitor/cli": "^6.2.2",
     "@capacitor/core": "^6.2.2",
+    "@capacitor/haptics": "6.0.3",
     "@capacitor/ios": "^6.2.2",
     "express": "^4.22.2",
     "web-push": "^3.6.7"

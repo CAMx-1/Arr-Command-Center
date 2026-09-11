@@ -55,7 +55,7 @@ async function directFetch(url, opts = {}) {
     }
     return new Response(body, { status: res.status || 200, headers: respHeaders });
   } catch (e) {
-    return new Response(JSON.stringify({ error: (e && e.message) || 'Network error' }), { status: 0, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ error: (e && e.message) || 'Network error' }), { status: 502, headers: { 'content-type': 'application/json' } });
   }
 }
 let _installed = false;

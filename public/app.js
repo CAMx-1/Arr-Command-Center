@@ -1,5 +1,6 @@
 import { api } from './lib/api.js';
 import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, debounce, spinner, empty, poster, fmtBytes, copyable, registerOverlay, closeOverlay, unregisterOverlay, overlayOpen } from './lib/ui.js';
+import { haptic } from './lib/haptics.js';
 // Local (direct) mode: installs a fetch shim that services /api/* on-device
 // when enabled. Imported first so it wraps fetch before any request is made.
 import './lib/localBackend.js';
@@ -279,6 +280,7 @@ function buildHive() {
     class: `hive-cell hive-${c.kind} ${c.active ? 'active' : ''}`, title: c.title,
     dataset: c.key ? { svcKey: c.key } : null,
     onclick: (e) => {
+      haptic();
       if (c.kind === 'more') { e.stopPropagation(); hiveExpanded = !hiveExpanded; buildHive(); return; }
       closeSidebarMobile(); hiveExpanded = false; c.onClick();
     },
@@ -388,8 +390,6 @@ function updateStatusDots() {
 }
 
 // ---------- Mobile hex bottom navigation ----------
-// Short vibration on tap where supported (no-op on desktop / unsupported).
-function haptic(ms = 10) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch { /* ignore */ } }
 
 // User-pinned quick-picks for the bottom bar (max 4). Falls back to nav order.
 function loadPinned() { try { return JSON.parse(localStorage.getItem('bn:pinned') || '[]'); } catch { return []; } }
@@ -584,13 +584,37 @@ function renderAllServicesGrid() {
   const nav = orderServices(base).filter((s) => !isHidden(s.key));
   const pinBtn = (svc) => h('span', { class: `allsvc-pin ${isPinned(svc.key) ? 'on' : ''}`, role: 'button',
     title: isPinned(svc.key) ? 'Unpin from bottom bar' : 'Pin to bottom bar',
+    onpointerup: (e) => { e.stopPropagation(); },
     onclick: (e) => { e.stopPropagation(); haptic(); togglePinned(svc.key); renderAllServicesGrid(); } }, isPinned(svc.key) ? '\u2605' : '\u2606');
-  const item = (label, active, icon, onClick, dot, svc) => h('button', { class: 'allsvc-item', onclick: () => { haptic(); selectAllService(onClick); } },
-    h('span', { class: 'allsvc-hexwrap' },
-      h('span', { class: `bn-hex ${active ? 'active' : ''}`, dataset: svc ? { svcKey: svc.key } : null }, dot ? h('span', { class: `hive-dot ${dot}` }) : null, h('span', { class: 'hive-icon' }, icon)),
-      svc ? pinBtn(svc) : null,
-    ),
-    h('span', { class: 'allsvc-label' }, label));
+  let lastTouchActivation = 0;
+  const item = (label, active, icon, onClick, dot, svc) => {
+    const activate = (e) => {
+      // iOS can delay or suppress the synthetic click after a touch inside a
+      // transformed/scrolling sheet. Activate on pointerup for touch/pen, then
+      // swallow the duplicate click. Mouse/keyboard continue through click.
+      if (e && e.type === 'pointerup') {
+        if (e.pointerType === 'mouse' || e.isPrimary === false) return;
+        e.preventDefault();
+        lastTouchActivation = Date.now();
+      } else if (Date.now() - lastTouchActivation < 700) {
+        e && e.preventDefault();
+        return;
+      }
+      haptic();
+      selectAllService(onClick);
+    };
+    return h('button', {
+      class: 'allsvc-item',
+      style: { touchAction: 'manipulation' },
+      onpointerup: activate,
+      onclick: activate,
+    },
+      h('span', { class: 'allsvc-hexwrap' },
+        h('span', { class: `bn-hex ${active ? 'active' : ''}`, dataset: svc ? { svcKey: svc.key } : null }, dot ? h('span', { class: `hive-dot ${dot}` }) : null, h('span', { class: 'hive-icon' }, icon)),
+        svc ? pinBtn(svc) : null,
+      ),
+      h('span', { class: 'allsvc-label' }, label));
+  };
   const items = [
     item('Home', route === 'home', hiveImg('/icons/home-icon.png'), () => { location.hash = '#/home'; }),
     // Search is a global tool (not a pinnable service). Selecting it closes the
