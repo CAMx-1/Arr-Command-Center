@@ -44,7 +44,7 @@ function plexHeaders(clientId, product) {
   };
 }
 
-export function createPlexAuth(cfg, { root, publicDir }) {
+export function createPlexAuth(cfg, { root, publicDir, authStore = store }) {
   const pcfg = (cfg.auth && cfg.auth.plex) || {};
   const enabled = !!pcfg.enabled;
   const product = pcfg.product || 'Arr Command Center';
@@ -86,9 +86,21 @@ export function createPlexAuth(cfg, { root, publicDir }) {
   }
 
   function sessionCookie(value, maxAge) {
-    const parts = [`${COOKIE}=${encodeURIComponent(value)}`, 'Path=/', 'HttpOnly', 'SameSite=Strict'];
+    const age = Math.max(0, Math.floor(Number(maxAge) || 0));
+    // Native launches enter from capacitor://localhost, which is cross-site to
+    // the HTTPS server. Lax includes this cookie on that safe top-level GET,
+    // while still withholding it from cross-site POST/fetch requests. Expires
+    // complements Max-Age for persistent-cookie compatibility in WKWebView.
+    const expires = age > 0 ? new Date(Date.now() + age * 1000) : new Date(0);
+    const parts = [
+      `${COOKIE}=${encodeURIComponent(value)}`,
+      'Path=/',
+      'HttpOnly',
+      'SameSite=Lax',
+      `Max-Age=${age}`,
+      `Expires=${expires.toUTCString()}`,
+    ];
     if (secureCookies) parts.push('Secure');
-    parts.push(`Max-Age=${maxAge}`);
     return parts.join('; ');
   }
 
@@ -155,9 +167,9 @@ export function createPlexAuth(cfg, { root, publicDir }) {
       // dashboard can call the Plex API (watchlist, users, sessions). Also log
       // the successful login.
       const uname = user.username || user.email;
-      try { store.set('plex', { token: data.authToken, user: uname, at: Date.now() }); } catch { /* best effort */ }
+      try { authStore.set('plex', { token: data.authToken, user: uname, at: Date.now() }); } catch { /* best effort */ }
       try {
-        store.push('loginLog', {
+        authStore.push('loginLog', {
           user: uname, at: Date.now(),
           ip: (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '',
           ua: req.headers['user-agent'] || '',
