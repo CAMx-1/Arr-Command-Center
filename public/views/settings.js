@@ -8,6 +8,7 @@ import * as push from '../lib/push.js';
 import { renderQueueCleaner, renderHunting } from '../lib/automationUI.js';
 import { dashboardSettingsCard } from '../lib/dashboardSettings.js';
 import { getSysmonPrefs, setSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
+import { getAppMode, setAppMode, isLocalMode, getConnection, setConnection, removeConnection } from '../lib/connections.js';
 
 export async function renderSettings(root, ctx) {
   const { api, state } = ctx;
@@ -20,6 +21,7 @@ export async function renderSettings(root, ctx) {
   try { status = await api.status(); state.status = status; } catch { /* ignore */ }
 
   const cfg = state.config || { services: {} };
+  const localMode = isLocalMode();
 
   const general = h('div', { class: 'card' },
     h('h3', {}, 'General'),
@@ -112,38 +114,40 @@ export async function renderSettings(root, ctx) {
   mount(root,
     h('div', { class: 'section-title' }, 'General'),
     general,
+    h('div', { class: 'section-title' }, 'Connection'),
+    connectionModeCard(root, ctx),
     h('div', { class: 'section-title' }, 'Appearance'),
     appearanceCard(root, ctx),
     h('div', { class: 'section-title' }, 'System monitor'),
-    systemMonitorCard(root, ctx),
+    localMode ? serverOnlyCard('The system monitor') : systemMonitorCard(root, ctx),
     h('div', { class: 'section-title' }, 'Overview Layout'),
     dashboardSettingsCard(ctx),
     h('div', { class: 'section-title' }, 'Notifications'),
-    h('div', { class: 'card', id: 'push-panel' }, h('div', { class: 'dim' }, 'Loading…')),
+    localMode ? serverOnlyCard('Notifications') : h('div', { class: 'card', id: 'push-panel' }, h('div', { class: 'dim' }, 'Loading…')),
     h('div', { class: 'section-title' }, 'Automation'),
-    h('div', { class: 'card', id: 'automation-panel' }, h('div', { class: 'dim' }, 'Loading…')),
+    localMode ? serverOnlyCard('Automation') : h('div', { class: 'card', id: 'automation-panel' }, h('div', { class: 'dim' }, 'Loading…')),
     h('div', { class: 'section-title' }, 'Services'),
     h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', margin: '-4px 0 12px' } },
-      h('div', { class: 'dim', style: { fontSize: '13px', flex: '1' } }, 'Drag a service card to reorder it, and use Hide to remove one from the sidebar and Home (it stays configured and reachable directly).'),
-      cfg.mock ? null : h('button', { class: 'btn sm primary hex-btn', onclick: () => openServiceForm(root, ctx, null, null) }, '＋ Add service'),
+      h('div', { class: 'dim', style: { fontSize: '13px', flex: '1' } }, localMode ? 'Manage local connections under “Connection” above. Drag a service card to reorder it, or Hide it from the sidebar and Home.' : 'Drag a service card to reorder it, and use Hide to remove one from the sidebar and Home (it stays configured and reachable directly).'),
+      (cfg.mock || localMode) ? null : h('button', { class: 'btn sm primary hex-btn', onclick: () => openServiceForm(root, ctx, null, null) }, '＋ Add service'),
     ),
     h('div', { class: 'grid cols-2' }, ...serviceCards),
     h('div', { class: 'section-title' }, 'About'),
     note,
     h('div', { class: 'section-title' }, 'Diagnostics'),
-    h('div', { class: 'card', id: 'diag-panel' }, h('div', { class: 'dim' }, 'Loading diagnostics…')),
+    localMode ? serverOnlyCard('Diagnostics') : h('div', { class: 'card', id: 'diag-panel' }, h('div', { class: 'dim' }, 'Loading diagnostics…')),
     h('div', { class: 'section-title' }, 'Custom Links'),
-    h('div', { class: 'card', id: 'links-admin' }, h('div', { class: 'dim' }, 'Loading…')),
-    (cfg.auth && cfg.auth.plexEnabled) ? h('div', { class: 'section-title' }, 'Login log') : null,
-    (cfg.auth && cfg.auth.plexEnabled) ? h('div', { class: 'card', id: 'loginlog-panel' }, h('div', { class: 'dim' }, 'Loading…')) : null,
+    localMode ? serverOnlyCard('Custom Links') : h('div', { class: 'card', id: 'links-admin' }, h('div', { class: 'dim' }, 'Loading…')),
+    (!localMode && cfg.auth && cfg.auth.plexEnabled) ? h('div', { class: 'section-title' }, 'Login log') : null,
+    (!localMode && cfg.auth && cfg.auth.plexEnabled) ? h('div', { class: 'card', id: 'loginlog-panel' }, h('div', { class: 'dim' }, 'Loading…')) : null,
   );
 
-  hydrateDiagnostics(ctx);
-  hydrateLinksAdmin(ctx);
-  hydrateNotifications(ctx);
-  hydrateAutomation();
-  hydrateSystemMonitor(ctx);
-  if (cfg.auth && cfg.auth.plexEnabled) hydrateLoginLog(ctx);
+  if (!localMode) hydrateDiagnostics(ctx);
+  if (!localMode) hydrateLinksAdmin(ctx);
+  if (!localMode) hydrateNotifications(ctx);
+  if (!localMode) hydrateAutomation();
+  if (!localMode) hydrateSystemMonitor(ctx);
+  if (!localMode && cfg.auth && cfg.auth.plexEnabled) hydrateLoginLog(ctx);
 }
 
 async function hydrateLinksAdmin(ctx) {
@@ -264,6 +268,91 @@ function settingRow(label, value) {
   return h('div', { class: 'setting-row' },
     h('span', { class: 'dim' }, label),
     h('span', { class: 'right' }, value),
+  );
+}
+
+// A placeholder card for sections that need the companion server (shown greyed
+// in local mode).
+function serverOnlyCard(what) {
+  return h('div', { class: 'card server-only-card' },
+    h('div', { class: 'dim', style: { lineHeight: '1.6' } },
+      `${what} requires the companion server. Switch Connection mode to “Server” to use it.`),
+  );
+}
+
+// Connection mode: Server (proxy through the backend) vs Local (talk directly to
+// services from this device — currently Sonarr). In local mode a connection
+// form is shown; server-only features are greyed out elsewhere.
+function connectionModeCard(root, ctx) {
+  const mode = getAppMode();
+  const modeBtn = (val, label) => h('button', {
+    class: `btn sm hex-btn ${mode === val ? 'primary' : ''}`,
+    onclick: () => { if (getAppMode() === val) return; setAppMode(val); location.reload(); },
+  }, label);
+  const rows = [
+    settingRow('Connection mode', h('span', { style: { display: 'flex', gap: '8px' } }, modeBtn('server', 'Server'), modeBtn('local', 'Local only'))),
+    h('div', { class: 'dim', style: { fontSize: '12px', marginTop: '8px' } },
+      mode === 'local'
+        ? 'Local mode talks directly to your services from this device — no backend proxy. Enter each service below. Server-only features (system monitor, notifications, automation) are unavailable.'
+        : 'Server mode routes everything through the Arr Command Center backend (API keys + Cloudflare Access injected server-side).'),
+  ];
+  if (mode === 'local') rows.push(sonarrConnectionForm(root, ctx));
+  return h('div', { class: 'card' }, ...rows);
+}
+
+function sonarrConnectionForm(root, ctx) {
+  const conn = getConnection('sonarr') || {};
+  const label = h('input', { class: 'input', value: conn.label || 'Sonarr', placeholder: 'Sonarr' });
+  const url = h('input', { class: 'input', type: 'url', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', value: conn.baseUrl || '', placeholder: 'https://sonarr.example.com' });
+  const key = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', value: conn.apiKey || '', placeholder: 'Sonarr API key (Settings → General)' });
+  const cfId = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', value: conn.cfClientId || '', placeholder: 'CF-Access-Client-Id (optional)' });
+  const cfSecret = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', value: conn.cfClientSecret || '', placeholder: 'CF-Access-Client-Secret (optional)' });
+  const status = h('div', { class: 'dim', style: { fontSize: '12px', minHeight: '16px', margin: '2px 0' } });
+
+  const collect = () => ({
+    type: 'sonarr',
+    label: (label.value || 'Sonarr').trim(),
+    baseUrl: (url.value || '').trim().replace(/\/+$/, ''),
+    apiKey: (key.value || '').trim(),
+    cfClientId: (cfId.value || '').trim(),
+    cfClientSecret: (cfSecret.value || '').trim(),
+  });
+  const save = () => {
+    const c = collect();
+    if (!/^https?:\/\/.+/i.test(c.baseUrl)) { status.textContent = 'Enter a valid URL (http(s)://…)'; return; }
+    if (!c.apiKey) { status.textContent = 'API key is required'; return; }
+    setConnection('sonarr', c);
+    location.reload();
+  };
+  const test = async () => {
+    const c = collect();
+    if (!/^https?:\/\/.+/i.test(c.baseUrl) || !c.apiKey) { status.textContent = 'Enter URL and API key first'; return; }
+    setConnection('sonarr', c);
+    status.textContent = 'Testing…';
+    try {
+      const r = await ctx.api.status();
+      const s = r && r.sonarr;
+      status.textContent = s && s.ok ? `Connected${s.version ? ` · v${s.version}` : ''}` : `Failed: ${(s && s.error) || 'unreachable'}`;
+    } catch (e) { status.textContent = `Failed: ${e.message}`; }
+  };
+  const remove = () => { removeConnection('sonarr'); location.reload(); };
+
+  const field = (lbl, input) => h('label', { class: 'pw-field', style: { display: 'block', margin: '8px 0' } },
+    h('span', { class: 'dim', style: { fontSize: '12px', display: 'block', marginBottom: '4px' } }, lbl), input);
+
+  return h('div', { class: 'local-conn', style: { marginTop: '12px', borderTop: '1px solid var(--border)', paddingTop: '12px' } },
+    h('div', { style: { fontWeight: '700', marginBottom: '4px' } }, 'Sonarr'),
+    field('Label', label),
+    field('Server URL', url),
+    field('API key', key),
+    field('Cloudflare Access — Client Id', cfId),
+    field('Cloudflare Access — Client Secret', cfSecret),
+    status,
+    h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+      h('button', { class: 'btn sm primary hex-btn', onclick: save }, 'Save'),
+      h('button', { class: 'btn sm hex-btn', onclick: test }, 'Test'),
+      conn.baseUrl ? h('button', { class: 'btn sm danger hex-btn', onclick: remove }, 'Remove') : null,
+    ),
   );
 }
 

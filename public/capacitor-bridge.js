@@ -83,6 +83,11 @@
   // ---------------------------------------------------------------------------
   if (!native) return;
 
+  // Local (direct) mode: the app talks straight to services from the device via
+  // the local-backend shim (see lib/localBackend.js) — no server bootstrap or
+  // navigation. Let the SPA boot normally.
+  try { if (localStorage.getItem('acc:app-mode') === 'local') return; } catch (e) { /* ignore */ }
+
   // Stop the SPA from booting into a broken (no-API) state on capacitor://localhost.
   window.__ACC_SETUP_REQUIRED__ = true;
 
@@ -118,11 +123,17 @@
           'style="width:100%;box-sizing:border-box;padding:14px 14px;font-size:16px;border-radius:12px;border:1px solid #4d576c;background:#252a39;color:#eceef4" />' +
         '<div id="acc-connect-err" style="color:#f87171;font-size:13px;min-height:18px;margin:8px 2px"></div>' +
         '<button id="acc-connect-go" style="width:100%;padding:15px;font-size:16px;font-weight:700;border:none;border-radius:12px;color:#fff;background:linear-gradient(90deg,#6366f1,#a855f7 55%,#ec4899);cursor:pointer">Continue to sign in</button>' +
+        '<button id="acc-connect-local" style="width:100%;margin-top:10px;padding:12px;font-size:14px;font-weight:600;border:1px solid #4d576c;border-radius:12px;color:#cbd2e0;background:transparent;cursor:pointer">Use local mode (connect to services directly)</button>' +
       '</div>';
     document.body.appendChild(wrap);
     var input = document.getElementById('acc-connect-url');
     var err = document.getElementById('acc-connect-err');
     var go = document.getElementById('acc-connect-go');
+    var localBtn = document.getElementById('acc-connect-local');
+    if (localBtn) localBtn.addEventListener('click', function () {
+      try { localStorage.setItem('acc:app-mode', 'local'); } catch (e) { /* ignore */ }
+      location.reload();
+    });
     var submit = function () {
       var v = (input.value || '').trim();
       if (!/^https?:\/\/.+/i.test(v)) { err.textContent = 'Enter a full URL, e.g. https://host:7373'; return; }

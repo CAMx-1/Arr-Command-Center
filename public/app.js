@@ -1,5 +1,8 @@
 import { api } from './lib/api.js';
 import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, debounce, spinner, empty, poster, fmtBytes, copyable, registerOverlay, closeOverlay, overlayOpen } from './lib/ui.js';
+// Local (direct) mode: installs a fetch shim that services /api/* on-device
+// when enabled. Imported first so it wraps fetch before any request is made.
+import './lib/localBackend.js';
 import { orderServices, isHidden } from './lib/servicePrefs.js';
 import { splitHive, flyoutLayout } from './lib/hiveLayout.js';
 import { hiveSignature, statusDotClass } from './lib/hiveState.js';
