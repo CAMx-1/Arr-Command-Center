@@ -5,7 +5,7 @@ import { bulkLibrary } from './bulk.js';
 import { tabSystem, tabWanted } from './arrSystem.js';
 import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
-import { cachedGet, invalidate } from '../lib/cache.js';
+import { cachedGet, cachedList, invalidate } from '../lib/cache.js';
 import { libraryFilter, consumePendingFilter } from '../lib/libraryFilter.js';
 import { tagEditor, arrCommandBar, loadTags, openManualImport } from '../lib/arrActions.js';
 import { compactTable } from '../lib/tableView.js';
@@ -71,7 +71,7 @@ function historyRow(r) {
 async function tabSeries(root, arr, ctx) {
   mount(root, skeletonList());
   try {
-    const series = [...await cachedGet(`arr:${ctx.service.key}:series`, () => arr.get('series'), 300000)];
+    const series = [...await cachedList(`arr:${ctx.service.key}:series`, () => arr.get('series'), 300000, 'Sonarr series')];
     series.sort((a, b) => a.title.localeCompare(b.title));
     if (!series.length) return mount(root, empty('', 'No series yet', 'Add a series to get started', { label: '＋ Add Series', onClick: () => openAddModal(arr, ctx) }));
     const mode = ['hex', 'list', 'table'].includes(ctx.params.mode) ? ctx.params.mode : effectiveMode(ctx.service.key);

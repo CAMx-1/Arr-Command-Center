@@ -6,7 +6,7 @@ import { bulkLibrary } from './bulk.js';
 import { tabSystem, tabWanted } from './arrSystem.js';
 import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
-import { cachedGet, invalidate } from '../lib/cache.js';
+import { cachedGet, cachedList, invalidate } from '../lib/cache.js';
 import { libraryFilter, consumePendingFilter } from '../lib/libraryFilter.js';
 import { tagEditor, arrCommandBar, loadTags, openManualImport } from '../lib/arrActions.js';
 import { compactTable } from '../lib/tableView.js';
@@ -103,7 +103,7 @@ function historyRow(r) {
 async function tabMovies(root, arr, ctx) {
   mount(root, skeletonList());
   try {
-    const movies = [...await cachedGet(`arr:${ctx.service.key}:movie`, () => arr.get('movie'), 300000)];
+    const movies = [...await cachedList(`arr:${ctx.service.key}:movie`, () => arr.get('movie'), 300000, 'Radarr movies')];
     movies.sort((a, b) => a.title.localeCompare(b.title));
     if (!movies.length) return mount(root, empty('', 'No movies yet', 'Add a movie to get started', { label: '＋ Add Movie', onClick: () => openAddModal(arr, ctx) }));
     const mode = ['hex', 'list', 'table'].includes(ctx.params.mode) ? ctx.params.mode : effectiveMode(ctx.service.key);

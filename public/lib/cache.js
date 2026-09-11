@@ -26,6 +26,16 @@ export async function cachedGet(key, fetcher, ttl = 300000) {
   return run(key); // cold: fetch and cache
 }
 
+// Fetch and cache an endpoint that must return a JSON array. A 2xx response
+// with an empty/malformed body can parse as null; never retain that value or a
+// Retry action will keep replaying the same poisoned cache entry.
+export async function cachedList(key, fetcher, ttl = 300000, label = 'Service') {
+  const data = await cachedGet(key, fetcher, ttl);
+  if (Array.isArray(data)) return data;
+  invalidate(key);
+  throw new TypeError(`${label} returned an invalid list response`);
+}
+
 export function invalidate(key) { store.delete(key); }
 
 // Background ticker: refresh any stale registered entry so data is updated behind
