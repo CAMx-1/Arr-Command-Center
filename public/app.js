@@ -1,6 +1,7 @@
 import { api } from './lib/api.js';
 import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, debounce, spinner, empty, poster, fmtBytes, copyable, registerOverlay, closeOverlay, unregisterOverlay, overlayOpen } from './lib/ui.js';
 import { haptic } from './lib/haptics.js';
+import { reliableActivation } from './lib/tapActivation.js';
 // Local (direct) mode: installs a fetch shim that services /api/* on-device
 // when enabled. Imported first so it wraps fetch before any request is made.
 import './lib/localBackend.js';
@@ -585,29 +586,19 @@ function renderAllServicesGrid() {
   const pinBtn = (svc) => h('span', { class: `allsvc-pin ${isPinned(svc.key) ? 'on' : ''}`, role: 'button',
     title: isPinned(svc.key) ? 'Unpin from bottom bar' : 'Pin to bottom bar',
     onpointerup: (e) => { e.stopPropagation(); },
+    ontouchend: (e) => { e.stopPropagation(); },
     onclick: (e) => { e.stopPropagation(); haptic(); togglePinned(svc.key); renderAllServicesGrid(); } }, isPinned(svc.key) ? '\u2605' : '\u2606');
-  let lastTouchActivation = 0;
   const item = (label, active, icon, onClick, dot, svc) => {
-    const activate = (e) => {
-      // iOS can delay or suppress the synthetic click after a touch inside a
-      // transformed/scrolling sheet. Activate on pointerup for touch/pen, then
-      // swallow the duplicate click. Mouse/keyboard continue through click.
-      if (e && e.type === 'pointerup') {
-        if (e.pointerType === 'mouse' || e.isPrimary === false) return;
-        e.preventDefault();
-        lastTouchActivation = Date.now();
-      } else if (Date.now() - lastTouchActivation < 700) {
-        e && e.preventDefault();
-        return;
-      }
-      haptic();
+    const activation = reliableActivation(() => {
+      // Complete the history-safe route change before crossing the native
+      // haptics bridge, so WKWebView cannot reclassify the in-flight gesture.
       selectAllService(onClick);
-    };
+      haptic();
+    });
     return h('button', {
       class: 'allsvc-item',
       style: { touchAction: 'manipulation' },
-      onpointerup: activate,
-      onclick: activate,
+      ...activation,
     },
       h('span', { class: 'allsvc-hexwrap' },
         h('span', { class: `bn-hex ${active ? 'active' : ''}`, dataset: svc ? { svcKey: svc.key } : null }, dot ? h('span', { class: `hive-dot ${dot}` }) : null, h('span', { class: 'hive-icon' }, icon)),
