@@ -122,7 +122,17 @@ btn.addEventListener('click', async () => {
       method: 'POST',
       headers: forwardUrl ? { 'content-type': 'application/json' } : undefined,
       body: forwardUrl ? JSON.stringify({ forwardUrl }) : undefined,
+      redirect: 'manual', // don't silently follow a Cloudflare Access 302
     });
+
+    // Diagnostic: if Cloudflare Access intercepted this API call (302 / opaque
+    // redirect / non-JSON), the request never reached our server. Surface it
+    // clearly instead of hanging.
+    const ct = r.headers.get('content-type') || '';
+    if (r.type === 'opaqueredirect' || r.status === 0 || (r.status >= 300 && r.status < 400) || !ct.includes('application/json')) {
+      throw new Error(`AUTH-EDGE: status=${r.status} type=${r.type} ct=${ct || 'none'} — the API call did not reach the server (Cloudflare Access blocked it). The app needs a Cloudflare service token or a bypass policy for /api/auth/*.`);
+    }
+
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Could not start Plex sign-in');
 
