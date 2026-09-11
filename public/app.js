@@ -1,6 +1,6 @@
 import { api } from './lib/api.js';
 import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, debounce, spinner, empty, poster, fmtBytes, copyable, registerOverlay, closeOverlay, unregisterOverlay, overlayOpen } from './lib/ui.js';
-import { haptic } from './lib/haptics.js';
+import { haptic, installHapticFeedback } from './lib/haptics.js';
 import { reliableActivation } from './lib/tapActivation.js';
 // Local (direct) mode: installs a fetch shim that services /api/* on-device
 // when enabled. Imported first so it wraps fetch before any request is made.
@@ -1139,6 +1139,7 @@ async function init() {
   // Native app first-run: the Capacitor bridge shows a "connect to server"
   // screen when no server is configured — don't boot the app into a no-API state.
   if (window.__ACC_SETUP_REQUIRED__) return;
+  installHapticFeedback(document);
   initAppearance();
   initDensity();
   // Own scroll restoration so route/history-aware logic (see navigate) controls
