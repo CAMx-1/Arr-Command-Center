@@ -80,7 +80,7 @@
     }
   },
   "system": {
-    "_comment": "Optional. Paths shown as disk-usage hexes when the System monitor is enabled in Settings. Defaults to the filesystem root. Can also be set via the SYSTEM_DISKS env (comma-separated).",
+    "_comment": "Optional. Restricts which disk paths the system monitor can offer. When omitted, the server auto-discovers mounted disks (Linux) or falls back to the filesystem root. Can also be set via the SYSTEM_DISKS env (comma-separated). Choose which of the reported disks to actually show from Settings → System monitor.",
     "disks": ["/", "/media"]
   }
 }

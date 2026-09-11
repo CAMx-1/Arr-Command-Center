@@ -5,7 +5,7 @@ import { visibleServices } from '../lib/servicePrefs.js';
 import { loadDashboards, activeDashboard } from '../lib/dashboardPrefs.js';
 import { actionGroup } from '../lib/actions.js';
 import { hive, posterHexCard } from '../lib/hive.js';
-import { getSysmonPrefs } from '../lib/systemMonitor.js';
+import { getSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
 
 // ---- Activity source definitions ----
 const ACTIVITY_DEFS = [
@@ -700,11 +700,15 @@ function systemNetHex(net) {
   });
 }
 
+// Stable per-disk hex id derived from the mount path (so selection/filtering
+// never desyncs the in-place value updates from the rendered hexes).
+const diskHexId = (p) => 'sys-hex-disk-' + (String(p).replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || 'root');
+
 function buildSystemCells(sys, prefs) {
   const cells = [];
   if (prefs.cpu) { const el = systemCpuHex(sys); el.id = 'sys-hex-cpu'; cells.push(el); }
   if (prefs.memory) { const el = systemMemHex(sys); el.id = 'sys-hex-mem'; cells.push(el); }
-  if (prefs.disk) (sys.disks || []).forEach((d, i) => { const el = systemDiskHex(d); el.id = `sys-hex-disk-${i}`; cells.push(el); });
+  if (prefs.disk) (sys.disks || []).filter((d) => diskVisible(d.path, prefs)).forEach((d) => { const el = systemDiskHex(d); el.id = diskHexId(d.path); cells.push(el); });
   if (prefs.network && sys.net) { const el = systemNetHex(sys.net); el.id = 'sys-hex-net'; cells.push(el); }
   return cells;
 }
@@ -724,8 +728,8 @@ function patchGraphHex(id, value, history) {
 function updateSystemHexes(sys) {
   patchGraphHex('sys-hex-cpu', (sys.cpu && sys.cpu.percent) || 0, sysHistory.cpu);
   patchGraphHex('sys-hex-mem', (sys.mem && sys.mem.percent) || 0, sysHistory.mem);
-  (sys.disks || []).forEach((d, i) => {
-    const el = document.getElementById(`sys-hex-disk-${i}`);
+  (sys.disks || []).forEach((d) => {
+    const el = document.getElementById(diskHexId(d.path));
     if (!el) return;
     const dot = el.querySelector('.hex-dot');
     const vals = el.querySelectorAll('.stat-value');

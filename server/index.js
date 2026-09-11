@@ -203,13 +203,13 @@ app.get('/api/diagnostics', (req, res) => {
 
 // Host system stats (CPU / memory / disks / network) for the optional Overview
 // "system monitor" hexes. Disk paths come from config.system.disks or the
-// SYSTEM_DISKS env (comma-separated), defaulting to the filesystem root.
+// SYSTEM_DISKS env (comma-separated); when unset, the server auto-discovers
+// mounted disks. The UI chooses which of the reported disks to display.
 function systemDiskPaths() {
   const fromCfg = cfg.system && Array.isArray(cfg.system.disks) ? cfg.system.disks : null;
   const fromEnv = process.env.SYSTEM_DISKS ? process.env.SYSTEM_DISKS.split(',').map((s) => s.trim()).filter(Boolean) : null;
   const list = (fromCfg && fromCfg.length ? fromCfg : null) || (fromEnv && fromEnv.length ? fromEnv : null);
-  if (list && list.length) return list.map((p) => String(p)).slice(0, 12);
-  return [path.parse(ROOT).root || '/'];
+  return list && list.length ? list.map((p) => String(p)).slice(0, 24) : undefined;
 }
 app.get('/api/system', async (req, res) => {
   try {

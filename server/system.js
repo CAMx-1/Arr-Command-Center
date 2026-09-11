@@ -74,10 +74,47 @@ async function networkThroughput() {
   return { rxSec, txSec, totalRx: rx, totalTx: tx };
 }
 
-export async function getSystemStats({ disks = [] } = {}) {
+// Default filesystem root for the current platform (fallback when we can't
+// enumerate mounts, e.g. macOS/Windows).
+function defaultRoot() { return process.platform === 'win32' ? `${process.env.SystemDrive || 'C:'}\\` : '/'; }
+
+// Enumerate real (non-pseudo) mount points from /proc/mounts. Linux-only; other
+// platforms return null (callers fall back to the configured list or root).
+async function listMounts() {
+  let txt;
+  try { txt = await fsp.readFile('/proc/mounts', 'utf8'); }
+  catch { return null; }
+  const seen = new Set();
+  const mounts = [];
+  for (const line of txt.split('\n')) {
+    const [dev, rawMnt, type] = line.split(/\s+/);
+    if (!dev || !rawMnt) continue;
+    // Real block devices + network shares only; skip pseudo/virtual filesystems.
+    const isReal = dev.startsWith('/dev/') || /^(nfs|nfs4|cifs|smb3?|fuse\.)/.test(type || '');
+    if (!isReal) continue;
+    const mnt = rawMnt.replace(/\\040/g, ' ').replace(/\\011/g, '\t');
+    if (mnt.startsWith('/boot') || mnt.startsWith('/snap') || seen.has(mnt)) continue;
+    seen.add(mnt);
+    mounts.push(mnt);
+  }
+  mounts.sort((a, b) => a.length - b.length || a.localeCompare(b));
+  return mounts;
+}
+
+// Resolve which disk paths to report: an explicit list when provided (config /
+// env), otherwise every discovered mount, otherwise the filesystem root.
+async function resolveDiskPaths(disks) {
+  if (Array.isArray(disks) && disks.length) return disks.slice(0, 24);
+  const mounts = await listMounts();
+  if (mounts && mounts.length) return mounts.slice(0, 24);
+  return [defaultRoot()];
+}
+
+export async function getSystemStats({ disks } = {}) {
+  const paths = await resolveDiskPaths(disks);
   const [cpu, disksOut, net] = await Promise.all([
     cpuPercent(),
-    diskUsage(disks),
+    diskUsage(paths),
     networkThroughput(),
   ]);
   const total = os.totalmem();

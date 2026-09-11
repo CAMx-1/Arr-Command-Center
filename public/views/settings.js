@@ -1,4 +1,4 @@
-import { h, mount, clear, spinner, svcIcon, confirmModal, openModal, closeModal, toast, tabs } from '../lib/ui.js';
+import { h, mount, clear, spinner, svcIcon, confirmModal, openModal, closeModal, toast, tabs, fmtBytes } from '../lib/ui.js';
 import { SERVICE_META } from '../app.js';
 import { getTheme, getAccent, applyTheme, applyAccent, ACCENTS, ACCENT_NAMES } from '../lib/theme.js';
 import { globalMode, setGlobalMode } from '../lib/viewMode.js';
@@ -7,7 +7,7 @@ import { isHidden, setHidden, orderServices, setOrder } from '../lib/servicePref
 import * as push from '../lib/push.js';
 import { renderQueueCleaner, renderHunting } from '../lib/automationUI.js';
 import { dashboardSettingsCard } from '../lib/dashboardSettings.js';
-import { getSysmonPrefs, setSysmonPrefs } from '../lib/systemMonitor.js';
+import { getSysmonPrefs, setSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
 
 export async function renderSettings(root, ctx) {
   const { api, state } = ctx;
@@ -142,6 +142,7 @@ export async function renderSettings(root, ctx) {
   hydrateLinksAdmin(ctx);
   hydrateNotifications(ctx);
   hydrateAutomation();
+  hydrateSystemMonitor(ctx);
   if (cfg.auth && cfg.auth.plexEnabled) hydrateLoginLog(ctx);
 }
 
@@ -282,12 +283,45 @@ function systemMonitorCard(root, ctx) {
       settingRow('CPU', onOff('cpu')),
       settingRow('Memory', onOff('memory')),
       settingRow('Disk usage', onOff('disk')),
-      settingRow('Network usage', onOff('network')),
     );
+    if (prefs.disk) {
+      rows.push(h('div', { class: 'setting-row', style: { alignItems: 'flex-start' } },
+        h('span', { class: 'dim' }, 'Show disks'),
+        h('span', { class: 'right' }, h('div', { id: 'sysmon-disks', class: 'sysmon-disks' }, h('div', { class: 'dim' }, 'Loading disks…'))),
+      ));
+    }
+    rows.push(settingRow('Network usage', onOff('network')));
   }
   rows.push(h('div', { class: 'dim', style: { fontSize: '12px', marginTop: '8px' } },
-    'Host CPU and memory each get a hex with a live 60-second graph; disks and network throughput show as hexes attached to the Overview services. Disk paths are set server-side (config.json “system.disks” or the SYSTEM_DISKS env); network throughput requires Linux.'));
+    'Host CPU and memory each get a hex with a live 60-second graph; disks and network throughput show as hexes attached to the Overview services. Choose which disks to show above; network throughput requires Linux.'));
   return h('div', { class: 'card' }, ...rows);
+}
+
+// Populate the "Show disks" checklist with the disks the server reports
+// (auto-discovered mounts, or the configured system.disks). Selecting a subset
+// persists to the system-monitor prefs; the Overview shows exactly those.
+async function hydrateSystemMonitor(ctx) {
+  const panel = document.getElementById('sysmon-disks');
+  if (!panel) return;
+  let sys;
+  try { sys = await ctx.api.system(); }
+  catch { mount(panel, h('div', { class: 'dim' }, 'Could not load disks')); return; }
+  const disks = sys.disks || [];
+  if (!disks.length) { mount(panel, h('div', { class: 'dim' }, 'No disks detected')); return; }
+  const prefs = getSysmonPrefs();
+  const selected = new Set(disks.filter((d) => diskVisible(d.path, prefs)).map((d) => d.path));
+  const rowFor = (d) => {
+    const cb = h('input', { type: 'checkbox', checked: selected.has(d.path) });
+    cb.addEventListener('change', () => {
+      if (cb.checked) selected.add(d.path); else selected.delete(d.path);
+      setSysmonPrefs({ diskPaths: [...selected] });
+    });
+    const meta = d.error
+      ? h('span', { class: 'dim' }, d.error)
+      : h('span', { class: 'dim' }, `${d.percent}% used · ${fmtBytes(d.free)} free`);
+    return h('label', { class: 'sysmon-disk' }, cb, h('span', { class: 'sysmon-disk-path' }, d.path), meta);
+  };
+  mount(panel, ...disks.map(rowFor));
 }
 
 // Queue Cleaner + Hunting, split into tabs (elongated-hexagon inputs preserved
