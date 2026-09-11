@@ -5,11 +5,59 @@
 // configured service (auth injected on-device), and returns empty/disabled
 // responses for endpoints that inherently need the companion server.
 //
-// On device (Capacitor) enable CapacitorHttp so the WebView's fetch is routed
-// through native networking and cross-origin direct calls bypass CORS.
+// Cross-origin direct calls to services would hit CORS from the WebView, so in
+// local mode those specific calls are routed through the native CapacitorHttp
+// plugin (which makes the request natively, bypassing CORS). We deliberately do
+// NOT enable CapacitorHttp globally: doing so patches window.fetch to use a
+// native cookie jar, which breaks server mode's Cloudflare Access cookie (the
+// CF_Authorization cookie set on WebView navigation isn't sent by native HTTP,
+// so /api/auth/* gets 302'd to the Access login). Keeping the global fetch
+// native-free preserves cookie sharing for server mode; only local-mode direct
+// service calls opt into native HTTP here.
 import { isLocalMode, getConnections, buildDirectRequest } from './connections.js';
 
 let _origFetch = null;
+
+// Native HTTP plugin accessor (present only in the Capacitor app). Used to make
+// cross-origin direct service calls without tripping CORS.
+function nativeHttp() {
+  try {
+    const cap = (typeof window !== 'undefined') && window.Capacitor;
+    const p = cap && (cap.Plugins && cap.Plugins.CapacitorHttp);
+    return (p && typeof p.request === 'function') ? p : null;
+  } catch (e) { return null; }
+}
+
+// Perform a cross-origin service request. In the native app use CapacitorHttp
+// (CORS-free); otherwise fall back to the ordinary fetch (web/PWA, same-origin
+// or CORS-enabled services). Returns a standard Response so callers are agnostic.
+async function directFetch(url, opts = {}) {
+  const http = nativeHttp();
+  if (!http) return _origFetch(url, opts);
+  const method = (opts.method || 'GET').toUpperCase();
+  const headers = opts.headers || {};
+  let data;
+  if (opts.body !== undefined && opts.body !== null) {
+    const ct = (headers['content-type'] || headers['Content-Type'] || '').toLowerCase();
+    if (typeof opts.body === 'string' && ct.includes('application/json')) {
+      try { data = JSON.parse(opts.body); } catch { data = opts.body; }
+    } else {
+      data = opts.body;
+    }
+  }
+  try {
+    const res = await http.request({ url, method, headers, data });
+    const body = (typeof res.data === 'string') ? res.data : JSON.stringify(res.data);
+    const respHeaders = res.headers || {};
+    // Normalize a content-type so downstream JSON parsing works.
+    if (!respHeaders['content-type'] && !respHeaders['Content-Type'] && typeof res.data !== 'string') {
+      respHeaders['content-type'] = 'application/json';
+    }
+    return new Response(body, { status: res.status || 200, headers: respHeaders });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: (e && e.message) || 'Network error' }), { status: 0, headers: { 'content-type': 'application/json' } });
+  }
+}
 let _installed = false;
 
 function json(data, status = 200) {
@@ -74,7 +122,7 @@ async function pingConnection(conn) {
   const started = Date.now();
   try {
     const { url, headers } = buildDirectRequest(`/api/proxy/${conn.key}/${statusPath(conn.type)}`, conn);
-    const r = await _origFetch(url, { headers: { accept: 'application/json', ...headers } });
+    const r = await directFetch(url, { headers: { accept: 'application/json', ...headers } });
     let version;
     try { const d = await r.clone().json(); version = d && (d.version || d.data?.version); } catch { /* non-json */ }
     const error = r.ok ? undefined : (r.status === 401 || r.status === 403) ? 'Auth / access denied' : `HTTP ${r.status}`;
@@ -123,7 +171,7 @@ async function handleLocal(u, input, init) {
       const acc = headerVal(src.headers, 'accept'); if (acc) opts.headers['accept'] = acc;
       if (src.body !== undefined && src.body !== null) opts.body = src.body;
     }
-    return _origFetch(url, opts);
+    return directFetch(url, opts);
   }
   if (kind === 'operations') {
     return json({ summary: { total: 0, critical: 0, warning: 0, health: 0, missing: 0 }, inbox: [], seerr: [], seerrSummary: { requests: 0, pending: 0, issues: 0 }, activity: [] });

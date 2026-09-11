@@ -18,10 +18,5 @@
     "contentInset": "always",
     "backgroundColor": "#0f1117",
     "limitsNavigationsToAppBoundDomains": false
-  },
-  "plugins": {
-    "CapacitorHttp": {
-      "enabled": true
-    }
   }
 }
