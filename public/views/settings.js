@@ -448,7 +448,12 @@ async function hydrateSystemMonitor(ctx) {
   try { sys = await ctx.api.system(); }
   catch { mount(panel, h('div', { class: 'dim' }, 'Could not load disks')); return; }
   const disks = sys.disks || [];
-  if (!disks.length) { mount(panel, h('div', { class: 'dim' }, 'No disks detected')); return; }
+  if (!disks.length) {
+    mount(panel, h('div', { class: 'dim' }, sys.containerized
+      ? 'No host disks are mounted into this Docker container. Bind each host disk individually and set SYSTEM_DISKS (see the Docker section in README).'
+      : 'No disks detected'));
+    return;
+  }
   const prefs = getSysmonPrefs();
   const selected = new Set(disks.filter((d) => diskVisible(d.path, prefs)).map((d) => d.path));
   const rowFor = (d) => {

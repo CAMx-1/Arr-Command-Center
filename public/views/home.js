@@ -634,10 +634,13 @@ function sparkline(points, cls) {
 }
 
 // Stat-style system hex (disk / network): icon, name, two stats.
-function systemHex({ icon, name, stats, dotClass, title }) {
-  return h('div', { class: 'hex-cell hex-static hex-system', title: title || name },
+// Disk cells optionally get a bottom-up percentage fill inside the clipped face.
+function systemHex({ icon, name, stats, dotClass, title, fillPercent = null }) {
+  const hasFill = fillPercent !== null && fillPercent !== undefined;
+  return h('div', { class: `hex-cell hex-static hex-system${hasFill ? ' hex-disk' : ''}`, title: title || name },
     h('div', { class: 'hex-border' }),
     h('div', { class: 'hex-face' },
+      hasFill ? h('div', { class: 'hex-disk-fill', 'aria-hidden': 'true', style: { height: pct(fillPercent) } }) : null,
       h('div', { class: 'hex-inner' },
         h('span', { class: `hex-dot ${dotClass || ''}` }),
         h('span', { class: 'hex-sys-ico' }, icon),
@@ -681,12 +684,13 @@ function systemMemHex(sys) {
 
 function systemDiskHex(d) {
   if (d.error) {
-    return systemHex({ icon: '💾', name: diskName(d.path), stats: [['—', 'Used'], ['error', d.error]], dotClass: 'down', title: `${d.path}: ${d.error}` });
+    return systemHex({ icon: '💾', name: diskName(d.path), stats: [['—', 'Used'], ['error', d.error]], dotClass: 'down', fillPercent: 0, title: `${d.path}: ${d.error}` });
   }
   return systemHex({
     icon: '💾', name: diskName(d.path),
     stats: [[`${d.percent}%`, 'Used'], [fmtBytes(d.free), 'Free']],
     dotClass: usageDot(d.percent),
+    fillPercent: d.percent,
     title: `${d.path} · ${fmtBytes(d.used)} / ${fmtBytes(d.total)} used`,
   });
 }
@@ -733,6 +737,8 @@ function updateSystemHexes(sys) {
     if (!el) return;
     const dot = el.querySelector('.hex-dot');
     const vals = el.querySelectorAll('.stat-value');
+    const fill = el.querySelector('.hex-disk-fill');
+    if (fill) fill.style.height = pct(d.error ? 0 : d.percent);
     if (d.error) { if (dot) dot.className = 'hex-dot down'; return; }
     if (dot) dot.className = `hex-dot ${usageDot(d.percent)}`;
     if (vals[0]) vals[0].textContent = `${d.percent}%`;

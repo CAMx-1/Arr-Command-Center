@@ -243,6 +243,43 @@ docker compose up -d --build
 `docker-compose.yml` bind-mounts your `config.json` read-only. Prefer env vars? Drop the
 volume and use `env_file: .env` instead (see the commented lines).
 
+### System Monitor disks in Docker
+
+Containers cannot see host disks unless each disk is explicitly bind-mounted. On Docker
+Desktop for macOS, mount each volume separately—do **not** mount `/Volumes` as one parent,
+because Docker then reports the startup disk's capacity for every child volume.
+
+For Compose, uncomment/add one bind per disk plus `SYSTEM_DISKS`:
+
+```yaml
+services:
+  arr-command-center:
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - /Volumes/New-14:/Volumes/New-14:ro
+      - /Volumes/12-1:/Volumes/12-1:ro
+    environment:
+      - PORT=7373
+      - HOST=0.0.0.0
+      - SYSTEM_DISKS=/Volumes/New-14,/Volumes/12-1
+```
+
+Then recreate the container with `docker compose up -d --build --force-recreate`.
+The mounts are read-only; the dashboard only calls filesystem-stat APIs and does not read
+media contents. `SYSTEM_DISKS` may be omitted to auto-discover eligible directory mounts,
+but setting it is recommended so only the intended disks appear.
+
+For plain Docker, use the equivalent individual mounts:
+
+```bash
+docker run -d --name arr-command-center \
+  -p 7373:7373 \
+  -v "$PWD/config.json:/app/config.json:ro" \
+  -v "/Volumes/New-14:/Volumes/New-14:ro" \
+  -e SYSTEM_DISKS=/Volumes/New-14 \
+  arr-command-center
+```
+
 **Plain docker:**
 
 ```bash

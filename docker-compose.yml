@@ -11,11 +11,18 @@ services:
     volumes:
       # Provide your real config with secrets via a bind mount (recommended).
       - ./config.json:/app/config.json:ro
-    # Alternatively, drop the volume above and configure entirely via env vars:
+      # Docker cannot see host disks unless they are explicitly mounted. On
+      # macOS, mount EACH volume individually (mounting /Volumes as one parent
+      # reports the startup disk's capacity for every child):
+      # - /Volumes/New-14:/Volumes/New-14:ro
+      # - /Volumes/12-1:/Volumes/12-1:ro
+    # Alternatively, drop the config volume above and configure entirely via env vars:
     # env_file: .env
     environment:
       - PORT=7373
       - HOST=0.0.0.0
+      # Match the individual disk targets mounted above (comma-separated):
+      # - SYSTEM_DISKS=/Volumes/New-14,/Volumes/12-1
       # - MOCK=1   # uncomment to run the bundled demo with fake data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7373/healthcheck').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]

@@ -4,9 +4,25 @@
 // /proc/net/dev; disks that can't be stat'd return an error field).
 import os from 'node:os';
 import fsp from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const clampPct = (n) => Math.max(0, Math.min(100, Math.round(n)));
+const execFileAsync = promisify(execFile);
+
+let containerizedCache;
+async function isContainerized() {
+  if (containerizedCache !== undefined) return containerizedCache;
+  try {
+    await fsp.access('/.dockerenv');
+    containerizedCache = true;
+  } catch {
+    try { await fsp.access('/run/.containerenv'); containerizedCache = true; }
+    catch { containerizedCache = false; }
+  }
+  return containerizedCache;
+}
 
 function cpuTimes() {
   let idle = 0; let total = 0;
@@ -28,18 +44,50 @@ async function cpuPercent(windowMs = 120) {
   return clampPct((1 - di / dt) * 100);
 }
 
-async function diskUsage(paths) {
+async function dfUsageMap() {
+  // Docker Desktop's grpcfuse reports f_bsize=1 MiB to statfs while its block
+  // counts are in 4 KiB units, inflating Node statfs capacities by 256x. POSIX
+  // df uses the filesystem fragment size and returns correct 1 KiB counts.
+  // Query every mount once and match the exact target: `df <path>` can select
+  // the first grpcfuse bind when several binds share the same synthetic device.
+  const { stdout } = await execFileAsync('/bin/df', ['-Pk'], {
+    encoding: 'utf8', timeout: 5000, maxBuffer: 256 * 1024,
+  });
+  const usages = new Map();
+  for (const line of stdout.trim().split('\n').slice(1)) {
+    const match = line.match(/^\S+\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)%\s+(.+)$/);
+    if (!match) continue;
+    const total = Number(match[1]) * 1024;
+    const free = Number(match[3]) * 1024;
+    if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(free)) continue;
+    const used = Math.max(0, total - free);
+    usages.set(match[5], { total, free, used, percent: clampPct((used / total) * 100) });
+  }
+  return usages;
+}
+
+async function statfsUsage(path) {
+  const s = await fsp.statfs(path);
+  const bsize = Number(s.bsize) || 0;
+  const total = Number(s.blocks) * bsize;
+  const free = Number(s.bavail) * bsize;      // space available to unprivileged users
+  const used = Math.max(0, total - free);
+  return { path, total, free, used, percent: total ? clampPct((used / total) * 100) : 0 };
+}
+
+async function diskUsage(paths, { containerized = false } = {}) {
   const list = (Array.isArray(paths) && paths.length) ? paths : [];
-  return Promise.all(list.map(async (p) => {
+  let df = null;
+  if (containerized && process.platform !== 'win32' && list.length) {
+    try { df = await dfUsageMap(); } catch { /* statfs fallback below */ }
+  }
+  return Promise.all(list.map(async (path) => {
     try {
-      const s = await fsp.statfs(p);
-      const bsize = Number(s.bsize) || 0;
-      const total = Number(s.blocks) * bsize;
-      const free = Number(s.bavail) * bsize;      // space available to unprivileged users
-      const used = Math.max(0, total - free);
-      return { path: p, total, free, used, percent: total ? clampPct((used / total) * 100) : 0 };
+      const fromDf = df && df.get(path);
+      if (fromDf) return { path, ...fromDf };
+      return await statfsUsage(path);
     } catch (e) {
-      return { path: p, error: e.code || e.message || 'unavailable' };
+      return { path, error: e.code || e.message || 'unavailable' };
     }
   }));
 }
@@ -79,12 +127,17 @@ async function networkThroughput() {
 function defaultRoot() { return process.platform === 'win32' ? `${process.env.SystemDrive || 'C:'}\\` : '/'; }
 
 // Enumerate real (non-pseudo) Linux mount points from /proc/mounts.
-async function listLinuxMounts() {
+// Docker injects several *file* mounts (/etc/hosts, hostname, resolv.conf), and
+// this app commonly bind-mounts config/data beneath /app. Neither represents a
+// host disk the user can select, so auto-discovery keeps accessible directories
+// only and hides app-internal mounts when running in a container. Explicit
+// config.system.disks / SYSTEM_DISKS paths still bypass this discovery filter.
+async function listLinuxMounts(containerized) {
   let txt;
   try { txt = await fsp.readFile('/proc/mounts', 'utf8'); }
   catch { return null; }
   const seen = new Set();
-  const mounts = [];
+  const candidates = [];
   for (const line of txt.split('\n')) {
     const [dev, rawMnt, type] = line.split(/\s+/);
     if (!dev || !rawMnt) continue;
@@ -93,9 +146,16 @@ async function listLinuxMounts() {
     if (!isReal) continue;
     const mnt = rawMnt.replace(/\\040/g, ' ').replace(/\\011/g, '\t');
     if (mnt.startsWith('/boot') || mnt.startsWith('/snap') || seen.has(mnt)) continue;
+    if (containerized && (mnt === '/app' || mnt.startsWith('/app/'))) continue;
     seen.add(mnt);
-    mounts.push(mnt);
+    candidates.push(mnt);
   }
+
+  const checked = await Promise.all(candidates.map(async (mnt) => {
+    try { return (await fsp.stat(mnt)).isDirectory() ? mnt : null; }
+    catch { return null; }
+  }));
+  const mounts = checked.filter(Boolean);
   mounts.sort((a, b) => a.length - b.length || a.localeCompare(b));
   return mounts;
 }
@@ -128,26 +188,30 @@ async function listMacMounts() {
   return mounts;
 }
 
-async function listMounts() {
-  if (process.platform === 'linux') return listLinuxMounts();
+async function listMounts(containerized) {
+  if (process.platform === 'linux') return listLinuxMounts(containerized);
   if (process.platform === 'darwin') return listMacMounts();
   return null;
 }
 
 // Resolve which disk paths to report: an explicit list when provided (config /
-// env), otherwise every discovered mount, otherwise the filesystem root.
-async function resolveDiskPaths(disks) {
+// env), otherwise every discovered mount, otherwise the filesystem root. An
+// unconfigured container with no host-directory binds reports no disks instead
+// of presenting its ephemeral overlay filesystem as if it were the host.
+async function resolveDiskPaths(disks, containerized) {
   if (Array.isArray(disks) && disks.length) return disks.slice(0, 24);
-  const mounts = await listMounts();
+  const mounts = await listMounts(containerized);
   if (mounts && mounts.length) return mounts.slice(0, 24);
+  if (containerized && process.platform === 'linux') return [];
   return [defaultRoot()];
 }
 
 export async function getSystemStats({ disks } = {}) {
-  const paths = await resolveDiskPaths(disks);
+  const containerized = await isContainerized();
+  const paths = await resolveDiskPaths(disks, containerized);
   const [cpu, disksOut, net] = await Promise.all([
     cpuPercent(),
-    diskUsage(paths),
+    diskUsage(paths, { containerized }),
     networkThroughput(),
   ]);
   const total = os.totalmem();
@@ -156,6 +220,7 @@ export async function getSystemStats({ disks } = {}) {
   const load = os.loadavg(); // [1, 5, 15] — all 0 on platforms without load avg
   return {
     at: Date.now(),
+    containerized,
     cpu: { percent: cpu, cores: (os.cpus() || []).length, load },
     mem: { total, free, used, percent: total ? clampPct((used / total) * 100) : 0 },
     disks: disksOut,

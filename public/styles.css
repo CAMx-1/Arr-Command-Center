@@ -359,6 +359,23 @@ button { font-family: inherit; cursor: pointer; }
    service tiles, with an emoji glyph instead of a service logo. */
 .hex-cell.hex-system .hex-face { background: linear-gradient(160deg, var(--accent-soft), #ffffff); }
 html[data-theme="dark"] .hex-cell.hex-system .hex-face { background: linear-gradient(160deg, var(--surface-2), var(--surface)); }
+/* Disk usage rises from the bottom inside the already-clipped hex face. The
+   translucent purple keeps the current theme's text legible at every level. */
+.hex-cell.hex-disk .hex-face { overflow: hidden; isolation: isolate; }
+.hex-disk-fill {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 0; z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(168, 85, 247, 0.46), rgba(109, 40, 217, 0.62));
+  border-top: 1px solid rgba(196, 181, 253, 0.72);
+  box-shadow: 0 -5px 14px rgba(124, 58, 237, 0.18);
+  transition: height 0.55s var(--ease);
+}
+html[data-theme="dark"] .hex-disk-fill {
+  background: linear-gradient(180deg, rgba(168, 85, 247, 0.52), rgba(109, 40, 217, 0.70));
+  border-top-color: rgba(216, 180, 254, 0.58);
+}
+.hex-cell.hex-disk .hex-inner { position: relative; z-index: 1; }
+@media (prefers-reduced-motion: reduce) { .hex-disk-fill { transition: none; } }
 .hex-sys-ico { font-size: 28px; line-height: 1; }
 /* CPU/Memory graph hexes: name, big value, and a 60s sparkline. */
 .hex-cell.hex-graph .hex-inner { gap: 3px; padding: 0 24px; }
