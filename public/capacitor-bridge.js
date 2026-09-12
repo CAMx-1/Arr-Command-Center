@@ -75,9 +75,15 @@
   window.accGoToServer = function (url) {
     var b = String(url || base || '').replace(/\/+$/, '');
     if (!b) return;
-    // A dedicated query flag lets the server origin know this navigation came
-    // from the native shell (harmless on web; useful for future tweaks/telemetry).
-    try { window.location.href = b + '/?acc_native=1'; } catch (e) { /* ignore */ }
+    // WKWebView may preserve the last server document across an app reinstall or
+    // rebuild. Give every native launch a unique document URL so it cannot
+    // restore an old HTML/module graph after the server has been updated.
+    // `replace` also keeps the local bootstrap out of the Back history.
+    var target = b + '/?acc_native=1&acc_launch=' + Date.now();
+    try {
+      if (window.location && typeof window.location.replace === 'function') window.location.replace(target);
+      else window.location.href = target;
+    } catch (e) { /* ignore */ }
   };
 
   // ---------------------------------------------------------------------------

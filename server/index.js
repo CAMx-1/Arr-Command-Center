@@ -413,12 +413,14 @@ app.delete('/api/config/service/:key', async (req, res) => {
   }
 });
 
-// Static frontend. Force revalidation of HTML/CSS/JS so UI changes are picked
-// up on a normal refresh (avoids stale cached views during development).
+// Static frontend. Do not retain HTML/CSS/JS in browser or WKWebView caches:
+// the native shell runs the UI from this server origin after authentication,
+// and WebKit can otherwise restore an old document/module graph after an app
+// rebuild even though the native bundle itself contains the latest assets.
 app.use(express.static(PUBLIC_DIR, {
   setHeaders(res, filePath) {
     if (/\.(html|css|js)$/i.test(filePath)) {
-      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Cache-Control', 'no-store, must-revalidate');
     }
     if (/\.webmanifest$/i.test(filePath)) {
       res.setHeader('Content-Type', 'application/manifest+json');
