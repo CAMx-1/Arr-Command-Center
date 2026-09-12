@@ -1,5 +1,45 @@
 import UIKit
+import WebKit
 import Capacitor
+
+// Server mode navigates this WebView away from the bundled shell to the saved
+// Arr Command Center URL. WKWebView can retain an old HTML/module graph across
+// app rebuilds, so clear only cached responses on each cold launch. Cookies,
+// localStorage, favorites, connection settings, and push registration remain
+// intact because their website-data types are deliberately not removed.
+@objc(AppBridgeViewController)
+final class AppBridgeViewController: CAPBridgeViewController {
+    private var startupCachePurgeStarted = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        guard !startupCachePurgeStarted else { return }
+        startupCachePurgeStarted = true
+
+        URLCache.shared.removeAllCachedResponses()
+        let cacheTypes: Set<String> = [
+            WKWebsiteDataTypeDiskCache,
+            WKWebsiteDataTypeMemoryCache,
+            WKWebsiteDataTypeOfflineWebApplicationCache,
+        ]
+        WKWebsiteDataStore.default().removeData(
+            ofTypes: cacheTypes,
+            modifiedSince: .distantPast
+        ) { [weak self] in
+            DispatchQueue.main.async {
+                guard let self,
+                      let bridge = self.bridge,
+                      let webView = self.webView else { return }
+                let request = URLRequest(
+                    url: bridge.config.appStartServerURL,
+                    cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
+                    timeoutInterval: 60
+                )
+                webView.load(request)
+            }
+        }
+    }
+}
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
