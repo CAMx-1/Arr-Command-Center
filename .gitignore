@@ -19,6 +19,7 @@ ios/App/App/public/
 ios/App/build/
 ios/App/output/
 ios/DerivedData/
+ios/**/ModuleCache.noindex/
 DerivedData/
 xcuserdata/
 *.xcuserstate
