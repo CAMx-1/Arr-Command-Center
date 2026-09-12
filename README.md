@@ -408,3 +408,6 @@ No build step, no frontend framework — just modern browser ES modules served s
 ## License
 
 MIT
+
+## Privacy Policy
+The Arr Command Center iOS app does not collect any user data of any kind
