@@ -1,0 +1,21 @@
+{
+  "" : {
+    "const-values" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorHaptics.build/Objects-normal/arm64/CapacitorHaptics-primary.swiftconstvalues",
+    "dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorHaptics.build/Objects-normal/arm64/CapacitorHaptics-primary.d",
+    "diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorHaptics.build/Objects-normal/arm64/CapacitorHaptics-primary.dia",
+    "emit-module-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorHaptics.build/Objects-normal/arm64/CapacitorHaptics-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorHaptics.build/Objects-normal/arm64/CapacitorHaptics-primary-emit-module.dia",
+    "pch" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorHaptics.build/Objects-normal/arm64/CapacitorHaptics-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorHaptics.build/Objects-normal/arm64/CapacitorHaptics-primary.swiftdeps"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/haptics/ios/Sources/HapticsPlugin/Haptics.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/CapacitorHaptics.build/Objects-normal/arm64/Haptics.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorHaptics.build/Objects-normal/arm64/Haptics.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorHaptics.build/Objects-normal/arm64/Haptics.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/haptics/ios/Sources/HapticsPlugin/HapticsPlugin.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/CapacitorHaptics.build/Objects-normal/arm64/HapticsPlugin.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorHaptics.build/Objects-normal/arm64/HapticsPlugin.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorHaptics.build/Objects-normal/arm64/HapticsPlugin.o"
+  }
+}

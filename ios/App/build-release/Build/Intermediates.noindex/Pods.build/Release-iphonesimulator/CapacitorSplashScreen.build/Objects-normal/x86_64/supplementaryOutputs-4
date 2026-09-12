@@ -1,0 +1,12 @@
+{
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/splash-screen/ios/Sources/SplashScreenPlugin/SplashScreen.swift" : {
+    "abi-baseline-json" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorSplashScreen.build/Objects-normal/x86_64/CapacitorSplashScreen.abi.json",
+    "const-values" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorSplashScreen.build/Objects-normal/x86_64/CapacitorSplashScreen-primary.swiftconstvalues",
+    "dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorSplashScreen.build/Objects-normal/x86_64/CapacitorSplashScreen-primary.d",
+    "diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorSplashScreen.build/Objects-normal/x86_64/CapacitorSplashScreen-primary.dia",
+    "objc-header" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorSplashScreen.build/Objects-normal/x86_64/CapacitorSplashScreen-Swift.h",
+    "swiftdoc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorSplashScreen.build/Objects-normal/x86_64/CapacitorSplashScreen.swiftdoc",
+    "swiftmodule" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorSplashScreen.build/Objects-normal/x86_64/CapacitorSplashScreen.swiftmodule",
+    "swiftsourceinfo" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorSplashScreen.build/Objects-normal/x86_64/CapacitorSplashScreen.swiftsourceinfo"
+  }
+}

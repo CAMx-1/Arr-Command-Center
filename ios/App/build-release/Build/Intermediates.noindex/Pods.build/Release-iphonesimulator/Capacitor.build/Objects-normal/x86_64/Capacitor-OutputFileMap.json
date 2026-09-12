@@ -1,0 +1,236 @@
+{
+  "" : {
+    "const-values" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Capacitor-primary.swiftconstvalues",
+    "dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Capacitor-primary.d",
+    "diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Capacitor-primary.dia",
+    "emit-module-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Capacitor-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Capacitor-primary-emit-module.dia",
+    "pch" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Capacitor-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Capacitor-primary.swiftdeps"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/AppUUID.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/AppUUID.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/AppUUID.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/AppUUID.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/Array+Capacitor.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Array+Capacitor.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Array+Capacitor.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Array+Capacitor.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPApplicationDelegateProxy.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPApplicationDelegateProxy.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPApplicationDelegateProxy.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPApplicationDelegateProxy.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPBridge.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridge.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridge.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridge.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPBridgeDelegate.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridgeDelegate.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridgeDelegate.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridgeDelegate.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPBridgeProtocol.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridgeProtocol.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridgeProtocol.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridgeProtocol.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPBridgeViewController.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridgeViewController.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridgeViewController.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridgeViewController.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPBridgedPlugin+getMethod.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridgedPlugin+getMethod.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridgedPlugin+getMethod.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPBridgedPlugin+getMethod.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPFile.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPFile.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPFile.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPFile.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPInstanceConfiguration.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPInstanceConfiguration-29e8c319d867fa85b8f31cc7e31e5351.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPInstanceConfiguration-29e8c319d867fa85b8f31cc7e31e5351.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPInstanceConfiguration-29e8c319d867fa85b8f31cc7e31e5351.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPInstanceDescriptor.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPInstanceDescriptor-cfbf48fd96ee553d2c3d843a781e3846.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPInstanceDescriptor-cfbf48fd96ee553d2c3d843a781e3846.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPInstanceDescriptor-cfbf48fd96ee553d2c3d843a781e3846.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPInstancePlugin.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPInstancePlugin.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPInstancePlugin.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPInstancePlugin.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPLog.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPLog.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPLog.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPLog.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPNotifications.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPNotifications.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPNotifications.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPNotifications.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPPlugin+LoadInstance.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPPlugin+LoadInstance.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPPlugin+LoadInstance.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPPlugin+LoadInstance.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPPluginCall.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPPluginCall-19082b54706afcfb802e4021a6f7cd34.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPPluginCall-19082b54706afcfb802e4021a6f7cd34.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPPluginCall-19082b54706afcfb802e4021a6f7cd34.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CAPPluginMethod.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPPluginMethod-b6782c694dba345194923b81e3300a93.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPPluginMethod-b6782c694dba345194923b81e3300a93.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CAPPluginMethod-b6782c694dba345194923b81e3300a93.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CapacitorBridge.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorBridge.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorBridge.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorBridge.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/CapacitorExtension.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorExtension.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorExtension.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorExtension.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/Codable/JSValueDecoder.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JSValueDecoder.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JSValueDecoder.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JSValueDecoder.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/Codable/JSValueEncoder.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JSValueEncoder.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JSValueEncoder.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JSValueEncoder.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/Data+Capacitor.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Data+Capacitor.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Data+Capacitor.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Data+Capacitor.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/DocLinks.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/DocLinks.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/DocLinks.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/DocLinks.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/JS.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JS.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JS.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JS.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/JSExport.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JSExport.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JSExport.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JSExport.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/JSTypes.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JSTypes.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JSTypes.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/JSTypes.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/KeyPath.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/KeyPath.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/KeyPath.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/KeyPath.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/KeyValueStore.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/KeyValueStore.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/KeyValueStore.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/KeyValueStore.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/NotificationHandlerProtocol.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/NotificationHandlerProtocol.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/NotificationHandlerProtocol.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/NotificationHandlerProtocol.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/NotificationRouter.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/NotificationRouter.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/NotificationRouter.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/NotificationRouter.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/PluginCallResult.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/PluginCallResult.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/PluginCallResult.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/PluginCallResult.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/PluginConfig.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/PluginConfig.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/PluginConfig.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/PluginConfig.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/Plugins/CapacitorCookieManager.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorCookieManager.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorCookieManager.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorCookieManager.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/Plugins/CapacitorCookies.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorCookies.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorCookies.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorCookies.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/Plugins/CapacitorHttp.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorHttp.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorHttp.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorHttp.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/Plugins/CapacitorUrlRequest.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorUrlRequest.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorUrlRequest.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/CapacitorUrlRequest.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/Plugins/Console.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Console.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Console.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Console.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/Plugins/HttpRequestHandler.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/HttpRequestHandler.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/HttpRequestHandler.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/HttpRequestHandler.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/Plugins/WebView.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/WebView.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/WebView.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/WebView.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/Router.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Router.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Router.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/Router.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/TmpViewController.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/TmpViewController.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/TmpViewController.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/TmpViewController.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/UIColor.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/UIColor.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/UIColor.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/UIColor.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/WKWebView+Capacitor.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/WKWebView+Capacitor-6ac2472b3b4f46e358c0462097cd4250.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/WKWebView+Capacitor-6ac2472b3b4f46e358c0462097cd4250.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/WKWebView+Capacitor-6ac2472b3b4f46e358c0462097cd4250.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/WebViewAssetHandler.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/WebViewAssetHandler.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/WebViewAssetHandler.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/WebViewAssetHandler.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/WebViewDelegationHandler.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/WebViewDelegationHandler.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/WebViewDelegationHandler.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/Capacitor.build/Objects-normal/x86_64/WebViewDelegationHandler.o"
+  }
+}

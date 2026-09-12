@@ -18,5 +18,24 @@
     "contentInset": "always",
     "backgroundColor": "#0f1117",
     "limitsNavigationsToAppBoundDomains": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "launchShowDuration": 0,
+      "launchFadeOutDuration": 220,
+      "backgroundColor": "#0f1117",
+      "showSpinner": false
+    },
+    "Keyboard": {
+      "resize": "native",
+      "style": "dark",
+      "resizeOnFullScreen": true
+    },
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "dark",
+      "backgroundColor": "#0f1117"
+    }
   }
 }

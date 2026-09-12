@@ -394,7 +394,7 @@ export function createProxyRouter(cfg) {
   // Raw body so we can forward any payload untouched.
   router.use(express.raw({ type: '*/*', limit: '25mb' }));
 
-  router.all('/:service/*', async (req, res) => {
+  router.all('/:service/{*path}', async (req, res) => {
     const svc = cfg.services[req.params.service];
     if (!svc || svc.enabled === false) {
       return res.status(404).json({ error: `Unknown or disabled service: ${req.params.service}` });
@@ -402,7 +402,8 @@ export function createProxyRouter(cfg) {
     if (!svc.baseUrl) {
       return res.status(500).json({ error: `Service ${req.params.service} has no baseUrl configured` });
     }
-    const subPath = req.params[0] || '';
+    const rawPath = req.params.path;
+    const subPath = Array.isArray(rawPath) ? rawPath.join('/') : (rawPath || '');
     await forward(svc, req.params.service, subPath, req, res);
   });
 

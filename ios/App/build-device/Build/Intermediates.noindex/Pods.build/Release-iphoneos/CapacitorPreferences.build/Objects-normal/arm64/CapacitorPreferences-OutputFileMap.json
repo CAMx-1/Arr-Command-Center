@@ -1,0 +1,21 @@
+{
+  "" : {
+    "const-values" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorPreferences.build/Objects-normal/arm64/CapacitorPreferences-primary.swiftconstvalues",
+    "dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorPreferences.build/Objects-normal/arm64/CapacitorPreferences-primary.d",
+    "diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorPreferences.build/Objects-normal/arm64/CapacitorPreferences-primary.dia",
+    "emit-module-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorPreferences.build/Objects-normal/arm64/CapacitorPreferences-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorPreferences.build/Objects-normal/arm64/CapacitorPreferences-primary-emit-module.dia",
+    "pch" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorPreferences.build/Objects-normal/arm64/CapacitorPreferences-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorPreferences.build/Objects-normal/arm64/CapacitorPreferences-primary.swiftdeps"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/preferences/ios/Sources/PreferencesPlugin/Preferences.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/CapacitorPreferences.build/Objects-normal/arm64/Preferences.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorPreferences.build/Objects-normal/arm64/Preferences.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorPreferences.build/Objects-normal/arm64/Preferences.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/preferences/ios/Sources/PreferencesPlugin/PreferencesPlugin.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/CapacitorPreferences.build/Objects-normal/arm64/PreferencesPlugin.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorPreferences.build/Objects-normal/arm64/PreferencesPlugin.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorPreferences.build/Objects-normal/arm64/PreferencesPlugin.o"
+  }
+}

@@ -1,0 +1,4 @@
+
+module CapacitorStatusBar.__Swift {
+  exclude header "CapacitorStatusBar-Swift.h"
+}

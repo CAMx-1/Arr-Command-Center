@@ -49,24 +49,46 @@
     try { return (localStorage.getItem(SERVER_KEY) || '').replace(/\/+$/, ''); } catch (e) { return ''; }
   }
 
+  function preferencesPlugin() {
+    try { return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Preferences; } catch (e) { return null; }
+  }
+
+  function preferredBase() {
+    var prefs = preferencesPlugin();
+    if (!prefs || typeof prefs.get !== 'function') return Promise.resolve('');
+    return prefs.get({ key: SERVER_KEY }).then(function (result) {
+      return String((result && result.value) || '').replace(/\/+$/, '');
+    }).catch(function () { return ''; });
+  }
+
   var native = isBootstrap();
   var base = native ? storedBase() : '';
 
-  // Public helpers (kept for API compatibility; used only in the native
-  // bootstrap context, which no longer performs same-origin fetch rewriting).
+  // Public helpers work from both the local shell and an allowed remote server
+  // origin. Preferences is native shared storage, unlike origin-scoped
+  // localStorage, so Settings can change the server used by the next launch.
   window.accApiUrl = function (u) {
     if (!base || typeof u !== 'string') return u;
-    if (/^[a-z]+:\/\//i.test(u) || /^(data|blob):/i.test(u)) return u; // already absolute
+    if (/^[a-z]+:\/\//i.test(u) || /^(data|blob):/i.test(u)) return u;
     if (u.charAt(0) === '/') return base + u;
     return u;
   };
   window.__ACC_NATIVE__ = native;
   window.__ACC_API_BASE__ = base;
   window.accSetServerBase = function (url) {
-    try { localStorage.setItem(SERVER_KEY, String(url || '').replace(/\/+$/, '')); } catch (e) { /* ignore */ }
+    var value = String(url || '').replace(/\/+$/, '');
+    base = value;
+    try { localStorage.setItem(SERVER_KEY, value); } catch (e) { /* ignore */ }
+    var prefs = preferencesPlugin();
+    if (prefs && typeof prefs.set === 'function') return prefs.set({ key: SERVER_KEY, value: value }).catch(function () {});
+    return Promise.resolve();
   };
   window.accClearServerBase = function () {
+    base = '';
     try { localStorage.removeItem(SERVER_KEY); } catch (e) { /* ignore */ }
+    var prefs = preferencesPlugin();
+    if (prefs && typeof prefs.remove === 'function') return prefs.remove({ key: SERVER_KEY }).catch(function () {});
+    return Promise.resolve();
   };
 
   // Navigate the app's own WebView to the server origin. This performs the real
@@ -100,39 +122,40 @@
   // Stop the SPA from booting into a broken (no-API) state on capacitor://localhost.
   window.__ACC_SETUP_REQUIRED__ = true;
 
-  // Already configured → jump straight to the server. If the stored session is
-  // still valid, the server serves the app immediately; otherwise the user is
-  // taken through Cloudflare Access + Plex again.
-  if (base) {
-    var jump = function () { window.accGoToServer(base); };
-    if (document.body) jump();
-    else document.addEventListener('DOMContentLoaded', jump);
-    return;
-  }
+  // Server selection is resolved after the connect-screen renderer is defined:
+  // native Preferences may contain a newer value set from remote Settings.
 
-  // First run: no server configured yet → show the connect screen.
+  // First run: no server configured yet → show the branded connect screen.
   var render = function () {
     if (document.getElementById('acc-connect')) return;
     var wrap = document.createElement('div');
     wrap.id = 'acc-connect';
+    wrap.setAttribute('role', 'main');
     wrap.setAttribute('style', [
-      'position:fixed', 'inset:0', 'z-index:99999',
+      'position:fixed', 'inset:0', 'z-index:99999', 'overflow:auto',
       'display:flex', 'align-items:center', 'justify-content:center',
-      'padding:24px', 'box-sizing:border-box',
-      'background:#0f1117', 'color:#eceef4',
-      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',
-      '-webkit-user-select:none'
+      'padding:calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom))', 'box-sizing:border-box',
+      'background:radial-gradient(circle at 50% 0,rgba(139,92,246,.22),transparent 42%),#0f1117', 'color:#eceef4',
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif'
     ].join(';'));
     wrap.innerHTML =
-      '<div style="width:100%;max-width:420px">' +
-        '<div style="font-size:22px;font-weight:800;margin-bottom:6px">Arr Command Center</div>' +
-        '<div style="color:#b0b7c8;font-size:14px;margin-bottom:18px">Connect to your Arr Command Center server to get started. You\'ll sign in on the next screen.</div>' +
-        '<label style="display:block;font-size:12px;color:#b0b7c8;margin-bottom:6px">Server URL</label>' +
-        '<input id="acc-connect-url" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://arrcc.example.com" ' +
-          'style="width:100%;box-sizing:border-box;padding:14px 14px;font-size:16px;border-radius:12px;border:1px solid #4d576c;background:#252a39;color:#eceef4" />' +
-        '<div id="acc-connect-err" style="color:#f87171;font-size:13px;min-height:18px;margin:8px 2px"></div>' +
-        '<button id="acc-connect-go" style="width:100%;padding:15px;font-size:16px;font-weight:700;border:none;border-radius:12px;color:#fff;background:linear-gradient(90deg,#6366f1,#a855f7 55%,#ec4899);cursor:pointer">Continue to sign in</button>' +
-        '<button id="acc-connect-local" style="width:100%;margin-top:10px;padding:12px;font-size:14px;font-weight:600;border:1px solid #4d576c;border-radius:12px;color:#cbd2e0;background:transparent;cursor:pointer">Use local mode (connect to services directly)</button>' +
+      '<div style="width:100%;max-width:440px">' +
+        '<div style="text-align:center;margin-bottom:24px">' +
+          '<img src="/icons/icon-192.png" alt="" width="88" height="88" style="border-radius:22px;box-shadow:0 14px 40px rgba(0,0,0,.4)" />' +
+          '<div style="font-size:25px;font-weight:850;margin-top:14px">Arr Command Center</div>' +
+          '<div style="color:#b0b7c8;font-size:14px;line-height:1.5;margin-top:6px">One dashboard for your media services.</div>' +
+        '</div>' +
+        '<div style="background:#1b1f2b;border:1px solid #343b4f;border-radius:18px;padding:18px;box-shadow:0 18px 50px rgba(0,0,0,.25)">' +
+          '<div style="font-size:16px;font-weight:750;margin-bottom:5px">Connect to your server</div>' +
+          '<div style="color:#b0b7c8;font-size:13px;line-height:1.5;margin-bottom:16px">Enter the same address you use in Safari. Cloudflare Access and Plex sign-in will open securely in this app.</div>' +
+          '<label for="acc-connect-url" style="display:block;font-size:12px;color:#cbd2e0;margin-bottom:6px">Server URL</label>' +
+          '<input id="acc-connect-url" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="https://arrcc.example.com" ' +
+            'style="width:100%;box-sizing:border-box;padding:14px;font-size:16px;border-radius:12px;border:1px solid #4d576c;background:#252a39;color:#eceef4" />' +
+          '<div id="acc-connect-err" role="alert" aria-live="polite" style="color:#fda4af;font-size:13px;min-height:20px;margin:8px 2px"></div>' +
+          '<button id="acc-connect-go" style="width:100%;min-height:48px;padding:14px;font-size:16px;font-weight:750;border:none;border-radius:12px;color:#fff;background:linear-gradient(90deg,#6366f1,#a855f7 55%,#ec4899);cursor:pointer">Continue to sign in</button>' +
+          '<button id="acc-connect-local" style="width:100%;min-height:44px;margin-top:10px;padding:12px;font-size:14px;font-weight:650;border:1px solid #4d576c;border-radius:12px;color:#cbd2e0;background:transparent;cursor:pointer">Use local-only mode</button>' +
+        '</div>' +
+        '<div style="color:#838da3;font-size:12px;line-height:1.5;text-align:center;margin:14px 12px 0">Server mode keeps credentials on your server. Local-only mode stores service connections on this device.</div>' +
       '</div>';
     document.body.appendChild(wrap);
     var input = document.getElementById('acc-connect-url');
@@ -144,20 +167,47 @@
       location.reload();
     });
     var submit = function () {
-      var v = (input.value || '').trim();
-      if (!/^https?:\/\/.+/i.test(v)) { err.textContent = 'Enter a full URL, e.g. https://host:7373'; return; }
-      v = v.replace(/\/+$/, '');
-      window.accSetServerBase(v);
-      err.textContent = '';
-      go.textContent = 'Opening…';
+      var raw = (input.value || '').trim();
+      var parsed;
+      try { parsed = new URL(raw); } catch (e) { err.textContent = 'Enter a complete URL, including http:// or https://'; return; }
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') { err.textContent = 'Only http:// and https:// server addresses are supported.'; return; }
+      if (!parsed.hostname || parsed.username || parsed.password) { err.textContent = 'Enter a server address without embedded credentials.'; return; }
+      var value = parsed.origin;
+      err.style.color = '#a7f3d0';
+      err.textContent = parsed.protocol === 'http:' ? 'Connecting over HTTP. Use HTTPS when available.' : 'Server address looks good.';
+      go.textContent = 'Opening sign in…';
       go.disabled = true;
-      // Navigate the WebView to the server so Cloudflare Access + Plex can run.
-      window.accGoToServer(v);
+      Promise.resolve(window.accSetServerBase(value)).then(function () { window.accGoToServer(value); });
     };
     go.addEventListener('click', submit);
     input.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
-    setTimeout(function () { try { input.focus(); } catch (e) {} }, 50);
+    setTimeout(function () { try { input.focus(); } catch (e) {} }, 100);
   };
-  if (document.body) render();
-  else document.addEventListener('DOMContentLoaded', render);
+
+  var start = function () {
+    var completed = false;
+    var finish = function (selected) {
+      if (completed) return;
+      completed = true;
+      if (selected) {
+        base = selected;
+        try { localStorage.setItem(SERVER_KEY, selected); } catch (e) { /* ignore */ }
+        window.accGoToServer(selected);
+      } else {
+        render();
+      }
+    };
+    // Native plugin calls should resolve immediately, but never leave a fresh
+    // install on a blank WebView if bridge initialization is delayed.
+    var fallback = setTimeout(function () { finish(base); }, 900);
+    preferredBase().then(function (shared) {
+      clearTimeout(fallback);
+      finish(shared || base);
+    }).catch(function () {
+      clearTimeout(fallback);
+      finish(base);
+    });
+  };
+  if (document.body) start();
+  else document.addEventListener('DOMContentLoaded', start);
 })();

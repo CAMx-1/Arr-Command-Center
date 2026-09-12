@@ -1,0 +1,21 @@
+{
+  "" : {
+    "const-values" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/App.build/Release-iphonesimulator/App.build/Objects-normal/arm64/App-primary.swiftconstvalues",
+    "dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/App.build/Release-iphonesimulator/App.build/Objects-normal/arm64/App-primary.d",
+    "diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/App.build/Release-iphonesimulator/App.build/Objects-normal/arm64/App-primary.dia",
+    "emit-module-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/App.build/Release-iphonesimulator/App.build/Objects-normal/arm64/App-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/App.build/Release-iphonesimulator/App.build/Objects-normal/arm64/App-primary-emit-module.dia",
+    "pch" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/App.build/Release-iphonesimulator/App.build/Objects-normal/arm64/App-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/App.build/Release-iphonesimulator/App.build/Objects-normal/arm64/App-primary.swiftdeps"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/ios/App/App/AppDelegate.swift" : {
+    "index-unit-output-path" : "/App.build/Release-iphonesimulator/App.build/Objects-normal/arm64/AppDelegate.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/App.build/Release-iphonesimulator/App.build/Objects-normal/arm64/AppDelegate.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/App.build/Release-iphonesimulator/App.build/Objects-normal/arm64/AppDelegate.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/App.build/Release-iphonesimulator/App.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "index-unit-output-path" : "/App.build/Release-iphonesimulator/App.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/App.build/Release-iphonesimulator/App.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/App.build/Release-iphonesimulator/App.build/Objects-normal/arm64/GeneratedAssetSymbols.o"
+  }
+}

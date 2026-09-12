@@ -1,0 +1,16 @@
+{
+  "" : {
+    "const-values" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorStatusBar.build/Objects-normal/x86_64/CapacitorStatusBar-primary.swiftconstvalues",
+    "dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorStatusBar.build/Objects-normal/x86_64/CapacitorStatusBar-primary.d",
+    "diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorStatusBar.build/Objects-normal/x86_64/CapacitorStatusBar-primary.dia",
+    "emit-module-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorStatusBar.build/Objects-normal/x86_64/CapacitorStatusBar-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorStatusBar.build/Objects-normal/x86_64/CapacitorStatusBar-primary-emit-module.dia",
+    "pch" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorStatusBar.build/Objects-normal/x86_64/CapacitorStatusBar-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorStatusBar.build/Objects-normal/x86_64/CapacitorStatusBar-primary.swiftdeps"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/status-bar/ios/Sources/StatusBarPlugin/StatusBarPlugin.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphonesimulator/CapacitorStatusBar.build/Objects-normal/x86_64/StatusBarPlugin.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorStatusBar.build/Objects-normal/x86_64/StatusBarPlugin.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-release/Build/Intermediates.noindex/Pods.build/Release-iphonesimulator/CapacitorStatusBar.build/Objects-normal/x86_64/StatusBarPlugin.o"
+  }
+}

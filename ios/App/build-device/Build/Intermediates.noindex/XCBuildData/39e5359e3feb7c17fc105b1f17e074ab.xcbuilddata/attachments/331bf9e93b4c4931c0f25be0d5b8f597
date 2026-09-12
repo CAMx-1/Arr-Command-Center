@@ -1,0 +1,21 @@
+{
+  "" : {
+    "const-values" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorBrowser.build/Objects-normal/arm64/CapacitorBrowser-primary.swiftconstvalues",
+    "dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorBrowser.build/Objects-normal/arm64/CapacitorBrowser-primary.d",
+    "diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorBrowser.build/Objects-normal/arm64/CapacitorBrowser-primary.dia",
+    "emit-module-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorBrowser.build/Objects-normal/arm64/CapacitorBrowser-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorBrowser.build/Objects-normal/arm64/CapacitorBrowser-primary-emit-module.dia",
+    "pch" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorBrowser.build/Objects-normal/arm64/CapacitorBrowser-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorBrowser.build/Objects-normal/arm64/CapacitorBrowser-primary.swiftdeps"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/browser/ios/Sources/BrowserPlugin/Browser.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/CapacitorBrowser.build/Objects-normal/arm64/Browser.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorBrowser.build/Objects-normal/arm64/Browser.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorBrowser.build/Objects-normal/arm64/Browser.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/browser/ios/Sources/BrowserPlugin/BrowserPlugin.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/CapacitorBrowser.build/Objects-normal/arm64/BrowserPlugin.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorBrowser.build/Objects-normal/arm64/BrowserPlugin.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorBrowser.build/Objects-normal/arm64/BrowserPlugin.o"
+  }
+}

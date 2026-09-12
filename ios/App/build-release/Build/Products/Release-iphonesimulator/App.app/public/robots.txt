@@ -1,0 +1,3 @@
+# Private, self-hosted dashboard — keep it out of all search engines / crawlers.
+User-agent: *
+Disallow: /

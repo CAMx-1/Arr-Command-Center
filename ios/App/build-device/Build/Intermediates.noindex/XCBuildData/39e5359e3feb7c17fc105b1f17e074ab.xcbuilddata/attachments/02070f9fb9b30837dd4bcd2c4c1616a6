@@ -1,0 +1,23 @@
+{
+  "version": 0,
+  "use-external-names": false,
+  "case-sensitive": false,
+  "roots": [{
+    "type": "directory",
+    "name": "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Products/Release-iphoneos/CapacitorPreferences/CapacitorPreferences.framework/Modules",
+    "contents": [{
+      "type": "file",
+      "name": "module.modulemap",
+      "external-contents": "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorPreferences.build/unextended-module.modulemap",
+    }]
+    },
+    {
+    "type": "directory",
+    "name": "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Products/Release-iphoneos/CapacitorPreferences/CapacitorPreferences.framework/Headers",
+    "contents": [{
+      "type": "file",
+      "name": "CapacitorPreferences-Swift.h",
+      "external-contents": "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorPreferences.build/unextended-interface-header.h",
+    }]
+  }]
+}

@@ -12,22 +12,30 @@
     "ios:add": "cap add ios",
     "ios:copy": "cap copy ios",
     "ios:sync": "cap sync ios",
-    "ios:open": "cap open ios"
+    "ios:open": "cap open ios",
+    "ios:build:sim": "xcodebuild -workspace ios/App/App.xcworkspace -scheme App -sdk iphonesimulator -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/App/build CODE_SIGNING_ALLOWED=NO clean build",
+    "ios:archive": "xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath ios/App/build/ArrCommandCenter.xcarchive archive",
+    "ios:validate:release": "plutil -lint ios/App/App/Info.plist ios/App/App/PrivacyInfo.xcprivacy ios/ExportOptions.plist"
   },
   "engines": {
     "node": ">=23"
   },
   "dependencies": {
+    "@capacitor/app": "6.0.3",
     "@capacitor/browser": "^6.0.6",
-    "@capacitor/cli": "^6.2.2",
     "@capacitor/core": "^6.2.2",
     "@capacitor/haptics": "6.0.3",
     "@capacitor/ios": "^6.2.2",
-    "express": "^4.22.2",
+    "@capacitor/keyboard": "6.0.4",
+    "@capacitor/preferences": "6.0.4",
+    "@capacitor/splash-screen": "6.0.4",
+    "@capacitor/status-bar": "6.0.3",
+    "express": "5.2.1",
     "web-push": "^3.6.7"
   },
   "license": "MIT",
   "devDependencies": {
+    "@capacitor/cli": "6.2.2",
     "@playwright/test": "1.62.1"
   }
 }

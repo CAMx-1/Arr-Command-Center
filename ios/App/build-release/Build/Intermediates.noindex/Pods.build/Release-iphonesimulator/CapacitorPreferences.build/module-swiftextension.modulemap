@@ -1,0 +1,5 @@
+
+module CapacitorPreferences.Swift {
+  header "CapacitorPreferences-Swift.h"
+  requires objc
+}

@@ -1,0 +1,12 @@
+{
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/ios/Capacitor/Capacitor/AppUUID.swift" : {
+    "abi-baseline-json" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/Capacitor.build/Objects-normal/arm64/Capacitor.abi.json",
+    "const-values" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/Capacitor.build/Objects-normal/arm64/Capacitor-primary.swiftconstvalues",
+    "dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/Capacitor.build/Objects-normal/arm64/Capacitor-primary.d",
+    "diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/Capacitor.build/Objects-normal/arm64/Capacitor-primary.dia",
+    "objc-header" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/Capacitor.build/Objects-normal/arm64/Capacitor-Swift.h",
+    "swiftdoc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/Capacitor.build/Objects-normal/arm64/Capacitor.swiftdoc",
+    "swiftmodule" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/Capacitor.build/Objects-normal/arm64/Capacitor.swiftmodule",
+    "swiftsourceinfo" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/Capacitor.build/Objects-normal/arm64/Capacitor.swiftsourceinfo"
+  }
+}

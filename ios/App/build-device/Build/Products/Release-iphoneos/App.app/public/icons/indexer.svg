@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="ix" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#b45309"/>
+    </linearGradient>
+  </defs>
+  <circle cx="256" cy="256" r="240" fill="url(#ix)"/>
+  <!-- magnifying glass -->
+  <circle cx="228" cy="224" r="96" fill="none" stroke="#ffffff" stroke-width="30"/>
+  <rect x="300" y="296" width="150" height="42" rx="21" transform="rotate(45 300 296)" fill="#ffffff"/>
+  <!-- little "signal/usenet" dots inside the lens -->
+  <circle cx="196" cy="224" r="14" fill="#ffffff"/>
+  <circle cx="240" cy="224" r="14" fill="#ffffff"/>
+  <circle cx="284" cy="224" r="14" fill="#ffffff"/>
+</svg>

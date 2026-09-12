@@ -1,0 +1,31 @@
+{
+  "" : {
+    "const-values" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/CapacitorSplashScreen-primary.swiftconstvalues",
+    "dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/CapacitorSplashScreen-primary.d",
+    "diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/CapacitorSplashScreen-primary.dia",
+    "emit-module-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/CapacitorSplashScreen-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/CapacitorSplashScreen-primary-emit-module.dia",
+    "pch" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/CapacitorSplashScreen-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/CapacitorSplashScreen-primary.swiftdeps"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/splash-screen/ios/Sources/SplashScreenPlugin/SplashScreen.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/SplashScreen.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/SplashScreen.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/SplashScreen.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/splash-screen/ios/Sources/SplashScreenPlugin/SplashScreenConfig.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/SplashScreenConfig.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/SplashScreenConfig.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/SplashScreenConfig.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/splash-screen/ios/Sources/SplashScreenPlugin/SplashScreenPlugin.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/SplashScreenPlugin.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/SplashScreenPlugin.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/SplashScreenPlugin.o"
+  },
+  "/Users/cameron/Documents/Arr-Command-Center/node_modules/@capacitor/splash-screen/ios/Sources/SplashScreenPlugin/SplashScreenSettings.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/SplashScreenSettings.o",
+    "llvm-bc" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/SplashScreenSettings.bc",
+    "object" : "/Users/cameron/Documents/Arr-Command-Center/ios/App/build-device/Build/Intermediates.noindex/Pods.build/Release-iphoneos/CapacitorSplashScreen.build/Objects-normal/arm64/SplashScreenSettings.o"
+  }
+}

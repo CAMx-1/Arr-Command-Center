@@ -4,40 +4,38 @@ import Capacitor
 
 // Server mode navigates this WebView away from the bundled shell to the saved
 // Arr Command Center URL. WKWebView can retain an old HTML/module graph across
-// app rebuilds, so clear only cached responses on each cold launch. Cookies,
-// localStorage, favorites, connection settings, and push registration remain
-// intact because their website-data types are deliberately not removed.
+// app upgrades, so clear only URL-cached responses when a new binary is first
+// launched. Cookies, localStorage, favorites, connection settings, and push
+// registration remain intact.
 @objc(AppBridgeViewController)
 final class AppBridgeViewController: CAPBridgeViewController {
     private var startupCachePurgeStarted = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        guard !startupCachePurgeStarted else { return }
-        startupCachePurgeStarted = true
-
-        URLCache.shared.removeAllCachedResponses()
-        let cacheTypes: Set<String> = [
-            WKWebsiteDataTypeDiskCache,
-            WKWebsiteDataTypeMemoryCache,
-            WKWebsiteDataTypeOfflineWebApplicationCache,
-        ]
-        WKWebsiteDataStore.default().removeData(
-            ofTypes: cacheTypes,
-            modifiedSince: .distantPast
-        ) { [weak self] in
-            DispatchQueue.main.async {
-                guard let self,
-                      let bridge = self.bridge,
-                      let webView = self.webView else { return }
-                let request = URLRequest(
-                    url: bridge.config.appStartServerURL,
-                    cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
-                    timeoutInterval: 60
-                )
-                webView.load(request)
+        // The first-run connect screen and external authentication pages do not
+        // execute app.js, so they cannot call SplashScreen.hide themselves.
+        // Dismiss the native overlay after the WebView has had time to paint;
+        // the normal app path also hides it immediately after its first render.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            let hideSplash = "window.Capacitor?.Plugins?.SplashScreen?.hide?.({fadeOutDuration:220})"
+            self?.webView?.evaluateJavaScript(hideSplash, completionHandler: nil)
+        }
+        #if DEBUG
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            let probe = "(()=>JSON.stringify({protocol:location.protocol,ready:document.readyState,setup:!!window.__ACC_SETUP_REQUIRED__,bodyChildren:document.body?.children.length||0}))()"
+            self?.webView?.evaluateJavaScript(probe) { result, error in
+                NSLog("[startup] webview=%@ error=%@", String(describing: result), error?.localizedDescription ?? "none")
             }
         }
+        #endif
+        guard isNewBinary, !startupCachePurgeStarted else { return }
+        startupCachePurgeStarted = true
+        // URLCache is safe to invalidate synchronously. Full WKWebsiteDataStore
+        // deletion can reset the active WebContent process and leave an
+        // otherwise-rendered page uncomposited; server build IDs and no-store
+        // headers handle web asset version changes instead.
+        URLCache.shared.removeAllCachedResponses()
     }
 }
 

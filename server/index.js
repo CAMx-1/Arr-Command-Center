@@ -94,11 +94,28 @@ app.use((req, res, next) => {
   next();
 });
 
-// Baseline security headers (safe defaults; no CSP to avoid breaking assets).
+// Baseline security headers. The app intentionally permits http(s) connections
+// and frames because users configure self-hosted LAN services; scripts remain
+// same-origin and plugins/objects are blocked.
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('X-Frame-Options', 'SAMEORIGIN');
   res.set('Referrer-Policy', 'no-referrer');
+  res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+  res.set('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https: http:",
+    "font-src 'self' data:",
+    "connect-src 'self' https: http: wss: ws:",
+    "frame-src https: http:",
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self' https:",
+    "frame-ancestors 'self'",
+  ].join('; '));
   next();
 });
 
@@ -143,7 +160,7 @@ if (!localOnly && !anyAuth) {
 }
 
 // Public (secret-free) config for the frontend.
-app.get('/api/config', (req, res) => res.json({ ...publicConfig(cfg), auth: { plexEnabled: plexAuth.enabled, user: req.plexUser || null } }));
+app.get('/api/config', (req, res) => res.json({ ...publicConfig(cfg), buildId: BUILD_ID, auth: { plexEnabled: plexAuth.enabled, user: req.plexUser || null } }));
 
 // Build identity for the frontend update banner. Never cached so a new deploy
 // is seen promptly by polling clients.
@@ -434,7 +451,7 @@ app.use(express.static(PUBLIC_DIR, {
   },
 }));
 // SPA fallback for any non-API route.
-app.get('*', (req, res, next) => {
+app.get('/{*path}', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });

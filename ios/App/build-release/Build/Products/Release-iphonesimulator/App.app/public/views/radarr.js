@@ -1,0 +1,422 @@
+import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, debounce, autoRefresh, swipeToAction } from '../lib/ui.js';
+import { reconcileQueueIssues } from '../lib/queueIssues.js';
+import { openDetailModal, openArrFileInfo } from './detail.js';
+import { openReleaseSearch } from './releaseSearch.js';
+import { bulkLibrary } from './bulk.js';
+import { tabSystem, tabWanted } from './arrSystem.js';
+import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
+import { viewToggle, effectiveMode } from '../lib/viewMode.js';
+import { cachedGet, cachedList, invalidate } from '../lib/cache.js';
+import { libraryFilter, consumePendingFilter } from '../lib/libraryFilter.js';
+import { tagEditor, arrCommandBar, loadTags, openManualImport } from '../lib/arrActions.js';
+import { compactTable } from '../lib/tableView.js';
+import { savedViewsControl } from '../lib/savedViews.js';
+import { comparisonBar } from '../lib/comparisonDrawer.js';
+import { actionGroup } from '../lib/actions.js';
+import { restoreSelection, persistSelection } from '../lib/workflowState.js';
+
+export async function renderRadarr(root, ctx) {
+  const svc = ctx.service;
+  const arr = ctx.api.arr(svc.key);
+  ctx.setActions(
+    viewToggle(svc.key, (mode) => ctx.setParams({ mode }, { reload: true }), ctx.params.mode, { table: true }),
+    h('button', { class: 'btn primary', onclick: () => openAddModal(arr, ctx) }, '＋ Add Movie'),
+  );
+
+  const body = h('div', {});
+  const bar = tabs(body, [
+    { id: 'movies', label: 'Library', render: (c) => tabMovies(c, arr, ctx) },
+    { id: 'calendar', label: 'Calendar', render: (c) => tabCalendar(c, arr) },
+    { id: 'wanted', label: 'Wanted', render: (c) => tabWanted(c, arr, ctx, 'movie') },
+    { id: 'queue', label: 'Queue', render: (c) => tabQueue(c, arr, ctx) },
+    { id: 'history', label: 'History', render: (c) => tabHistory(c, arr) },
+    { id: 'system', label: 'System', render: (c) => tabSystem(c, arr, ctx, 'movie') },
+  ], `tabs-${svc.key}`, {
+    activeId: ctx.params.tab,
+    onChange: (id) => ctx.setParams({ tab: id === 'movies' ? '' : id }),
+  });
+  mount(root, bar, body);
+}
+
+async function tabCalendar(root, arr) {
+  mount(root, skeletonList());
+  try {
+    const start = new Date(); start.setDate(start.getDate() - 1);
+    const end = new Date(); end.setDate(end.getDate() + 60);
+    const items = await arr.get(`calendar?start=${start.toISOString()}&end=${end.toISOString()}`);
+    if (!items.length) return mount(root, empty('', 'Nothing scheduled', 'No upcoming movie releases in the next 60 days'));
+    const withDate = items.map((m) => ({ m, when: m.digitalRelease || m.physicalRelease || m.inCinemas }))
+      .filter((x) => x.when).sort((a, b) => new Date(a.when) - new Date(b.when));
+    mount(root, h('div', { class: 'list' }, ...withDate.map(({ m, when }) => calRow(m, when))));
+  } catch (err) {
+    mount(root, empty('', 'Failed to load calendar', err.message));
+  }
+}
+
+function calRow(m, when) {
+  const img = (m.images || []).find((i) => i.coverType === 'poster');
+  const kind = m.digitalRelease && when === m.digitalRelease ? 'Digital'
+    : m.physicalRelease && when === m.physicalRelease ? 'Physical'
+    : 'In Cinemas';
+  return h('div', { class: 'row' },
+    poster(img && (img.remoteUrl || img.url), ''),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title' }, `${m.title} `, h('span', { class: 'dim nowrap' }, m.year ? `(${m.year})` : '')),
+      h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+        h('span', {}, fmtDate(when), ' · ', fmtRelative(when)),
+        h('span', { class: 'pill muted' }, kind),
+        m.hasFile ? h('span', { class: 'pill ok' }, 'Downloaded') : h('span', { class: 'pill warn' }, 'Pending'),
+      ),
+    ),
+  );
+}
+
+async function tabHistory(root, arr) {
+  mount(root, skeletonList());
+  try {
+    const data = await arr.get('history?page=1&pageSize=40&sortKey=date&sortDirection=descending&includeMovie=true');
+    const records = data.records || [];
+    if (!records.length) return mount(root, empty('', 'No history yet'));
+    mount(root, h('div', { class: 'list' }, ...records.map(historyRow)));
+  } catch (err) {
+    mount(root, empty('', 'Failed to load history', err.message));
+  }
+}
+
+function historyRow(r) {
+  const info = arrEventInfo(r.eventType);
+  const title = (r.movie && r.movie.title) || r.sourceTitle || 'Unknown';
+  return h('div', { class: 'row' },
+    h('div', { class: 'poster', style: { width: '40px', height: '40px', fontSize: '16px' } }, ''),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title' }, title),
+      h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+        h('span', { class: `pill ${info.cls}` }, info.label),
+        r.quality && r.quality.quality ? h('span', {}, r.quality.quality.name) : null,
+        r.date ? timeEl(r.date) : null,
+      ),
+      r.movie && r.sourceTitle ? h('div', { class: 'row-sub' }, r.sourceTitle) : null,
+    ),
+  );
+}
+
+async function tabMovies(root, arr, ctx) {
+  mount(root, skeletonList());
+  try {
+    const movies = [...await cachedList(`arr:${ctx.service.key}:movie`, () => arr.get('movie'), 300000, 'Radarr movies')];
+    movies.sort((a, b) => a.title.localeCompare(b.title));
+    if (!movies.length) return mount(root, empty('', 'No movies yet', 'Add a movie to get started', { label: '＋ Add Movie', onClick: () => openAddModal(arr, ctx) }));
+    const mode = ['hex', 'list', 'table'].includes(ctx.params.mode) ? ctx.params.mode : effectiveMode(ctx.service.key);
+    let sortKey = ctx.params.sort || 'title';
+    let direction = ctx.params.dir === 'desc' ? 'desc' : 'asc';
+    let filteredItems = movies;
+    // Restore any service-scoped selection (comparison/bulk) from a prior
+    // visit, intersected with the current library so stale ids are dropped.
+    const selected = restoreSelection(ctx.service.key, movies);
+    const persistSel = () => persistSelection(ctx.service.key, selected);
+    const listWrap = h('div', {});
+    const compareWrap = h('div', {});
+    const fields = [
+      { label: 'Year', value: (m) => m.year }, { label: 'Status', value: (m) => m.status },
+      { label: 'Studio', value: (m) => m.studio }, { label: 'Runtime', value: (m) => m.runtime ? `${m.runtime} min` : '—' },
+      { label: 'Downloaded', value: (m) => m.hasFile ? 'Yes' : 'No' }, { label: 'Monitored', value: (m) => m.monitored ? 'Yes' : 'No' },
+      { label: 'Storage', value: (m) => m.sizeOnDisk || 0, bytes: true }, { label: 'Path', value: (m) => m.path },
+    ];
+    const updateCompare = () => mount(compareWrap, comparisonBar(selected, { title: 'Compare movies', fields, onClear: () => { selected.clear(); persistSel(); renderList(filteredItems); updateCompare(); } }));
+    const openInfo = (m) => {
+      const img = (m.images || []).find((i) => i.coverType === 'poster');
+      const rating = m.ratings && (m.ratings.tmdb?.value || m.ratings.imdb?.value || m.ratings.value);
+      openDetailModal(ctx, { mediaType: 'movie', tmdbId: m.tmdbId, fallback: { title: m.title, year: m.year, overview: m.overview, genres: m.genres, rating, runtime: m.runtime, posterUrl: img && (img.remoteUrl || img.url) } });
+    };
+    const columns = [
+      { key: 'title', label: 'Title', value: (m) => m.title },
+      { key: 'year', label: 'Year', value: (m) => m.year },
+      { key: 'status', label: 'Status', value: (m) => m.hasFile ? 'Downloaded' : 'Missing', render: (m) => m.hasFile ? 'Downloaded' : 'Missing' },
+      { key: 'runtime', label: 'Runtime', value: (m) => m.runtime || 0, render: (m) => m.runtime ? `${m.runtime} min` : '—' },
+      { key: 'size', label: 'Storage', value: (m) => m.sizeOnDisk || 0, render: (m) => fmtBytes(m.sizeOnDisk || 0) },
+      { key: 'monitored', label: 'Monitored', value: (m) => m.monitored ? 1 : 0, render: (m) => m.monitored ? 'Yes' : 'No' },
+    ];
+    const renderList = (items) => {
+      filteredItems = items;
+      if (!items.length) return mount(listWrap, empty('', 'No matches', 'No movies match this filter'));
+      if (mode === 'table') {
+        return mount(listWrap, compactTable(items, {
+          columns, sortKey, direction, selected,
+          onSort: (key, dir) => { sortKey = key; direction = dir; ctx.setParams({ sort: key === 'title' ? '' : key, dir: dir === 'asc' ? '' : dir }); renderList(filteredItems); },
+          onToggle: (entry) => { selected.has(entry.id) ? selected.delete(entry.id) : selected.set(entry.id, entry); persistSel(); renderList(filteredItems); updateCompare(); },
+          onOpen: openInfo,
+        }));
+      }
+      mount(listWrap, pagedLibrary(items, { isHex: mode === 'hex', makeCard: (m) => movieHex(m, arr, ctx), makeRow: (m) => movieRow(m, arr, ctx) }));
+    };
+    const initialTerm = ctx.params.q || consumePendingFilter(ctx.service.key);
+    const libHead = h('div', { class: 'lib-head' },
+      libraryFilter('movie', movies, renderList, {
+        initialTerm, initialStatus: ctx.params.status || 'all',
+        onStateChange: ({ term, status }) => ctx.setParams({ q: term, status: status === 'all' ? '' : status }),
+      }),
+      savedViewsControl(ctx),
+      h('button', { class: 'btn sm', title: 'Bulk select', onclick: () => bulkLibrary(root, {
+        items: movies, filteredItems, kind: 'movie', arr, invalidateKey: `arr:${ctx.service.key}:movie`,
+        mode, columns, sortKey, direction, scope: ctx.service.key, initialSelectedIds: [...selected.keys()],
+        onExit: () => tabMovies(root, arr, ctx),
+      }) }, '☑ Select'),
+    );
+    mount(root, libHead, compareWrap, listWrap);
+    updateCompare();
+  } catch (err) {
+    mount(root, empty('', 'Failed to load movies', err.message, { label: 'Retry', onClick: () => tabMovies(root, arr, ctx) }));
+  }
+}
+
+function movieHex(m, arr, ctx) {
+  const img = (m.images || []).find((i) => i.coverType === 'poster');
+  const url = img && (img.remoteUrl || img.url);
+  const rating = m.ratings && (m.ratings.tmdb?.value || m.ratings.imdb?.value || m.ratings.value);
+  const actions = actionGroup([
+    { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, false, m) },
+    { label: 'Search', title: 'Interactive search', primary: true, onClick: () => openReleaseSearch(ctx, ctx.service.key, `movieId=${m.id}`, `${m.title} (${m.year})`) },
+    { label: 'Auto', title: 'Automatic search', onClick: async () => {
+      try { await arr.post('command', { name: 'MoviesSearch', movieIds: [m.id] }); toast(`Searching for ${m.title}`, 'success'); }
+      catch (e2) { toast(e2.message, 'error'); }
+    } },
+    { label: 'Edit', title: 'Edit / delete', onClick: () => openEditMovie(arr, ctx, m) },
+  ], { sheetTitle: m.title });
+  return posterHexCard({
+    posterUrl: url,
+    title: `${m.title}${m.year ? ` (${m.year})` : ''}`,
+    pills: [
+      m.hasFile ? { label: 'Downloaded', cls: 'ok' } : { label: 'Missing', cls: 'warn' },
+      m.monitored ? { label: 'Monitored', cls: 'info' } : { label: 'Unmonitored', cls: 'muted' },
+    ],
+    actions,
+    onClick: () => openDetailModal(ctx, {
+      mediaType: 'movie', tmdbId: m.tmdbId,
+      fallback: { title: m.title, year: m.year, overview: m.overview, genres: m.genres, rating, runtime: m.runtime, posterUrl: url },
+    }),
+  });
+}
+
+function movieRow(m, arr, ctx) {
+  const img = (m.images || []).find((i) => i.coverType === 'poster');
+  const rating = m.ratings && (m.ratings.tmdb?.value || m.ratings.imdb?.value || m.ratings.value);
+  const openInfo = () => openDetailModal(ctx, {
+    mediaType: 'movie', tmdbId: m.tmdbId,
+    fallback: { title: m.title, year: m.year, overview: m.overview, genres: m.genres, rating, runtime: m.runtime, posterUrl: img && (img.remoteUrl || img.url) },
+  });
+  return h('div', { class: 'row clickable', onclick: openInfo },
+    poster(img && (img.remoteUrl || img.url), ''),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title' }, `${m.title} `, h('span', { class: 'dim nowrap' }, m.year ? `(${m.year})` : '')),
+      h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+        h('span', {}, m.studio || '—'),
+        m.runtime ? h('span', {}, `${m.runtime} min`) : null,
+        h('span', {}, fmtBytes(m.sizeOnDisk || 0)),
+        m.hasFile ? h('span', { class: 'pill ok' }, 'Downloaded') : h('span', { class: 'pill warn' }, 'Missing'),
+        m.monitored ? h('span', { class: 'pill info' }, 'Monitored') : h('span', { class: 'pill muted' }, 'Unmonitored'),
+      ),
+    ),
+    actionGroup([
+      { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, false, m) },
+      { label: 'Interactive', title: 'Interactive search', primary: true, onClick: () => openReleaseSearch(ctx, ctx.service.key, `movieId=${m.id}`, `${m.title} (${m.year})`) },
+      { label: 'Auto', title: 'Automatic search', onClick: async () => {
+        try { await arr.post('command', { name: 'MoviesSearch', movieIds: [m.id] }); toast(`Searching for ${m.title}`, 'success'); }
+        catch (e2) { toast(e2.message, 'error'); }
+      } },
+      { label: 'Edit', title: 'Edit / delete', onClick: () => openEditMovie(arr, ctx, m) },
+    ], { sheetTitle: m.title }),
+  );
+}
+
+async function tabQueue(root, arr, ctx) {
+  const wrap = h('div', {});
+  mount(root, wrap);
+  const load = async (silent) => {
+    if (!silent) mount(wrap, skeletonList());
+    try {
+      const queue = await arr.get('queue?pageSize=50');
+      const records = queue.records || [];
+      // Always reconcile the attention-dedup state (even for an empty queue) so
+      // a cleared issue resets and can notify again if it recurs.
+      const banner = queueAttentionBanner(records, ctx);
+      if (!records.length) { mount(wrap, empty('', 'Queue is empty', 'Nothing downloading right now')); return; }
+      mount(wrap, banner || null, h('div', { class: 'list' }, ...records.map((r) => queueRow(r, arr, ctx))));
+    } catch (err) {
+      if (!silent) mount(wrap, empty('', 'Failed to load queue', err.message));
+    }
+  };
+  await load(false);
+  autoRefresh(wrap, 5000, () => load(true));
+}
+
+const _queueIssueState = new Map(); // serviceKey -> Set of currently-bad keys
+function queueAttentionBanner(records, ctx) {
+  const bad = records.filter((r) => /warning|stalled|failed|error/i.test(`${r.status} ${r.trackedDownloadStatus} ${(r.statusMessages || []).map((m) => m.title).join(' ')} ${r.errorMessage || ''}`));
+  const byKey = new Map();
+  for (const r of bad) byKey.set(`${ctx.service.key}:${r.downloadId || r.id}`, r);
+  const emitKeys = reconcileQueueIssues(_queueIssueState, ctx.service.key, byKey.keys());
+  for (const key of emitKeys) {
+    const r = byKey.get(key);
+    try { window.dispatchEvent(new CustomEvent('app-error', { detail: { message: `${ctx.service.label}: “${r.title}” ${r.errorMessage || 'download needs attention'}`, at: Date.now() } })); } catch { /* ignore */ }
+  }
+  if (!bad.length) return null;
+  return h('div', { class: 'attention-banner' },
+    h('span', { class: 'pill down' }, `${bad.length} need${bad.length === 1 ? 's' : ''} attention`),
+    h('span', { class: 'dim' }, bad.slice(0, 3).map((r) => r.title).join(' · ') + (bad.length > 3 ? '…' : '')),
+  );
+}
+
+function queueRow(r, arr, ctx) {
+  const prog = r.size ? ((r.size - (r.sizeleft || 0)) / r.size) * 100 : 0;
+  const remove = async () => {
+    try { await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=false`); toast('Removed from queue', 'success'); ctx.reload(); }
+    catch (e) { toast(e.message, 'error'); }
+  };
+  const row = h('div', { class: 'row' },
+    h('div', { class: 'poster', style: { width: '40px', height: '40px', fontSize: '18px' } }, '⬇'),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title' }, r.title),
+      h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+        h('span', { class: 'pill info' }, r.status || 'unknown'),
+        h('span', {}, r.indexer || ''),
+        h('span', {}, `${fmtBytes(r.sizeleft || 0)} left`),
+        r.timeleft ? h('span', {}, `ETA ${r.timeleft}`) : null,
+      ),
+      h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })),
+    ),
+    actionGroup([
+      { label: '\u21E9 Import', title: 'Manually import completed files', onClick: () => openManualImport(arr, 'movie', { downloadId: r.downloadId, title: r.title }) },
+      { label: '\u2715 Remove', variant: 'danger', primary: true, onClick: remove },
+      { label: '\u26D4 Blocklist & search', title: 'Blocklist this release and search for a replacement', onClick: async () => {
+        try {
+          await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=true`);
+          if (r.movieId) await arr.post('command', { name: 'MoviesSearch', movieIds: [r.movieId] });
+          toast('Blocklisted & searching for a replacement', 'success'); ctx.reload();
+        } catch (e) { toast(e.message, 'error'); }
+      } },
+    ], { sheetTitle: r.title }),
+  );
+  return swipeToAction(row, remove); // swipe left to remove (touch)
+}
+
+// ---- Add movie flow ----
+function openAddModal(arr, ctx) {
+  const results = h('div', { class: 'list', style: { marginTop: '12px' } });
+  const input = h('input', { class: 'input', placeholder: 'Search for a movie…' });
+  const doSearch = debounce(async () => {
+    const term = input.value.trim();
+    if (!term) return clear(results);
+    mount(results, spinner());
+    try {
+      const found = await arr.get(`movie/lookup?term=${encodeURIComponent(term)}`);
+      if (!found.length) return mount(results, empty('', 'No matches'));
+      mount(results, ...found.slice(0, 10).map((r) => lookupRow(r, arr, ctx)));
+    } catch (e) { mount(results, empty('', 'Search failed', e.message)); }
+  }, 400);
+  input.addEventListener('input', doSearch);
+  openModal({ title: 'Add Movie', body: h('div', {}, input, results), wide: true });
+  setTimeout(() => input.focus(), 50);
+}
+
+function lookupRow(r, arr, ctx) {
+  const img = (r.images || []).find((i) => i.coverType === 'poster');
+  return h('div', { class: 'row' },
+    poster(img && (img.remoteUrl || img.url), ''),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title' }, `${r.title} `, h('span', { class: 'dim' }, r.year ? `(${r.year})` : '')),
+      h('div', { class: 'row-sub' }, r.overview || ''),
+    ),
+    h('div', { class: 'row-actions' }, h('button', { class: 'btn sm primary', onclick: () => confirmAdd(r, arr, ctx) }, '＋ Add')),
+  );
+}
+
+async function confirmAdd(r, arr, ctx) {
+  let folders = [], profiles = [];
+  try { [folders, profiles] = await Promise.all([
+    cachedGet(`arr:${ctx.service.key}:rootfolder`, () => arr.get('rootfolder'), 600000),
+    cachedGet(`arr:${ctx.service.key}:qualityprofile`, () => arr.get('qualityprofile'), 600000),
+  ]); } catch { /* defaults */ }
+  const folderSel = h('select', { class: 'input' }, ...folders.map((f) => h('option', { value: f.path }, `${f.path} (${fmtBytes(f.freeSpace)} free)`)));
+  const profileSel = h('select', { class: 'input' }, ...profiles.map((p) => h('option', { value: p.id }, p.name)));
+  const searchChk = h('input', { type: 'checkbox', checked: true });
+
+  const doAdd = async () => {
+    const payload = {
+      title: r.title, tmdbId: r.tmdbId, year: r.year, titleSlug: r.titleSlug, images: r.images || [],
+      qualityProfileId: Number(profileSel.value) || 1,
+      rootFolderPath: folderSel.value || '/movies',
+      monitored: true,
+      addOptions: { searchForMovie: searchChk.checked },
+    };
+    try { await arr.post('movie', payload); invalidate(`arr:${ctx.service.key}:movie`); toast(`Added ${r.title}`, 'success'); closeModal(); ctx.reload(); }
+    catch (e) { toast(e.message, 'error'); }
+  };
+
+  openModal({
+    title: `Add “${r.title}”`,
+    body: h('div', { class: 'grid', style: { gap: '14px' } },
+      field('Root Folder', folderSel),
+      field('Quality Profile', profileSel),
+      h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, searchChk, 'Search on add'),
+    ),
+    footer: h('div', { style: { display: 'flex', gap: '10px' } },
+      h('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
+      h('button', { class: 'btn primary', onclick: doAdd }, 'Add Movie'),
+    ),
+  });
+}
+
+function field(label, control) {
+  return h('div', {}, h('div', { class: 'section-title', style: { margin: '0 0 6px' } }, label), control);
+}
+
+// ---- Edit / delete an existing movie ----
+async function openEditMovie(arr, ctx, m) {
+  let profiles = [];
+  try { profiles = await cachedGet(`arr:${ctx.service.key}:qualityprofile`, () => arr.get('qualityprofile'), 600000); } catch { /* defaults */ }
+  const allTags = await loadTags(arr);
+  const tagIds = [...(m.tags || [])];
+  const tagsEl = tagEditor(allTags, tagIds, arr);
+  const cmdBar = arrCommandBar(arr, 'movie', m.id);
+  const monitorChk = h('input', { type: 'checkbox', checked: m.monitored ? 'checked' : null });
+  const profileSel = h('select', { class: 'input' }, ...profiles.map((p) => h('option', { value: p.id, selected: p.id === m.qualityProfileId ? 'selected' : null }, p.name)));
+  const deleteFilesChk = h('input', { type: 'checkbox' });
+
+  const save = async () => {
+    const payload = { ...m, monitored: monitorChk.checked, qualityProfileId: Number(profileSel.value) || m.qualityProfileId, tags: tagIds };
+    try {
+      await arr.put(`movie/${m.id}`, payload);
+      invalidate(`arr:${ctx.service.key}:movie`);
+      toast(`Saved ${m.title}`, 'success'); closeModal(); ctx.reload();
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  const del = () => confirmModal({
+    title: 'Remove movie', message: `Remove "${m.title}" from ${ctx.service.label}?${deleteFilesChk.checked ? ' Files on disk will be deleted.' : ''}`,
+    confirmLabel: 'Remove', danger: true,
+    onConfirm: async () => {
+      try {
+        await arr.del(`movie/${m.id}?deleteFiles=${deleteFilesChk.checked}&addImportListExclusion=false`);
+        invalidate(`arr:${ctx.service.key}:movie`);
+        toast(`Removed ${m.title}`, 'success'); closeModal(); ctx.reload();
+      } catch (e) { toast(e.message, 'error'); }
+    },
+  });
+
+  openModal({
+    title: `Edit “${m.title}”`,
+    body: h('div', { class: 'grid', style: { gap: '14px' } },
+      field('Quality Profile', profileSel),
+      field('Tags', tagsEl),
+      field('Maintenance', cmdBar),
+      h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, monitorChk, 'Monitored'),
+      h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, deleteFilesChk, 'Also delete files on disk (when removing)'),
+    ),
+    footer: h('div', { style: { display: 'flex', gap: '10px', justifyContent: 'space-between', width: '100%' } },
+      h('button', { class: 'btn danger sm', onclick: del }, 'Remove'),
+      h('div', { style: { display: 'flex', gap: '10px' } },
+        h('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
+        h('button', { class: 'btn primary', onclick: save }, 'Save'),
+      ),
+    ),
+  });
+}
