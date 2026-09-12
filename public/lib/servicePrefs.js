@@ -4,6 +4,41 @@
 const HIDDEN_KEY = 'svc-hidden';
 const ORDER_KEY = 'svc-order';
 
+// Mobile bottom-bar favorites. Keep the existing storage key so current users
+// retain their choices when the control moves from the all-services sheet into
+// Settings. Adding a fifth favorite preserves the previous behavior by removing
+// the oldest entry.
+const PINNED_KEY = 'bn:pinned';
+export const MAX_PINNED_SERVICES = 4;
+
+function pinStorage(storage) { return storage || globalThis.localStorage; }
+
+export function pinnedServices(storage) {
+  try {
+    const parsed = JSON.parse(pinStorage(storage)?.getItem(PINNED_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.filter((key) => typeof key === 'string' && key))].slice(-MAX_PINNED_SERVICES);
+  } catch { return []; }
+}
+
+export function isServicePinned(key, storage) { return pinnedServices(storage).includes(key); }
+
+export function setServicePinned(key, pinned, storage) {
+  const target = pinStorage(storage);
+  const keys = pinnedServices(storage).filter((entry) => entry !== key);
+  let removed = null;
+  if (pinned) {
+    if (keys.length >= MAX_PINNED_SERVICES) removed = keys.shift() || null;
+    keys.push(key);
+  }
+  try { target?.setItem(PINNED_KEY, JSON.stringify(keys)); } catch { /* unavailable */ }
+  return { keys, pinned: keys.includes(key), removed };
+}
+
+export function toggleServicePinned(key, storage) {
+  return setServicePinned(key, !isServicePinned(key, storage), storage);
+}
+
 function readHidden() {
   try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]')); }
   catch { return new Set(); }

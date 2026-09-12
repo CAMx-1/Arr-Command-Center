@@ -3,7 +3,7 @@ import { SERVICE_META } from '../app.js';
 import { getTheme, getAccent, applyTheme, applyAccent, ACCENTS, ACCENT_NAMES } from '../lib/theme.js';
 import { globalMode, setGlobalMode } from '../lib/viewMode.js';
 import { getDensity, setDensity, DENSITIES } from '../lib/density.js';
-import { isHidden, setHidden, orderServices, setOrder } from '../lib/servicePrefs.js';
+import { isHidden, setHidden, orderServices, setOrder, isServicePinned, toggleServicePinned } from '../lib/servicePrefs.js';
 import * as push from '../lib/push.js';
 import { renderQueueCleaner, renderHunting } from '../lib/automationUI.js';
 import { dashboardSettingsCard } from '../lib/dashboardSettings.js';
@@ -67,6 +67,7 @@ export async function renderSettings(root, ctx) {
     const st = status[svc.key];
     const online = st && st.ok;
     const hidden = isHidden(svc.key);
+    const favorite = isServicePinned(svc.key);
     return h('div', {
       class: `card svc-card-drag${hidden ? ' svc-hidden-card' : ''}`,
       draggable: 'true',
@@ -93,6 +94,23 @@ export async function renderSettings(root, ctx) {
         hidden ? h('span', { class: 'pill muted' }, 'Hidden from nav') : null,
       ),
       h('div', { class: 'meta-line svc-controls', style: { marginTop: '10px' } },
+        h('button', {
+          class: `btn sm svc-favorite-btn ${favorite ? 'primary' : ''}`,
+          type: 'button',
+          'aria-pressed': favorite ? 'true' : 'false',
+          title: favorite ? 'Remove from mobile bottom bar' : 'Add to mobile bottom bar',
+          onclick: () => {
+            const result = toggleServicePinned(svc.key);
+            const removedSvc = result.removed && state.services.find((entry) => entry.key === result.removed);
+            const message = result.pinned
+              ? `${svc.label} added to the mobile bottom bar${removedSvc ? ` · replaced ${removedSvc.label}` : ''}`
+              : `${svc.label} removed from the mobile bottom bar`;
+            toast(message, 'success');
+            ctx.reload();
+          },
+        },
+        h('span', { class: 'svc-favorite-star', 'aria-hidden': 'true' }, favorite ? '★' : '☆'),
+        favorite ? 'Favorited' : 'Add to bottom bar'),
         (st && !st.ok) ? h('button', { class: 'btn sm', title: 'Re-check connection', onclick: () => renderSettings(root, ctx) }, '↻ Retry') : null,
         cfg.mock ? null : h('button', { class: 'btn sm', onclick: () => openServiceForm(root, ctx, svc.key, svc) }, 'Edit'),
         h('button', { class: `btn sm ${hidden ? 'primary' : ''}`, onclick: () => { setHidden(svc.key, !hidden); ctx.reload(); } }, hidden ? 'Show' : 'Hide'),
@@ -128,7 +146,7 @@ export async function renderSettings(root, ctx) {
     localMode ? serverOnlyCard('Automation') : h('div', { class: 'card', id: 'automation-panel' }, h('div', { class: 'dim' }, 'Loading…')),
     h('div', { class: 'section-title' }, 'Services'),
     h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', margin: '-4px 0 12px' } },
-      h('div', { class: 'dim', style: { fontSize: '13px', flex: '1' } }, localMode ? 'Manage local connections under “Connection” above. Drag a service card to reorder it, or Hide it from the sidebar and Home.' : 'Drag a service card to reorder it, and use Hide to remove one from the sidebar and Home (it stays configured and reachable directly).'),
+      h('div', { class: 'dim', style: { fontSize: '13px', flex: '1' } }, (localMode ? 'Manage local connections under “Connection” above. Drag a service card to reorder it, or Hide it from the sidebar and Home.' : 'Drag a service card to reorder it, and use Hide to remove one from the sidebar and Home (it stays configured and reachable directly).') + ' Add up to four favorites to the mobile bottom bar.'),
       (cfg.mock || localMode) ? null : h('button', { class: 'btn sm primary hex-btn', onclick: () => openServiceForm(root, ctx, null, null) }, '＋ Add service'),
     ),
     h('div', { class: 'grid cols-2' }, ...serviceCards),

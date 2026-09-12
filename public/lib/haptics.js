@@ -98,7 +98,7 @@ export function notificationHaptic(type = 'SUCCESS', env) {
 }
 
 const INTERACTIVE_SELECTOR = 'button, a[href], [role="button"], input[type="button"], input[type="submit"], input[type="reset"], input[type="checkbox"], input[type="radio"], input[type="range"], select, summary';
-const EXPLICIT_HAPTIC_SELECTOR = '.hive-cell, .bn-hex, .bn-grip, .allsvc-pin, .allsvc-item';
+const EXPLICIT_HAPTIC_SELECTOR = '.hive-cell, .bn-hex, .bn-grip, .allsvc-item';
 
 export function hapticControlFor(target) {
   try {

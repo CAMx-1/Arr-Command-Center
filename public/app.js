@@ -5,7 +5,7 @@ import { reliableActivation } from './lib/tapActivation.js';
 // Local (direct) mode: installs a fetch shim that services /api/* on-device
 // when enabled. Imported first so it wraps fetch before any request is made.
 import './lib/localBackend.js';
-import { orderServices, isHidden } from './lib/servicePrefs.js';
+import { orderServices, isHidden, pinnedServices } from './lib/servicePrefs.js';
 import { splitHive, flyoutLayout } from './lib/hiveLayout.js';
 import { hiveSignature, statusDotClass } from './lib/hiveState.js';
 import { cachedGet } from './lib/cache.js';
@@ -367,7 +367,7 @@ function currentHiveSignature() {
   return hiveSignature({
     route: currentRoute(),
     services: ordered,
-    pinned: loadPinned(),
+    pinned: pinnedServices(),
     isMobile: isMobileHive(),
     hiveExpanded,
     plexEnabled: !!(state.config && state.config.auth && state.config.auth.plexEnabled),
@@ -393,17 +393,6 @@ function updateStatusDots() {
 // ---------- Mobile hex bottom navigation ----------
 
 // User-pinned quick-picks for the bottom bar (max 4). Falls back to nav order.
-function loadPinned() { try { return JSON.parse(localStorage.getItem('bn:pinned') || '[]'); } catch { return []; } }
-function savePinned(keys) { try { localStorage.setItem('bn:pinned', JSON.stringify(keys.slice(0, 4))); } catch { /* ignore */ } }
-function isPinned(key) { return loadPinned().includes(key); }
-function togglePinned(key) {
-  const p = loadPinned();
-  const i = p.indexOf(key);
-  if (i >= 0) p.splice(i, 1);
-  else { if (p.length >= 4) p.shift(); p.push(key); }
-  savePinned(p);
-  buildBottomNav();
-}
 
 // Service-specific quick destinations for the bottom-bar long-press menu. Each
 // entry is [tabId, label] where tabId matches the `tabs()` id used by that
@@ -483,7 +472,7 @@ function buildBottomNav() {
   const base = [...state.services].sort((a, b) => (a.type === 'overseerr' ? 0 : 1) - (b.type === 'overseerr' ? 0 : 1));
   const nav = orderServices(base).filter((s) => !isHidden(s.key));
   // Quick-picks: pinned first (in order), then fill from nav order up to 4.
-  const pinned = loadPinned().map((k) => nav.find((s) => s.key === k)).filter(Boolean);
+  const pinned = pinnedServices().map((k) => nav.find((s) => s.key === k)).filter(Boolean);
   const quick = [...pinned];
   for (const s of nav) { if (quick.length >= 4) break; if (!quick.includes(s)) quick.push(s); }
   quick.length = Math.min(quick.length, 4);
@@ -575,19 +564,14 @@ function unlockScroll() {
   window.scrollTo(0, _lockedScrollY);
 }
 
-// Build (or rebuild) the all-services sheet contents. Each service has a pin
-// toggle (★) that adds/removes it from the bottom bar's quick-picks (max 4).
+// Build (or rebuild) the all-services sheet contents. Favorites are managed in
+// Settings → Services, where each service has a full-size accessible control.
 function renderAllServicesGrid() {
   const sheet = document.getElementById('allsvc-sheet');
   if (!sheet) return;
   const route = currentRoute();
   const base = [...state.services].sort((a, b) => (a.type === 'overseerr' ? 0 : 1) - (b.type === 'overseerr' ? 0 : 1));
   const nav = orderServices(base).filter((s) => !isHidden(s.key));
-  const pinBtn = (svc) => h('span', { class: `allsvc-pin ${isPinned(svc.key) ? 'on' : ''}`, role: 'button',
-    title: isPinned(svc.key) ? 'Unpin from bottom bar' : 'Pin to bottom bar',
-    onpointerup: (e) => { e.stopPropagation(); },
-    ontouchend: (e) => { e.stopPropagation(); },
-    onclick: (e) => { e.stopPropagation(); haptic(); togglePinned(svc.key); renderAllServicesGrid(); } }, isPinned(svc.key) ? '\u2605' : '\u2606');
   const item = (label, active, icon, onClick, dot, svc) => {
     const activation = reliableActivation(() => {
       // Complete the history-safe route change before crossing the native
@@ -602,7 +586,6 @@ function renderAllServicesGrid() {
     },
       h('span', { class: 'allsvc-hexwrap' },
         h('span', { class: `bn-hex ${active ? 'active' : ''}`, dataset: svc ? { svcKey: svc.key } : null }, dot ? h('span', { class: `hive-dot ${dot}` }) : null, h('span', { class: 'hive-icon' }, icon)),
-        svc ? pinBtn(svc) : null,
       ),
       h('span', { class: 'allsvc-label' }, label));
   };
@@ -618,7 +601,7 @@ function renderAllServicesGrid() {
   mount(sheet,
     h('div', { class: 'allsvc-grip' }),
     h('div', { class: 'section-title', style: { marginTop: '2px' } }, 'All services'),
-    h('div', { class: 'allsvc-hint' }, 'Tap \u2606 to pin up to 4 services to the bottom bar'),
+    h('div', { class: 'allsvc-hint' }, 'Manage bottom bar favorites in Settings → Services'),
     h('div', { class: 'allsvc-grid' }, ...items));
 }
 
