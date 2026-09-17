@@ -1,5 +1,5 @@
 import { api } from './lib/api.js';
-import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, debounce, spinner, empty, poster, fmtBytes, copyable, registerOverlay, closeOverlay, unregisterOverlay, overlayOpen } from './lib/ui.js';
+import { h, mount, clear, toast, svcIcon, confirmModal, openModal, closeModal, spinner, empty, poster, fmtBytes, copyable, registerOverlay, closeOverlay, unregisterOverlay, overlayOpen } from './lib/ui.js';
 import { haptic, installHapticFeedback } from './lib/haptics.js';
 import { reliableActivation } from './lib/tapActivation.js';
 // Local (direct) mode: installs a fetch shim that services /api/* on-device
@@ -837,37 +837,77 @@ function openShortcutsHelp() {
 }
 
 function openSearch() {
-  const input = h('input', { class: 'input', type: 'search', enterkeyhint: 'search', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Search libraries & discover new titles…' });
-  const results = h('div', { class: 'list', style: { marginTop: '12px' } });
+  const input = h('input', { class: 'input', type: 'search', name: 'query', enterkeyhint: 'search', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Search libraries & discover new titles…' });
+  const results = h('div', { class: 'list search-results', 'aria-live': 'polite' });
   let typeFilter = 'all';
-  const seg = (t, label) => h('button', { class: `view-seg ${typeFilter === t ? 'active' : ''}`, dataset: { t }, onclick: () => setType(t) }, label);
-  const filterBar = h('div', { class: 'view-toggle', style: { marginTop: '10px' } }, seg('all', 'All'), seg('movie', 'Movies'), seg('tv', 'TV'));
+  let searchTimer = 0;
+  let searchRun = 0;
+  let keyboardActive = false;
+  const seg = (t, label) => h('button', { class: `view-seg ${typeFilter === t ? 'active' : ''}`, type: 'button', dataset: { t }, onclick: () => setType(t) }, label);
+  const filterBar = h('div', { class: 'view-toggle search-filters' }, seg('all', 'All'), seg('movie', 'Movies'), seg('tv', 'TV'));
   const tf = (mt) => typeFilter === 'all' || typeFilter === mt;
-  const run = debounce(async () => {
+  const dismissKeyboard = () => {
+    const shouldHide = keyboardActive;
+    keyboardActive = false;
+    input.blur();
+    if (!shouldHide) return;
+    const keyboard = window.Capacitor?.Plugins?.Keyboard;
+    if (keyboard?.hide) {
+      try { keyboard.hide()?.catch?.(() => {}); } catch { /* optional native plugin */ }
+    }
+  };
+  const runSearch = async () => {
+    const runId = ++searchRun;
     const q = input.value.trim();
     if (!q) { clear(results); return; }
     mount(results, spinner());
     const ql = q.toLowerCase();
     const lib = await loadLibraries();
-    let libMatches = lib.filter((x) => x.title.toLowerCase().includes(ql) && tf(x.mediaType)).slice(0, 40);
+    if (runId !== searchRun) return;
+    const libMatches = lib.filter((x) => x.title.toLowerCase().includes(ql) && tf(x.mediaType)).slice(0, 40);
     const ownedTmdb = new Set(lib.map((x) => x.tmdbId).filter(Boolean));
     let discover = [];
     const seerrSvc = state.services.find((s) => s.type === 'overseerr' && s.configured);
     if (seerrSvc) {
       try {
         const data = await api.seerr(seerrSvc.key).get(`search?query=${encodeURIComponent(q)}`);
+        if (runId !== searchRun) return;
         discover = (data.results || []).filter((x) => x.mediaType !== 'person' && tf(x.mediaType) && !ownedTmdb.has(x.id)).slice(0, 20);
       } catch { /* ignore */ }
     }
+    if (runId !== searchRun) return;
     if (!libMatches.length && !discover.length) return mount(results, empty('', 'No matches', 'Try a different title'));
     const nodes = [];
     if (libMatches.length) { nodes.push(h('div', { class: 'section-title' }, 'In your library')); nodes.push(...libMatches.map(searchRow)); }
     if (discover.length) { nodes.push(h('div', { class: 'section-title', style: { marginTop: '14px' } }, 'Discover')); nodes.push(...discover.map((r) => discoverSearchRow(r, seerrSvc))); }
     mount(results, ...nodes);
-  }, 300);
-  function setType(t) { typeFilter = t; for (const b of filterBar.children) b.classList.toggle('active', b.dataset.t === t); run(); }
-  input.addEventListener('input', run);
-  openModal({ title: 'Search', body: h('div', {}, input, filterBar, results), wide: true });
+  };
+  const scheduleSearch = () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { searchTimer = 0; runSearch(); }, 300);
+  };
+  function setType(t) {
+    typeFilter = t;
+    for (const b of filterBar.children) b.classList.toggle('active', b.dataset.t === t);
+    scheduleSearch();
+  }
+  const form = h('form', {
+    class: 'search-form',
+    role: 'search',
+    onsubmit: (e) => {
+      e.preventDefault();
+      clearTimeout(searchTimer);
+      searchTimer = 0;
+      dismissKeyboard();
+      runSearch();
+    },
+  }, input, h('button', { class: 'btn primary search-submit', type: 'submit' }, 'Search'));
+  input.addEventListener('focus', () => { keyboardActive = true; });
+  input.addEventListener('input', scheduleSearch);
+  results.addEventListener('touchmove', dismissKeyboard, { passive: true });
+  results.addEventListener('scroll', dismissKeyboard, { passive: true });
+  const overlay = openModal({ title: 'Search', body: h('div', { class: 'search-shell' }, form, filterBar, results), wide: true });
+  overlay.classList.add('search-modal-overlay');
   setTimeout(() => input.focus(), 50);
 }
 

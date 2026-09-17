@@ -462,6 +462,12 @@ html[data-theme="dark"] .hex-disk-fill {
 .input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16); }
 .search-row { display: flex; gap: 10px; margin-bottom: 4px; }
 .search-row .input { flex: 1; }
+.search-shell { min-height: 0; }
+.search-form { display: flex; align-items: stretch; gap: 10px; }
+.search-form .input { flex: 1 1 auto; min-width: 0; }
+.search-submit { flex: 0 0 auto; }
+.search-filters { margin-top: 10px; }
+.search-results { margin-top: 12px; }
 
 /* tabs */
 .tabs { position: relative; display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin-bottom: 20px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none; }
@@ -851,6 +857,16 @@ html[data-theme="dark"] .shx-face { background: linear-gradient(160deg, var(--su
   .modal { width: 100%; max-width: none; max-height: 92vh; border-radius: 20px 20px 0 0; animation: sheetUp 0.28s var(--ease); }
   .modal-head { position: sticky; top: 0; background: var(--surface); z-index: 2; }
   .modal-foot { position: sticky; bottom: 0; background: var(--surface); padding-bottom: calc(15px + env(safe-area-inset-bottom)); }
+  /* Search becomes a true full-screen view on phones. Keeping the controls
+     fixed and making only the results scroll prevents the keyboard from
+     covering matches and gives iOS a reliable scroll surface to dismiss it. */
+  .search-modal-overlay { align-items: stretch; }
+  .search-modal-overlay .modal { display: flex; flex-direction: column; width: 100%; height: 100dvh; max-width: none !important; max-height: 100dvh; border-radius: 0; overflow: hidden; animation: fadeIn 0.2s var(--ease); }
+  .search-modal-overlay .modal-head { flex: 0 0 auto; padding-top: calc(18px + env(safe-area-inset-top)); }
+  .search-modal-overlay .modal-body { display: flex; flex: 1 1 auto; min-height: 0; overflow: hidden; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+  .search-shell { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; width: 100%; }
+  .search-form, .search-filters { flex: 0 0 auto; }
+  .search-results { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
   .hist-detail-head { flex-direction: column; align-items: center; text-align: center; }
   .hist-detail-head .poster { width: 96px; height: 144px; }
   .pw-field { grid-template-columns: 1fr; gap: 4px; }
