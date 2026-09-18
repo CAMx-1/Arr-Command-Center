@@ -2,8 +2,8 @@
 
 ## Version and build
 
-- Marketing version: `1.0.0`
-- Build number: `1` (increment for every TestFlight/App Store upload)
+- Marketing version: `1.1.0`
+- Build number: `2` (increment for every TestFlight/App Store upload)
 - Bundle identifier: `app.arrcommandcenter.mobile`
 - Minimum deployment target: iOS 13.0
 
