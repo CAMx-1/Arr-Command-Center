@@ -416,10 +416,6 @@ function connectionModeCard(root, ctx) {
 // Generic local-connection manager: lists configured connections and provides
 // a single add/edit form with a service-type picker. Covers every service type
 // supported in local mode (all *arr + download/indexer/subtitle/analytics).
-function localConnectionsPanel(root, ctx) {
-  const defs = LOCAL_SERVICE_DEFS;
-
-
 
 async function hydrateLocalFallbackPanel(ctx) {
   const panel = document.getElementById('local-fallback-panel');
@@ -488,6 +484,11 @@ async function hydrateLocalFallbackPanel(ctx) {
     h('p', { class: 'dim settings-copy' }, 'Plex and services without a local-mode API key are skipped. Local mode cannot provide server-only system monitoring, notifications, or automation.'),
   );
 }
+
+function localConnectionsPanel(root, ctx) {
+  const defs = LOCAL_SERVICE_DEFS;
+
+
   const label = h('input', { class: 'input' });
   const url = h('input', { class: 'input', type: 'url', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' });
   const key = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' });
