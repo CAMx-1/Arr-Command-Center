@@ -66,10 +66,16 @@ export async function saveLocalFallbackSnapshot(snapshot) {
   return snapshot;
 }
 
-export async function loadLocalFallbackSnapshot() {
+export async function loadLocalFallbackSnapshot({ timeoutMs = 1200 } = {}) {
   try {
-    const result = await plugin('Preferences')?.get?.({ key: FALLBACK_STORAGE_KEY });
-    if (result?.value) return JSON.parse(result.value);
+    const request = plugin('Preferences')?.get?.({ key: FALLBACK_STORAGE_KEY });
+    if (request) {
+      const result = await Promise.race([
+        Promise.resolve(request),
+        new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+      ]);
+      if (result?.value) return JSON.parse(result.value);
+    }
   } catch { /* local fallback below */ }
   try { return JSON.parse(localStorage.getItem(FALLBACK_STORAGE_KEY) || 'null'); }
   catch { return null; }
