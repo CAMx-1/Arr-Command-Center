@@ -353,6 +353,14 @@ function makeOverseerr() {
     res.json({ pageInfo: { pages: 1, pageSize: 20, results: results.length, page: 1 }, results });
   });
   app.get('/api/v1/request/count', (req, res) => res.json({ total: requests.length, pending: requests.filter(r => r.status === 1).length, approved: requests.filter(r => r.status === 2).length, declined: requests.filter(r => r.status === 3).length }));
+  app.get('/api/v1/media', (req, res) => {
+    const results = [
+      { id: 201, mediaType: 'movie', tmdbId: 786892, status: 5, mediaAddedAt: new Date(Date.now() - 2 * 3600000).toISOString() },
+      { id: 202, mediaType: 'tv', tmdbId: 95396, status: 5, mediaAddedAt: new Date(Date.now() - 8 * 3600000).toISOString() },
+      { id: 203, mediaType: 'movie', tmdbId: 533535, status: 5, mediaAddedAt: new Date(Date.now() - 26 * 3600000).toISOString() },
+    ];
+    res.json({ pageInfo: { pages: 1, pageSize: 60, results: results.length, page: 1 }, results });
+  });
   app.post('/api/v1/request/:id/:action', (req, res) => {
     const r = requests.find(x => x.id === Number(req.params.id));
     if (!r) return res.status(404).json({ error: 'not found' });

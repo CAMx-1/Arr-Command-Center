@@ -594,7 +594,7 @@ function renderAllServicesGrid() {
       h('span', { class: 'allsvc-hexwrap' },
         h('span', { class: `bn-hex ${active ? 'active' : ''}`, dataset: svc ? { svcKey: svc.key } : null }, dot ? h('span', { class: `hive-dot ${dot}` }) : null, h('span', { class: 'hive-icon' }, icon)),
       ),
-      h('span', { class: 'allsvc-label' }, label));
+      h('span', { class: 'allsvc-label' }, label.length > 12 && label.includes(' (') ? label.replace(' (', '\n(') : label));
   };
   const items = [
     item('Home', route === 'home', hiveImg('/icons/home-icon.png'), () => { location.hash = '#/home'; }),
@@ -1336,4 +1336,5 @@ async function init() {
   });
 }
 
-init();
+if (!window.__ACC_SETUP_REQUIRED__ || window.__ACC_BOOTSTRAP_READY__) init();
+else window.addEventListener('acc-bootstrap-ready', init, { once: true });

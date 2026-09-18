@@ -4,7 +4,8 @@ import { getTheme, getAccent, applyTheme, applyAccent, ACCENTS, ACCENT_NAMES } f
 import { globalMode, setGlobalMode } from '../lib/viewMode.js';
 import { getDensity, setDensity, DENSITIES } from '../lib/density.js';
 import { isHidden, setHidden, orderServices, setOrder, isServicePinned, toggleServicePinned, pinnedServices, movePinnedService, setServicePinned } from '../lib/servicePrefs.js';
-import { getNativeAppInfo, connectedServerOrigin, changeServer, reloadInterface, isNativeApp } from '../lib/nativeApp.js';
+import { getNativeAppInfo, connectedServerOrigin, changeServer, reloadInterface, isNativeApp, saveLocalFallbackSnapshot, loadLocalFallbackSnapshot, persistAppMode } from '../lib/nativeApp.js';
+import { createLocalFallbackSnapshot, applyLocalFallbackSnapshot, fallbackMetadata } from '../lib/fallbackSync.js';
 import { diagnosticReport, copyDiagnosticReport, clearClientLog, readClientLog } from '../lib/clientDiagnostics.js';
 import * as push from '../lib/push.js';
 import { renderQueueCleaner, renderHunting } from '../lib/automationUI.js';
@@ -126,7 +127,7 @@ export async function renderSettings(root, ctx) {
     h('p', { class: 'dim', style: { margin: '0 0 8px', lineHeight: '1.6' } },
       'Services, API keys and Cloudflare Access tokens are configured server-side in ',
       h('span', { class: 'mono' }, 'config.json'),
-      ' (or via environment variables). Secrets are never sent to the browser. Edit that file and restart the server to change services.'),
+      ' (or via environment variables). Normal config responses remain secret-free; credentials are sent to the native app only when you explicitly confirm a local fallback sync. Edit the file and restart the server to change services.'),
     h('p', { class: 'dim', style: { margin: 0, lineHeight: '1.6' } },
       'A green dot means the service is reachable through the proxy (including Cloudflare Access, when enabled). A red dot means a connection or auth problem.'),
   );
@@ -168,6 +169,7 @@ export async function renderSettings(root, ctx) {
   );
 
   hydrateMobileAppPanel(ctx);
+  if (!localMode) hydrateLocalFallbackPanel(ctx);
 
   if (!localMode) hydrateDiagnostics(ctx);
   if (!localMode) hydrateLinksAdmin(ctx);
@@ -397,7 +399,7 @@ function connectionModeCard(root, ctx) {
   const mode = getAppMode();
   const modeBtn = (val, label) => h('button', {
     class: `btn sm hex-btn ${mode === val ? 'primary' : ''}`,
-    onclick: () => { if (getAppMode() === val) return; setAppMode(val); location.reload(); },
+    onclick: async () => { if (getAppMode() === val) return; setAppMode(val); await persistAppMode(val); location.reload(); },
   }, label);
   const rows = [
     settingRow('Connection mode', h('span', { style: { display: 'flex', gap: '8px' } }, modeBtn('server', 'Server'), modeBtn('local', 'Local only'))),
@@ -407,6 +409,7 @@ function connectionModeCard(root, ctx) {
         : 'Server mode routes everything through the Arr Command Center backend (API keys + Cloudflare Access injected server-side).'),
   ];
   if (mode === 'local') rows.push(localConnectionsPanel(root, ctx));
+  else if (isNativeApp()) rows.push(h('div', { id: 'local-fallback-panel', class: 'local-fallback-panel' }, h('div', { class: 'dim' }, 'Loading local fallback status…')));
   return h('div', { class: 'card' }, ...rows);
 }
 
@@ -416,6 +419,75 @@ function connectionModeCard(root, ctx) {
 function localConnectionsPanel(root, ctx) {
   const defs = LOCAL_SERVICE_DEFS;
 
+
+
+async function hydrateLocalFallbackPanel(ctx) {
+  const panel = document.getElementById('local-fallback-panel');
+  if (!panel) return;
+  let snapshot = null;
+  let metadata = null;
+  try {
+    snapshot = await loadLocalFallbackSnapshot();
+    if (snapshot) metadata = fallbackMetadata(snapshot);
+  } catch { snapshot = null; metadata = null; }
+
+  const syncNow = async () => {
+    mount(panel, h('div', { class: 'dim' }, 'Syncing server settings to this device…'));
+    try {
+      const payload = await ctx.api.exportLocalFallback();
+      const next = createLocalFallbackSnapshot(payload, localStorage, {
+        dashboardUser: ctx.state.config?.auth?.user,
+      });
+      const meta = applyLocalFallbackSnapshot(next, localStorage);
+      await saveLocalFallbackSnapshot(next);
+      toast(`Local fallback synced · ${meta.serviceCount} service${meta.serviceCount === 1 ? '' : 's'}`, 'success', 3200);
+      await hydrateLocalFallbackPanel(ctx);
+    } catch (e) {
+      toast(e.message || 'Could not sync local fallback', 'error', 4200);
+      await hydrateLocalFallbackPanel(ctx);
+    }
+  };
+
+  const requestSync = () => confirmModal({
+    title: metadata ? 'Replace local fallback?' : 'Create local fallback?',
+    message: 'This copies supported service URLs, API keys, Cloudflare Access credentials, and safe interface preferences from the server to this device. Existing local connections will be replaced. The credentials remain inside the iOS app sandbox.',
+    confirmLabel: metadata ? 'Replace fallback' : 'Sync to device',
+    onConfirm: () => { syncNow(); },
+  });
+
+  const useNow = async () => {
+    try {
+      const saved = await loadLocalFallbackSnapshot();
+      if (!saved) throw new Error('No local fallback has been synced');
+      applyLocalFallbackSnapshot(saved, localStorage);
+      setAppMode('local');
+      await persistAppMode('local');
+      location.reload();
+    } catch (e) { toast(e.message || 'Could not activate local fallback', 'error'); }
+  };
+
+  const status = metadata
+    ? h('span', { class: 'pill ok' }, `${metadata.serviceCount} synced`)
+    : h('span', { class: 'pill muted' }, 'Not synced');
+  const skipped = metadata && metadata.skipped && metadata.skipped.length
+    ? h('details', { class: 'fallback-skipped' },
+        h('summary', {}, `${metadata.skipped.length} service${metadata.skipped.length === 1 ? '' : 's'} skipped`),
+        h('div', { class: 'dim', style: { marginTop: '6px' } }, ...metadata.skipped.map((item) => h('div', {}, `${item.label || item.key}: ${item.reason}`))))
+    : null;
+
+  mount(panel,
+    h('div', { class: 'local-fallback-head' }, h('strong', {}, 'Local fallback'), status),
+    h('p', { class: 'dim settings-copy' }, metadata
+      ? `Last synced ${new Date(metadata.syncedAt).toLocaleString()}. If the server cannot be reached on a cold launch, the app will automatically open this saved local configuration.`
+      : 'Save supported server connections on this device so the app can automatically enter local mode when the server or Docker container is unreachable.'),
+    skipped,
+    h('div', { class: 'settings-action-grid' },
+      h('button', { class: 'btn sm primary', onclick: requestSync }, metadata ? 'Sync again' : 'Sync server to device'),
+      metadata ? h('button', { class: 'btn sm', onclick: useNow }, 'Use local fallback now') : null,
+    ),
+    h('p', { class: 'dim settings-copy' }, 'Plex and services without a local-mode API key are skipped. Local mode cannot provide server-only system monitoring, notifications, or automation.'),
+  );
+}
   const label = h('input', { class: 'input' });
   const url = h('input', { class: 'input', type: 'url', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' });
   const key = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' });

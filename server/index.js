@@ -8,7 +8,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, publicConfig, ALLOWED_SERVICE_TYPES, saveServiceToDisk, removeServiceFromDisk, isInsecureExposure, buildServiceUpdate } from './config.js';
+import { loadConfig, publicConfig, localFallbackConfig, ALLOWED_SERVICE_TYPES, saveServiceToDisk, removeServiceFromDisk, isInsecureExposure, buildServiceUpdate } from './config.js';
 import { createProxyRouter, pingService } from './proxy.js';
 import { startMockServices } from './mock/mockServices.js';
 import { createPlexAuth } from './plexAuth.js';
@@ -161,6 +161,17 @@ if (!localOnly && !anyAuth) {
 
 // Public (secret-free) config for the frontend.
 app.get('/api/config', (req, res) => res.json({ ...publicConfig(cfg), buildId: BUILD_ID, auth: { plexEnabled: plexAuth.enabled, user: req.plexUser || null } }));
+
+// Explicit credential-bearing export for the native local-fallback feature.
+// Authentication middleware above protects this route; normal /api/config and
+// diagnostics remain secret-free. POST + confirmation prevents prefetching or
+// accidental navigation from returning service credentials.
+app.post('/api/config/local-fallback', express.json({ limit: '1kb' }), (req, res) => {
+  res.set('Cache-Control', 'no-store, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  if (!req.body || req.body.confirm !== true) return res.status(400).json({ error: 'Explicit confirmation is required' });
+  res.json(localFallbackConfig(cfg));
+});
 
 // Build identity for the frontend update banner. Never cached so a new deploy
 // is seen promptly by polling clients.

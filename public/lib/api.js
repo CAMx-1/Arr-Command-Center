@@ -37,6 +37,7 @@ export const api = {
   async loginLog() { return parse(await fetch('/api/login-log')); },
   async saveService(key, service) { return parse(await fetch('/api/config/service', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, service }) })); },
   async deleteService(key) { return parse(await fetch(`/api/config/service/${encodeURIComponent(key)}`, { method: 'DELETE' })); },
+  async exportLocalFallback() { return parse(await fetch('/api/config/local-fallback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true }) })); },
 
   // Generic proxied request to a service
   async proxy(service, path, { method = 'GET', body, headers } = {}) {

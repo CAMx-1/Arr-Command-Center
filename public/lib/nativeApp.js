@@ -1,3 +1,4 @@
+import { FALLBACK_STORAGE_KEY, MODE_KEY } from './fallbackSync.js';
 import { isNativeCapacitorRuntime } from './tapActivation.js';
 
 const SERVER_KEY = 'acc:server-base';
@@ -56,6 +57,29 @@ export async function forgetServer() {
   try { await plugin('Preferences')?.remove?.({ key: SERVER_KEY }); } catch { /* ignore */ }
   try { localStorage.removeItem(SERVER_KEY); } catch { /* ignore */ }
   if (typeof window.accClearServerBase === 'function') await window.accClearServerBase();
+}
+
+export async function saveLocalFallbackSnapshot(snapshot) {
+  const value = JSON.stringify(snapshot);
+  try { localStorage.setItem(FALLBACK_STORAGE_KEY, value); } catch { /* ignore */ }
+  try { await plugin('Preferences')?.set?.({ key: FALLBACK_STORAGE_KEY, value }); } catch { /* optional plugin */ }
+  return snapshot;
+}
+
+export async function loadLocalFallbackSnapshot() {
+  try {
+    const result = await plugin('Preferences')?.get?.({ key: FALLBACK_STORAGE_KEY });
+    if (result?.value) return JSON.parse(result.value);
+  } catch { /* local fallback below */ }
+  try { return JSON.parse(localStorage.getItem(FALLBACK_STORAGE_KEY) || 'null'); }
+  catch { return null; }
+}
+
+export async function persistAppMode(mode) {
+  const value = mode === 'local' ? 'local' : 'server';
+  try { localStorage.setItem(MODE_KEY, value); } catch { /* ignore */ }
+  try { await plugin('Preferences')?.set?.({ key: MODE_KEY, value }); } catch { /* optional plugin */ }
+  return value;
 }
 
 export async function reloadInterface({ clearCaches = false } = {}) {

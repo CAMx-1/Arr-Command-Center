@@ -327,3 +327,60 @@ export function publicConfig(cfg) {
   }
   return { mock: !!cfg.mock, services };
 }
+
+
+// Credential-bearing export used only by the explicit native local-fallback
+// sync endpoint. This is deliberately separate from publicConfig(), which must
+// remain secret-free for every normal page/config request.
+const LOCAL_FALLBACK_TYPES = new Set([
+  'sonarr', 'radarr', 'lidarr', 'readarr', 'overseerr', 'prowlarr',
+  'bazarr', 'sabnzbd', 'qbittorrent', 'tautulli', 'indexer',
+]);
+
+function fallbackHttpUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return '';
+    return url.toString().replace(/\/+$/, '');
+  } catch { return ''; }
+}
+
+export function localFallbackConfig(cfg, { now = Date.now() } = {}) {
+  const services = {};
+  const skipped = [];
+  const entries = Object.entries((cfg && cfg.services) || {});
+
+  for (const [key, svc = {}] of entries) {
+    if (svc.enabled === false) continue;
+    const reason = (message) => skipped.push({ key: String(key).slice(0, 80), label: String(svc.label || key).slice(0, 60), reason: message });
+    if (!/^[a-z0-9._-]{1,80}$/i.test(key) || ['__proto__', 'prototype', 'constructor'].includes(key)) { reason('Unsupported service key'); continue; }
+    if (!LOCAL_FALLBACK_TYPES.has(svc.type)) { reason(svc.type === 'plex' ? 'Plex requires server-side OAuth' : 'Service type is not supported in local mode'); continue; }
+    if (svc.sample) { reason('Sample services are not exported'); continue; }
+
+    const baseUrl = fallbackHttpUrl(svc.baseUrl);
+    if (!baseUrl) { reason('Missing or invalid service URL'); continue; }
+    const apiKey = String(svc.apiKey || '').trim();
+    if (!apiKey) {
+      reason(svc.type === 'qbittorrent' && (svc.username || svc.password)
+        ? 'qBittorrent username/password login is not supported in local mode; configure an API key'
+        : 'API key is required for local mode');
+      continue;
+    }
+
+    const cf = svc.cloudflareAccess || {};
+    const cfClientId = String(cf.clientId || '').trim();
+    const cfClientSecret = String(cf.clientSecret || '').trim();
+    if (!!cfClientId !== !!cfClientSecret) { reason('Cloudflare Access credentials are incomplete'); continue; }
+
+    services[key] = {
+      key,
+      type: svc.type,
+      label: String(svc.label || key).slice(0, 60),
+      baseUrl: baseUrl.slice(0, 500),
+      apiKey: apiKey.slice(0, 1000),
+      ...(cfClientId ? { cfClientId: cfClientId.slice(0, 1000), cfClientSecret: cfClientSecret.slice(0, 1000) } : {}),
+    };
+  }
+
+  return { version: 1, generatedAt: new Date(now).toISOString(), services, skipped };
+}

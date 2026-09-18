@@ -33,6 +33,10 @@
  */
 (function () {
   var SERVER_KEY = 'acc:server-base';
+  var MODE_KEY = 'acc:app-mode';
+  var FALLBACK_KEY = 'acc:local-fallback';
+  var CONNECTIONS_KEY = 'acc:connections';
+  var FALLBACK_META_KEY = 'acc:local-fallback-meta';
 
   // The "bootstrap" context is ONLY the local Capacitor shell loaded from
   // capacitor://localhost (or ionic://). On the real server origin (http/https)
@@ -59,6 +63,43 @@
     return prefs.get({ key: SERVER_KEY }).then(function (result) {
       return String((result && result.value) || '').replace(/\/+$/, '');
     }).catch(function () { return ''; });
+  }
+
+
+  function preferenceValue(key) {
+    var prefs = preferencesPlugin();
+    if (!prefs || typeof prefs.get !== 'function') return Promise.resolve('');
+    return prefs.get({ key: key }).then(function (result) { return String((result && result.value) || ''); }).catch(function () { return ''; });
+  }
+
+  function persistMode(value) {
+    try { localStorage.setItem(MODE_KEY, value); } catch (e) { /* ignore */ }
+    var prefs = preferencesPlugin();
+    if (prefs && typeof prefs.set === 'function') return prefs.set({ key: MODE_KEY, value: value }).catch(function () {});
+    return Promise.resolve();
+  }
+
+  function installFallback(raw) {
+    if (!raw) return false;
+    try {
+      var snapshot = JSON.parse(raw);
+      if (!snapshot || snapshot.version !== 1 || !snapshot.connections || typeof snapshot.connections !== 'object') return false;
+      localStorage.setItem(CONNECTIONS_KEY, JSON.stringify(snapshot.connections));
+      var prefs = snapshot.preferences || {};
+      Object.keys(prefs).forEach(function (key) { if (typeof prefs[key] === 'string') localStorage.setItem(key, prefs[key]); });
+      localStorage.setItem(FALLBACK_KEY, raw);
+      localStorage.setItem(FALLBACK_META_KEY, JSON.stringify({ syncedAt: snapshot.syncedAt || '', serviceCount: Object.keys(snapshot.connections).length, skipped: snapshot.skipped || [] }));
+      return Object.keys(snapshot.connections).length > 0;
+    } catch (e) { return false; }
+  }
+
+  function serverReachable(origin, timeoutMs) {
+    if (!origin || typeof fetch !== 'function') return Promise.resolve(false);
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = setTimeout(function () { try { controller && controller.abort(); } catch (e) {} }, timeoutMs || 1800);
+    return fetch(origin + '/healthcheck?acc_probe=' + Date.now(), { method: 'GET', mode: 'no-cors', cache: 'no-store', signal: controller ? controller.signal : undefined })
+      .then(function () { clearTimeout(timer); return true; })
+      .catch(function () { clearTimeout(timer); return false; });
   }
 
   var native = isBootstrap();
@@ -114,12 +155,8 @@
   // ---------------------------------------------------------------------------
   if (!native) return;
 
-  // Local (direct) mode: the app talks straight to services from the device via
-  // the local-backend shim (see lib/localBackend.js) — no server bootstrap or
-  // navigation. Let the SPA boot normally.
-  try { if (localStorage.getItem('acc:app-mode') === 'local') return; } catch (e) { /* ignore */ }
-
-  // Stop the SPA from booting into a broken (no-API) state on capacitor://localhost.
+  // Pause SPA initialization until shared native mode/fallback preferences are
+  // hydrated. app.js resumes when acc-bootstrap-ready is dispatched.
   window.__ACC_SETUP_REQUIRED__ = true;
 
   // Server selection is resolved after the connect-screen renderer is defined:
@@ -163,8 +200,12 @@
     var go = document.getElementById('acc-connect-go');
     var localBtn = document.getElementById('acc-connect-local');
     if (localBtn) localBtn.addEventListener('click', function () {
-      try { localStorage.setItem('acc:app-mode', 'local'); } catch (e) { /* ignore */ }
-      location.reload();
+      Promise.resolve(persistMode('local')).then(function () {
+        window.__ACC_SETUP_REQUIRED__ = false;
+        window.__ACC_BOOTSTRAP_READY__ = true;
+        window.dispatchEvent(new Event('acc-bootstrap-ready'));
+        wrap.remove();
+      });
     });
     var submit = function () {
       var raw = (input.value || '').trim();
@@ -186,26 +227,39 @@
 
   var start = function () {
     var completed = false;
-    var finish = function (selected) {
+    var readyLocal = function (fallbackRaw, persist) {
       if (completed) return;
       completed = true;
-      if (selected) {
-        base = selected;
-        try { localStorage.setItem(SERVER_KEY, selected); } catch (e) { /* ignore */ }
-        window.accGoToServer(selected);
-      } else {
-        render();
-      }
+      installFallback(fallbackRaw);
+      var done = function () {
+        window.__ACC_SETUP_REQUIRED__ = false;
+        window.__ACC_BOOTSTRAP_READY__ = true;
+        window.dispatchEvent(new Event('acc-bootstrap-ready'));
+      };
+      if (persist) Promise.resolve(persistMode('local')).then(done); else { try { localStorage.setItem(MODE_KEY, 'local'); } catch (e) {} done(); }
+    };
+    var finish = function (selected, mode, fallbackRaw) {
+      if (completed) return;
+      if (mode === 'local') { readyLocal(fallbackRaw, false); return; }
+      if (!selected) { completed = true; render(); return; }
+      base = selected;
+      try { localStorage.setItem(SERVER_KEY, selected); localStorage.setItem(MODE_KEY, 'server'); } catch (e) { /* ignore */ }
+      if (!fallbackRaw) { completed = true; window.accGoToServer(selected); return; }
+      serverReachable(selected, 1800).then(function (reachable) {
+        if (completed) return;
+        if (reachable) { completed = true; window.accGoToServer(selected); }
+        else readyLocal(fallbackRaw, true);
+      });
     };
     // Native plugin calls should resolve immediately, but never leave a fresh
     // install on a blank WebView if bridge initialization is delayed.
-    var fallback = setTimeout(function () { finish(base); }, 900);
-    preferredBase().then(function (shared) {
+    var fallback = setTimeout(function () { finish(base, 'server', ''); }, 1200);
+    Promise.all([preferredBase(), preferenceValue(MODE_KEY), preferenceValue(FALLBACK_KEY)]).then(function (values) {
       clearTimeout(fallback);
-      finish(shared || base);
+      finish(values[0] || base, values[1] || 'server', values[2] || '');
     }).catch(function () {
       clearTimeout(fallback);
-      finish(base);
+      finish(base, 'server', '');
     });
   };
   if (document.body) start();
