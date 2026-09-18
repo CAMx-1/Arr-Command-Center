@@ -121,7 +121,7 @@ export function unregisterOverlay(id) {
 }
 
 // ---- Modal ----
-export function openModal({ title, body, footer, wide = false }) {
+export function openModal({ title, body, footer, wide = false, overlayClass = '' }) {
   const root = document.getElementById('modal-root');
   let startY = 0; let startX = 0; let swiping = false;
   const head = h('div', {
@@ -142,7 +142,7 @@ export function openModal({ title, body, footer, wide = false }) {
     h('div', { class: 'modal-body' }, body),
     footer ? h('div', { class: 'modal-foot' }, footer) : null,
   );
-  const overlay = h('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === overlay) closeModal(); } }, modal);
+  const overlay = h('div', { class: `modal-overlay${overlayClass ? ` ${overlayClass}` : ''}`, onclick: (e) => { if (e.target === overlay) closeModal(); } }, modal);
   clear(root).appendChild(overlay);
   registerOverlay('modal', { container: overlay, close: () => clear(document.getElementById('modal-root')) });
   return overlay;

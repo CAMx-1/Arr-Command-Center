@@ -30,7 +30,7 @@ import * as push from './lib/push.js';
 import { initAppearance } from './lib/theme.js';
 import { initDensity } from './lib/density.js';
 import { initUpdateBanner } from './lib/updateBanner.js';
-import { finishNativeLaunch, installNativeKeyboardHandling, onNativeAppStateChange } from './lib/nativeApp.js';
+import { dismissNativeKeyboard, finishNativeLaunch, installNativeKeyboardHandling, onNativeAppStateChange } from './lib/nativeApp.js';
 import { installClientDiagnostics, recordClientEvent } from './lib/clientDiagnostics.js';
 import { openCommandPalette } from './lib/commandPalette.js';
 import { setDashboardScope } from './lib/dashboardPrefs.js';
@@ -846,19 +846,15 @@ function openSearch() {
   let typeFilter = 'all';
   let searchTimer = 0;
   let searchRun = 0;
-  let keyboardActive = false;
+  let keyboardDismissal = null;
   const seg = (t, label) => h('button', { class: `view-seg ${typeFilter === t ? 'active' : ''}`, type: 'button', dataset: { t }, onclick: () => setType(t) }, label);
   const filterBar = h('div', { class: 'view-toggle search-filters' }, seg('all', 'All'), seg('movie', 'Movies'), seg('tv', 'TV'));
   const tf = (mt) => typeFilter === 'all' || typeFilter === mt;
   const dismissKeyboard = () => {
-    const shouldHide = keyboardActive;
-    keyboardActive = false;
-    input.blur();
-    if (!shouldHide) return;
-    const keyboard = window.Capacitor?.Plugins?.Keyboard;
-    if (keyboard?.hide) {
-      try { keyboard.hide()?.catch?.(() => {}); } catch { /* optional native plugin */ }
+    if (!keyboardDismissal) {
+      keyboardDismissal = dismissNativeKeyboard(input).finally(() => { keyboardDismissal = null; });
     }
+    return keyboardDismissal;
   };
   const runSearch = async () => {
     const runId = ++searchRun;
@@ -895,23 +891,32 @@ function openSearch() {
     for (const b of filterBar.children) b.classList.toggle('active', b.dataset.t === t);
     scheduleSearch();
   }
+  const submitButton = h('button', {
+    class: 'btn primary search-submit',
+    type: 'submit',
+    'aria-label': 'Submit search',
+    onclick: () => { void dismissKeyboard(); },
+  }, 'Search');
   const form = h('form', {
     class: 'search-form',
     role: 'search',
-    onsubmit: (e) => {
+    onsubmit: async (e) => {
       e.preventDefault();
       clearTimeout(searchTimer);
       searchTimer = 0;
-      dismissKeyboard();
+      await dismissKeyboard();
       runSearch();
     },
-  }, input, h('button', { class: 'btn primary search-submit', type: 'submit' }, 'Search'));
-  input.addEventListener('focus', () => { keyboardActive = true; });
+  }, input, submitButton);
   input.addEventListener('input', scheduleSearch);
   results.addEventListener('touchmove', dismissKeyboard, { passive: true });
   results.addEventListener('scroll', dismissKeyboard, { passive: true });
-  const overlay = openModal({ title: 'Search', body: h('div', { class: 'search-shell' }, form, filterBar, results), wide: true });
-  overlay.classList.add('search-modal-overlay');
+  openModal({
+    title: 'Search',
+    body: h('div', { class: 'search-shell' }, form, filterBar, results),
+    wide: true,
+    overlayClass: 'search-modal-overlay',
+  });
   setTimeout(() => input.focus(), 50);
 }
 

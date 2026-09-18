@@ -872,7 +872,7 @@ html[data-theme="dark"] .shx-face { background: linear-gradient(160deg, var(--su
      fixed and making only the results scroll prevents the keyboard from
      covering matches and gives iOS a reliable scroll surface to dismiss it. */
   .search-modal-overlay { align-items: stretch; }
-  .search-modal-overlay .modal { display: flex; flex-direction: column; width: 100%; height: 100dvh; max-width: none !important; max-height: 100dvh; border-radius: 0; overflow: hidden; animation: fadeIn 0.2s var(--ease); }
+  .search-modal-overlay .modal { display: flex; flex-direction: column; width: 100%; height: 100vh; max-width: none !important; max-height: 100vh; border-radius: 0; overflow: hidden; animation: fadeIn 0.2s var(--ease); }
   .search-modal-overlay .modal-head { flex: 0 0 auto; padding-top: calc(18px + env(safe-area-inset-top)); }
   .search-modal-overlay .modal-body { display: flex; flex: 1 1 auto; min-height: 0; overflow: hidden; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
   .search-shell { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; width: 100%; }
@@ -1213,6 +1213,13 @@ button, [role="button"], input, select, textarea { touch-action: manipulation; }
 .native-keyboard-open .modal { max-height: calc(100vh - var(--keyboard-height) - env(safe-area-inset-top)); }
 
 @media (max-width: 720px) {
+  /* Search uses overlay keyboard mode in the native shell, so its WebView and
+     physical viewport stay full-height while the keyboard covers the bottom. */
+  .native-keyboard-open .search-modal-overlay .modal {
+    height: 100vh;
+    max-height: 100vh;
+  }
+
   body { font-size: clamp(14px, 3.8vw, 16px); }
   #view { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
   .bottom-nav { padding-left: max(8px, env(safe-area-inset-left)); padding-right: max(8px, env(safe-area-inset-right)); padding-bottom: 0; }

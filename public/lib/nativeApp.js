@@ -79,6 +79,11 @@ export async function finishNativeLaunch() {
   try { await plugin('SplashScreen')?.hide?.({ fadeOutDuration: 220 }); } catch { /* storyboard-only fallback */ }
 }
 
+export async function dismissNativeKeyboard(element = globalThis.document?.activeElement) {
+  try { element?.blur?.(); } catch { /* best effort */ }
+  try { await plugin('Keyboard')?.hide?.(); } catch { /* optional native plugin */ }
+}
+
 export function installNativeKeyboardHandling(nav) {
   if (!isNativeApp()) return () => {};
   const keyboard = plugin('Keyboard');
