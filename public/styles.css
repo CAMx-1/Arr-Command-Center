@@ -775,6 +775,17 @@ html[data-theme="dark"] .shx-face { background: linear-gradient(160deg, var(--su
   -webkit-user-drag: none;
 }
 .bottom-nav .bn-hex img { pointer-events: none; }
+  /* Preserve compact flat-bottom cell geometry. The fixed nav itself has no
+     bottom safe-area spacer, so these natural-height cells end at the screen. */
+  .bottom-nav .bn-hex {
+    height: 60px;
+    padding-bottom: 0;
+    clip-path: polygon(50% 0, 100% 26%, 100% 100%, 0 100%, 0 26%);
+  }
+  .bottom-nav .bn-home {
+    height: 74px;
+    clip-path: polygon(50% 0, 100% 26%, 100% 100%, 0 100%, 0 26%);
+  }
   .bottom-nav { display: flex; flex-direction: column; align-items: center;
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
     padding: 0 8px; background: none; pointer-events: none;
@@ -1204,7 +1215,7 @@ button, [role="button"], input, select, textarea { touch-action: manipulation; }
 @media (max-width: 720px) {
   body { font-size: clamp(14px, 3.8vw, 16px); }
   #view { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
-  .bottom-nav { padding-left: max(8px, env(safe-area-inset-left)); padding-right: max(8px, env(safe-area-inset-right)); padding-bottom: env(safe-area-inset-bottom); }
+  .bottom-nav { padding-left: max(8px, env(safe-area-inset-left)); padding-right: max(8px, env(safe-area-inset-right)); padding-bottom: 0; }
   .allsvc-sheet, .modal { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
   .modal-body { overscroll-behavior: contain; }
   .btn, .topbar-icon-btn, .bn-grip, .allsvc-item { min-height: 44px; }

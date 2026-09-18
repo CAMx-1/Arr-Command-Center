@@ -98,7 +98,11 @@ export function installNativeKeyboardHandling(nav) {
   return () => handles.forEach((h) => h?.remove?.());
 }
 
-export function onNativeAppStateChange(handler) {
-  if (!isNativeApp() || !plugin('App')?.addListener) return Promise.resolve(null);
-  return plugin('App').addListener('appStateChange', handler).catch(() => null);
+export async function onNativeAppStateChange(handler) {
+  if (!isNativeApp() || !plugin('App')?.addListener) return null;
+  try {
+    return (await plugin('App').addListener('appStateChange', handler)) || null;
+  } catch {
+    return null;
+  }
 }

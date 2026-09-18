@@ -177,8 +177,6 @@ export async function renderSettings(root, ctx) {
   if (!localMode && cfg.auth && cfg.auth.plexEnabled) hydrateLoginLog(ctx);
 }
 
-async function hydrateLinksAdmin(ctx) {
-
 function settingsJumpNav() {
   const links = [
     ['settings-mobile', 'App'], ['settings-favorites', 'Favorites'], ['settings-connection', 'Connection'],
@@ -261,6 +259,8 @@ async function hydrateMobileAppPanel(ctx) {
     h('p', { class: 'dim settings-copy' }, 'Copied diagnostics are redacted and stay on this device until you choose to share them. API keys, cookies, and Cloudflare secrets are never included.'),
   );
 }
+
+async function hydrateLinksAdmin(ctx) {
   const panel = document.getElementById('links-admin');
   if (!panel) return;
   let links = [];

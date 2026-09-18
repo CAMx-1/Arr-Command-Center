@@ -497,13 +497,17 @@ function buildBottomNav() {
   const right = quick.slice(2, 4).map(svcHex);
   while (left.length < 2) left.push(h('span', { class: 'bn-hex bn-empty' }));
   while (right.length < 2) right.push(h('span', { class: 'bn-hex bn-empty' }));
-  // Single row of flat-bottom hexes anchored to the very bottom edge; they share
-  // vertical sides so they tile edge-to-edge. Home is taller so it pops up while
-  // its bottom stays flush with the rest.
+  // Keep the original compact flat-bottom cells and place their unchanged
+  // lower edges directly on the physical screen bottom. No safe-area spacer or
+  // added cell height remains below the icons.
   const nodes = [left[0], left[1], home, right[0], right[1]];
   const W = 68; const HOME_H = 74; const dx = W;
   const row = h('div', { class: 'bn-row', style: { width: `${5 * W}px`, height: `${HOME_H}px` } });
-  nodes.forEach((n, i) => { n.style.left = `${i * dx}px`; n.style.bottom = '0'; row.appendChild(n); });
+  nodes.forEach((n, i) => {
+    n.style.left = `${i * dx}px`;
+    n.style.bottom = '0';
+    row.appendChild(n);
+  });
   // Grip is "active" when you're on a route no hex represents (e.g. Settings).
   const gripActive = route === 'settings' || (route !== 'home' && !quick.some((s) => s.key === route));
   const grip = h('button', { class: `bn-grip ${gripActive ? 'active' : ''}`, title: 'All services', 'aria-label': 'All services', onclick: () => { haptic(); openAllServices(); } }, h('span', { class: 'bn-grip-bar' }));
