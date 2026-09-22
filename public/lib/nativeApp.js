@@ -3,6 +3,7 @@ import { isNativeCapacitorRuntime } from './tapActivation.js';
 
 const SERVER_KEY = 'acc:server-base';
 const plugin = (name) => globalThis.window?.Capacitor?.Plugins?.[name] || null;
+const SECURE_FALLBACK_KEY = 'arrcc_local_fallback_v2';
 
 export function isNativeApp() {
   return isNativeCapacitorRuntime(globalThis.window?.Capacitor);
@@ -61,22 +62,32 @@ export async function forgetServer() {
 
 export async function saveLocalFallbackSnapshot(snapshot) {
   const value = JSON.stringify(snapshot);
-  try { localStorage.setItem(FALLBACK_STORAGE_KEY, value); } catch { /* ignore */ }
-  try { await plugin('Preferences')?.set?.({ key: FALLBACK_STORAGE_KEY, value }); } catch { /* optional plugin */ }
+  const secure = plugin('SecureStorage');
+  if (secure?.internalSetItem) {
+    await secure.internalSetItem({ prefixedKey: SECURE_FALLBACK_KEY, data: value, sync: false, access: 1 });
+    try { localStorage.removeItem(FALLBACK_STORAGE_KEY); } catch {}
+    try { await plugin('Preferences')?.remove?.({ key: FALLBACK_STORAGE_KEY }); } catch {}
+  } else {
+    try { localStorage.setItem(FALLBACK_STORAGE_KEY, value); } catch {}
+  }
   return snapshot;
 }
 
 export async function loadLocalFallbackSnapshot({ timeoutMs = 1200 } = {}) {
   try {
+    const secure = plugin('SecureStorage');
+    if (secure?.internalGetItem) {
+      const result = await Promise.race([secure.internalGetItem({ prefixedKey: SECURE_FALLBACK_KEY, sync: false }), new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs))]);
+      if (result?.data) return JSON.parse(result.data);
+    }
+  } catch {}
+  try {
     const request = plugin('Preferences')?.get?.({ key: FALLBACK_STORAGE_KEY });
     if (request) {
-      const result = await Promise.race([
-        Promise.resolve(request),
-        new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-      ]);
-      if (result?.value) return JSON.parse(result.value);
+      const result = await Promise.race([Promise.resolve(request), new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs))]);
+      if (result?.value) { const snapshot = JSON.parse(result.value); await saveLocalFallbackSnapshot(snapshot); return snapshot; }
     }
-  } catch { /* local fallback below */ }
+  } catch {}
   try { return JSON.parse(localStorage.getItem(FALLBACK_STORAGE_KEY) || 'null'); }
   catch { return null; }
 }

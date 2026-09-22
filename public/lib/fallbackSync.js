@@ -1,3 +1,5 @@
+import { replaceConnections, replaceConnectionsSecure } from './connections.js';
+import { normalizeCustomHeaders } from './customHeaders.js';
 // Server-to-local fallback snapshot helpers. The credential-bearing server
 // response is strictly validated before it can replace local direct-mode state.
 // Only an explicit allowlist of UI preference keys is copied across origins.
@@ -8,8 +10,8 @@ export const CONNECTIONS_KEY = 'acc:connections';
 export const MODE_KEY = 'acc:app-mode';
 
 const SUPPORTED_TYPES = new Set([
-  'sonarr', 'radarr', 'lidarr', 'readarr', 'overseerr', 'prowlarr',
-  'bazarr', 'sabnzbd', 'qbittorrent', 'tautulli', 'indexer',
+  'sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'prowlarr',
+  'bazarr', 'sabnzbd', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'jellyfin', 'emby', 'tautulli', 'indexer',
 ]);
 const SAFE_PREF_KEYS = new Set([
   'theme', 'accent', 'acc:density', 'view-mode', 'svc-hidden', 'svc-order',
@@ -46,9 +48,18 @@ export function normalizeLocalFallbackExport(payload) {
       throw new Error('The server returned an invalid service entry');
     }
     if (!SUPPORTED_TYPES.has(raw.type)) throw new Error(`Unsupported local service type: ${raw.type || 'unknown'}`);
-    const baseUrl = safeHttpOriginUrl(raw.baseUrl);
+    const localUrl = safeHttpOriginUrl(raw.localUrl || raw.baseUrl);
+    const remoteUrl = raw.remoteUrl ? safeHttpOriginUrl(raw.remoteUrl) : '';
+    const baseUrl = localUrl || remoteUrl;
     const apiKey = cleanString(raw.apiKey, 1000);
-    if (!baseUrl || !apiKey) throw new Error(`Local fallback service “${key}” is missing a valid URL or API key`);
+    const username = cleanString(raw.username, 120);
+    const password = cleanString(raw.password, 1000);
+    if (!baseUrl) throw new Error(`Local fallback service “${key}” is missing a valid URL`);
+    if (raw.type === 'deluge' && !password) throw new Error(`Local fallback service “${key}” is missing its Deluge password`);
+    if (raw.type === 'nzbget' && (!username || !password)) throw new Error(`Local fallback service “${key}” is missing NZBGet credentials`);
+    if (raw.type === 'transmission' && (!!username !== !!password)) throw new Error(`Local fallback service “${key}” has incomplete Transmission credentials`);
+    const loginType = ['transmission', 'deluge', 'nzbget'].includes(raw.type);
+    if (!loginType && !apiKey) throw new Error(`Local fallback service “${key}” is missing an API key`);
     const cfClientId = cleanString(raw.cfClientId, 1000);
     const cfClientSecret = cleanString(raw.cfClientSecret, 1000);
     if (!!cfClientId !== !!cfClientSecret) throw new Error(`Local fallback service “${key}” has incomplete Cloudflare credentials`);
@@ -56,8 +67,14 @@ export function normalizeLocalFallbackExport(payload) {
       key,
       type: raw.type,
       label: cleanString(raw.label, 60) || key,
+      localUrl,
+      remoteUrl,
+      connectionPolicy: ['auto', 'local', 'remote'].includes(raw.connectionPolicy) ? raw.connectionPolicy : 'auto',
       baseUrl,
-      apiKey,
+      ...(apiKey ? { apiKey } : {}),
+      ...(username ? { username } : {}),
+      ...(password ? { password } : {}),
+      customHeaders: normalizeCustomHeaders(raw.customHeaders),
       ...(cfClientId ? { cfClientId, cfClientSecret } : {}),
     };
   }
@@ -147,13 +164,23 @@ export function fallbackMetadata(snapshot) {
 export function applyLocalFallbackSnapshot(snapshot, storage) {
   const normalized = normalizeLocalFallbackSnapshot(snapshot);
   const target = storageFor(storage);
-  target.setItem(CONNECTIONS_KEY, JSON.stringify(normalized.connections));
+  replaceConnections(normalized.connections, target);
   for (const [key, value] of Object.entries(normalized.preferences)) target.setItem(key, value);
   const metadata = fallbackMetadata(normalized);
   target.setItem(FALLBACK_META_KEY, JSON.stringify(metadata));
   return metadata;
 }
 
+
+export async function applyLocalFallbackSnapshotSecure(snapshot, storage) {
+  const normalized = normalizeLocalFallbackSnapshot(snapshot);
+  const target = storageFor(storage);
+  await replaceConnectionsSecure(normalized.connections, target);
+  for (const [key, value] of Object.entries(normalized.preferences)) target.setItem(key, value);
+  const metadata = fallbackMetadata(normalized);
+  target.setItem(FALLBACK_META_KEY, JSON.stringify(metadata));
+  return metadata;
+}
 export function readLocalFallbackMetadata(storage) {
   try {
     const value = JSON.parse(storageFor(storage).getItem(FALLBACK_META_KEY) || 'null');

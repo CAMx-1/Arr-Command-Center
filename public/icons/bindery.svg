@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Bindery">
+  <rect width="64" height="64" rx="14" fill="#7c3aed"/>
+  <path d="M14 15h15c5 0 9 4 9 9v27H23c-5 0-9-4-9-9V15Z" fill="#fff" opacity=".94"/>
+  <path d="M50 15H35c-5 0-9 4-9 9v27h15c5 0 9-4 9-9V15Z" fill="#ede9fe"/>
+  <path d="M32 21v31" stroke="#5b21b6" stroke-width="3" stroke-linecap="round"/>
+  <path d="M20 25h8M20 32h8M36 25h8M36 32h8" stroke="#7c3aed" stroke-width="2.5" stroke-linecap="round" opacity=".75"/>
+</svg>

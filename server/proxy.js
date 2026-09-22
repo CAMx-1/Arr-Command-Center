@@ -6,6 +6,7 @@
 import express from 'express';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { mergeProtectedHeaders } from '../public/lib/customHeaders.js';
 
 function trimSlash(u) {
   return String(u || '').replace(/\/+$/, '');
@@ -39,6 +40,10 @@ function cfHeaders(svc) {
   return h;
 }
 
+function combinedHeaders(svc, generated = {}) {
+  return mergeProtectedHeaders(svc.customHeaders, generated, cfHeaders(svc));
+}
+
 function authFor(svc) {
   const headers = {};
   const query = {};
@@ -55,14 +60,22 @@ function authFor(svc) {
     // qBittorrent >= v5.2.0 supports a stateless API key via Bearer auth.
     // (Older versions use username/password cookie login — see forwardQbit.)
     if (svc.apiKey) headers['Authorization'] = `Bearer ${svc.apiKey}`;
+  } else if (type === 'transmission' || type === 'nzbget') {
+    // Transmission optionally and NZBGet normally use HTTP Basic auth.
+    if (svc.username || svc.password) headers.Authorization = `Basic ${Buffer.from(`${svc.username || ''}:${svc.password || ''}`).toString('base64')}`;
+  } else if (type === 'deluge') {
+    // Deluge Web authenticates with auth.login(password); its _session_id
+    // cookie is managed by the dedicated forwarder below.
+  } else if (type === 'jellyfin' || type === 'emby') {
+    if (svc.apiKey) headers['X-Emby-Token'] = svc.apiKey;
   } else {
     // Sonarr / Radarr / Overseerr use the X-Api-Key header.
     if (svc.apiKey) headers['X-Api-Key'] = svc.apiKey;
   }
 
-  // Cloudflare Access service token — applies to every service type.
-  Object.assign(headers, cfHeaders(svc));
-  return { headers, query };
+  // Custom headers are additive; generated service auth and Cloudflare Access
+  // are merged afterward so required credentials cannot be overridden.
+  return { headers: combinedHeaders(svc, headers), query };
 }
 
 // Stream an upstream fetch Response body straight to the Express response,
@@ -120,7 +133,7 @@ async function qbitLogin(svc) {
   try {
     r = await fetch(`${base}/api/v2/auth/login`, {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', Referer: base, Origin: base, ...cfHeaders(svc) },
+      headers: combinedHeaders(svc, { 'content-type': 'application/x-www-form-urlencoded', Referer: base, Origin: base }),
       body, redirect: 'manual', signal: controller.signal,
     });
   } finally { clearTimeout(timer); }
@@ -163,7 +176,7 @@ async function forwardQbit(svc, serviceKey, subPath, req, res) {
 
   const doFetch = async (sid) => {
     // qBittorrent requires Referer/Origin to match the Host for its host-header check.
-    const headers = { Referer: base, Origin: base, ...cfHeaders(svc) };
+    const headers = combinedHeaders(svc, { Referer: base, Origin: base });
     if (useApiKey) headers['Authorization'] = `Bearer ${svc.apiKey}`;
     else if (sid) headers['Cookie'] = `SID=${sid}`;
     if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
@@ -197,6 +210,141 @@ async function forwardQbit(svc, serviceKey, subPath, req, res) {
   }
 }
 
+// ---- Transmission RPC session header -------------------------------------
+// Transmission rejects a missing/stale CSRF token with HTTP 409 and returns
+// the current token in X-Transmission-Session-Id. Cache by route service key
+// and retry the identical request exactly once on every 409.
+const transmissionSession = new Map();
+export function _resetTransmissionSessions() { transmissionSession.clear(); }
+export function _transmissionSessionSnapshot() { return new Map(transmissionSession); }
+
+async function transmissionFetch(svc, serviceKey, target, init, timeoutMs = 120000) {
+  const doFetch = async (sessionId) => {
+    const headers = { ...(init.headers || {}) };
+    if (sessionId) headers['X-Transmission-Session-Id'] = sessionId;
+    const controller = init.signal ? null : new AbortController();
+    const signal = init.signal || controller.signal;
+    const timer = setTimeout(() => { if (controller) controller.abort(); }, timeoutMs);
+    try { return await fetch(target, { ...init, headers, signal }); }
+    finally { clearTimeout(timer); }
+  };
+  let upstream = await doFetch(transmissionSession.get(serviceKey) || '');
+  if (upstream.status === 409) {
+    const next = upstream.headers.get('x-transmission-session-id') || '';
+    if (next) transmissionSession.set(serviceKey, next);
+    try { await upstream.arrayBuffer(); } catch { /* drain before retry */ }
+    if (next) upstream = await doFetch(next);
+  }
+  return upstream;
+}
+
+async function forwardTransmission(svc, serviceKey, subPath, req, res) {
+  const incomingQs = (req.originalUrl.split('?')[1]) || '';
+  const target = buildTargetUrl(svc, subPath, incomingQs);
+  const { headers: authHeaders } = authFor(svc);
+  const headers = { ...authHeaders };
+  if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
+  if (req.headers['accept']) headers.accept = req.headers.accept;
+  const method = req.method.toUpperCase();
+  const controller = new AbortController();
+  const init = { method, headers, redirect: 'manual', signal: controller.signal };
+  if (!['GET', 'HEAD'].includes(method) && req.body && req.body.length) init.body = req.body;
+  try {
+    const timer = setTimeout(() => controller.abort(), 120000);
+    let upstream;
+    try { upstream = await transmissionFetch(svc, serviceKey, target, init); }
+    finally { clearTimeout(timer); }
+    res.status(upstream.status);
+    const ct = upstream.headers.get('content-type');
+    if (ct) res.set('content-type', ct);
+    await pipeUpstream(upstream, res, controller);
+  } catch (err) {
+    if (res.headersSent) { if (!res.writableEnded) res.destroy(err); return; }
+    const reason = classifyUpstreamError(err);
+    res.status(err.name === 'AbortError' ? 504 : 502).json({ error: reason, detail: reason, service: svc.label });
+  }
+}
+
+// ---- Deluge Web JSON-RPC login cookie ------------------------------------
+// Deluge returns authentication failures inside an HTTP-200 JSON-RPC error
+// (code 1), so inspect a clone of each response, re-login, and retry once.
+const delugeSession = new Map();
+const delugePending = new Map();
+export function _resetDelugeSessions() { delugeSession.clear(); delugePending.clear(); }
+export function _delugeSessionSnapshot() { return { session: new Map(delugeSession), pending: new Map(delugePending) }; }
+
+async function delugeLogin(svc) {
+  const target = new URL(`${trimSlash(svc.baseUrl)}/json`);
+  const headers = combinedHeaders(svc, { 'content-type': 'application/json', accept: 'application/json' });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  let response;
+  try {
+    response = await fetch(target, {
+      method: 'POST', headers, body: JSON.stringify({ method: 'auth.login', params: [svc.password || ''], id: 1 }),
+      redirect: 'manual', signal: controller.signal,
+    });
+  } finally { clearTimeout(timer); }
+  if (!response.ok) throw new Error(`Deluge login failed (HTTP ${response.status})`);
+  const data = await response.clone().json().catch(() => null);
+  if (data?.error) throw new Error(`Deluge login failed: ${data.error.message || 'JSON-RPC error'}`);
+  if (data?.result !== true) throw new Error('Deluge login failed (check password)');
+  const setCookie = response.headers.get('set-cookie') || '';
+  const match = /(?:^|[;,]\s*)_session_id=([^;,\x00-\x1f]+)/i.exec(setCookie);
+  // Auth-disabled/local-trusted deployments may return true without a cookie.
+  return match ? match[1] : '';
+}
+
+async function ensureDelugeSession(svc, serviceKey, force = false, login = delugeLogin) {
+  if (!force && delugeSession.has(serviceKey)) return delugeSession.get(serviceKey);
+  if (delugePending.has(serviceKey)) return delugePending.get(serviceKey);
+  const pending = login(svc)
+    .then((cookie) => { delugeSession.set(serviceKey, cookie); delugePending.delete(serviceKey); return cookie; })
+    .catch((error) => { delugePending.delete(serviceKey); throw error; });
+  delugePending.set(serviceKey, pending);
+  return pending;
+}
+export { ensureDelugeSession as _ensureDelugeSession };
+
+async function isDelugeAuthError(response) {
+  try { const data = await response.clone().json(); return Number(data?.error?.code) === 1; }
+  catch { return false; }
+}
+
+async function forwardDeluge(svc, serviceKey, subPath, req, res) {
+  const incomingQs = (req.originalUrl.split('?')[1]) || '';
+  const target = buildTargetUrl(svc, subPath, incomingQs);
+  const method = req.method.toUpperCase();
+  const controller = new AbortController();
+  const doFetch = async (cookie) => {
+    const headers = combinedHeaders(svc, {});
+    if (cookie) headers.Cookie = `_session_id=${cookie}`;
+    if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
+    if (req.headers['accept']) headers.accept = req.headers.accept;
+    const init = { method, headers, redirect: 'manual', signal: controller.signal };
+    if (!['GET', 'HEAD'].includes(method) && req.body && req.body.length) init.body = req.body;
+    const timer = setTimeout(() => controller.abort(), 120000);
+    try { return await fetch(target, init); } finally { clearTimeout(timer); }
+  };
+  try {
+    let cookie = delugeSession.has(serviceKey) ? delugeSession.get(serviceKey) : await ensureDelugeSession(svc, serviceKey);
+    let upstream = await doFetch(cookie);
+    if (await isDelugeAuthError(upstream)) {
+      try { await upstream.arrayBuffer(); } catch { /* drain */ }
+      cookie = await ensureDelugeSession(svc, serviceKey, true);
+      upstream = await doFetch(cookie);
+    }
+    res.status(upstream.status);
+    const ct = upstream.headers.get('content-type');
+    if (ct) res.set('content-type', ct);
+    await pipeUpstream(upstream, res, controller);
+  } catch (err) {
+    if (res.headersSent) { if (!res.writableEnded) res.destroy(err); return; }
+    const reason = classifyUpstreamError(err);
+    res.status(err.name === 'AbortError' ? 504 : 502).json({ error: reason, detail: reason, service: svc.label });
+  }
+}
+
 // Build the upstream URL for a service + sub-path + incoming query string.
 // IMPORTANT: we preserve the client's original query string verbatim rather than
 // round-tripping it through URLSearchParams. URLSearchParams re-encodes spaces as
@@ -222,6 +370,8 @@ function buildTargetUrl(svc, subPath, incomingQuery) {
 
 async function forward(svc, serviceKey, subPath, req, res) {
   if (svc.type === 'qbittorrent') return forwardQbit(svc, serviceKey, subPath, req, res);
+  if (svc.type === 'transmission') return forwardTransmission(svc, serviceKey, subPath, req, res);
+  if (svc.type === 'deluge') return forwardDeluge(svc, serviceKey, subPath, req, res);
   const incomingQs = (req.originalUrl.split('?')[1]) || '';
   const target = buildTargetUrl(svc, subPath, incomingQs);
   const { headers: authHeaders } = authFor(svc);
@@ -277,12 +427,15 @@ const HEALTH_PATH = {
   radarr: 'api/v3/system/status',
   lidarr: 'api/v1/system/status',
   readarr: 'api/v1/system/status',
+  bindery: 'api/v1/system/status',
   overseerr: 'api/v1/status',
   sabnzbd: 'api?mode=version&output=json',
   tautulli: 'api/v2?cmd=status',
   prowlarr: 'api/v1/system/status',
   bazarr: 'api/system/status',
   qbittorrent: 'api/v2/app/version',
+  jellyfin: 'System/Info',
+  emby: 'System/Info',
   indexer: 'api?t=caps&o=json',
 };
 
@@ -291,7 +444,7 @@ async function pingQbit(svc, serviceKey, started) {
   const base = trimSlash(svc.baseUrl);
   const useApiKey = !!svc.apiKey;
   const fetchVersion = async (sid) => {
-    const headers = { Referer: base, Origin: base, ...cfHeaders(svc) };
+    const headers = combinedHeaders(svc, { Referer: base, Origin: base });
     if (useApiKey) headers['Authorization'] = `Bearer ${svc.apiKey}`;
     else if (sid) headers['Cookie'] = `SID=${sid}`;
     const controller = new AbortController();
@@ -340,6 +493,7 @@ export async function serviceGet(svc, path, { timeout = 10000 } = {}) {
 // the automation module to trigger searches and remove queue items.
 export async function serviceRequest(svc, path, { method = 'POST', body, timeout = 15000 } = {}) {
   const [p, q] = String(path).split('?');
+
   const target = buildTargetUrl(svc, p, q || '');
   const { headers } = authFor(svc);
   const init = { method, headers: { accept: 'application/json', ...headers } };
@@ -356,6 +510,78 @@ export async function serviceRequest(svc, path, { method = 'POST', body, timeout
   } finally { clearTimeout(timer); }
 }
 
+async function pingTransmission(svc, serviceKey, started) {
+  try {
+    const target = new URL(`${trimSlash(svc.baseUrl)}/transmission/rpc`);
+    const { headers } = authFor(svc);
+    const upstream = await transmissionFetch(svc, serviceKey, target, {
+      method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ method: 'session-get', arguments: {} }), redirect: 'manual',
+    }, 8000);
+    const data = await upstream.json().catch(() => null);
+    const rpcOk = data?.result === 'success';
+    const ok = upstream.ok && rpcOk;
+    return {
+      ok, status: upstream.status, ms: Date.now() - started,
+      version: data?.arguments?.version,
+      error: ok ? undefined : upstream.status === 401 ? 'Auth / access denied' : (data?.result || `HTTP ${upstream.status}`),
+    };
+  } catch (error) {
+    return { ok: false, status: 0, ms: Date.now() - started, error: classifyUpstreamError(error) };
+  }
+}
+
+async function delugeRpc(svc, serviceKey, method, params = [], timeoutMs = 8000) {
+  const target = new URL(`${trimSlash(svc.baseUrl)}/json`);
+  const request = async (cookie) => {
+    const headers = combinedHeaders(svc, { accept: 'application/json', 'content-type': 'application/json' });
+    if (cookie) headers.Cookie = `_session_id=${cookie}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(target, { method: 'POST', headers, body: JSON.stringify({ method, params, id: 2 }), signal: controller.signal });
+      const data = await response.json().catch(() => null);
+      return { response, data };
+    } finally { clearTimeout(timer); }
+  };
+  let cookie = delugeSession.has(serviceKey) ? delugeSession.get(serviceKey) : await ensureDelugeSession(svc, serviceKey);
+  let result = await request(cookie);
+  if (Number(result.data?.error?.code) === 1) {
+    cookie = await ensureDelugeSession(svc, serviceKey, true);
+    result = await request(cookie);
+  }
+  if (!result.response.ok) throw new Error(`HTTP ${result.response.status}`);
+  if (result.data?.error) throw new Error(result.data.error.message || 'Deluge JSON-RPC error');
+  return result.data?.result;
+}
+
+async function pingDeluge(svc, serviceKey, started) {
+  try {
+    const connected = await delugeRpc(svc, serviceKey, 'web.connected');
+    return { ok: connected === true, status: connected === true ? 200 : 503, ms: Date.now() - started, error: connected === true ? undefined : 'Deluge Web is not connected to a daemon' };
+  } catch (error) {
+    return { ok: false, status: 0, ms: Date.now() - started, error: classifyUpstreamError(error) };
+  }
+}
+
+async function pingNzbget(svc, started) {
+  try {
+    const target = new URL(`${trimSlash(svc.baseUrl)}/jsonrpc`);
+    const { headers } = authFor(svc);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    let response;
+    try {
+      response = await fetch(target, { method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json', ...headers }, body: JSON.stringify({ method: 'version', params: [], id: 1 }), signal: controller.signal });
+    } finally { clearTimeout(timer); }
+    const data = await response.json().catch(() => null);
+    const ok = response.ok && !data?.error && typeof data?.result === 'string';
+    return { ok, status: response.status, ms: Date.now() - started, version: ok ? data.result : undefined, error: ok ? undefined : (response.status === 401 ? 'Auth / access denied' : data?.error?.message || `HTTP ${response.status}`) };
+  } catch (error) {
+    return { ok: false, status: 0, ms: Date.now() - started, error: classifyUpstreamError(error) };
+  }
+}
+
 export async function pingService(svc, serviceKey) {
   const started = Date.now();
   if (!svc || !svc.baseUrl) return { ok: false, status: 0, ms: 0, error: 'No base URL configured' };
@@ -364,6 +590,9 @@ export async function pingService(svc, serviceKey) {
   // callers that have it; svc.baseUrl is a safe last-resort discriminator).
   const key = serviceKey || svc.key || svc.baseUrl;
   if (svc.type === 'qbittorrent') return pingQbit(svc, key, started);
+  if (svc.type === 'transmission') return pingTransmission(svc, key, started);
+  if (svc.type === 'deluge') return pingDeluge(svc, key, started);
+  if (svc.type === 'nzbget') return pingNzbget(svc, started);
   try {
     const path = HEALTH_PATH[svc.type] || '';
     const [p, q] = path.split('?');
@@ -377,7 +606,7 @@ export async function pingService(svc, serviceKey) {
     let version;
     try {
       const data = await upstream.json();
-      version = data.version || data.settings?.version || data.data?.bazarr_version || undefined;
+      version = data.version || data.Version || data.settings?.version || data.data?.bazarr_version || undefined;
     } catch { /* non-json */ }
     const error = upstream.ok ? undefined
       : (upstream.status === 401 || upstream.status === 403) ? 'Auth / access denied'

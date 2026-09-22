@@ -13,15 +13,17 @@ import { setPendingFilter } from './lib/libraryFilter.js';
 import { renderHome, refreshHome } from './views/home.js';
 import { renderSonarr } from './views/sonarr.js';
 import { renderRadarr } from './views/radarr.js';
-import { renderLidarr, renderReadarr } from './views/musicbooks.js';
+import { renderLidarr, renderReadarr, renderBindery } from './views/musicbooks.js';
 import { renderOverseerr, openSeasonModal, openMovieRequestModal } from './views/overseerr.js';
 import { renderSabnzbd } from './views/sabnzbd.js';
 import { renderTautulli } from './views/tautulli.js';
 import { renderProwlarr } from './views/prowlarr.js';
 import { renderBazarr } from './views/bazarr.js';
 import { renderQbittorrent } from './views/qbittorrent.js';
+import { renderDownloadClient } from './views/downloadClient.js';
 import { renderIndexer } from './views/indexer.js';
 import { renderPlex } from './views/plex.js';
+import { renderMediaServer } from './views/mediaServer.js';
 import { renderEmbed } from './views/embed.js';
 import { renderSettings } from './views/settings.js';
 import { openDetailModal } from './views/detail.js';
@@ -32,6 +34,7 @@ import { initDensity } from './lib/density.js';
 import { initUpdateBanner } from './lib/updateBanner.js';
 import { dismissNativeKeyboard, finishNativeLaunch, installNativeKeyboardHandling, onNativeAppStateChange } from './lib/nativeApp.js';
 import { installClientDiagnostics, recordClientEvent } from './lib/clientDiagnostics.js';
+import { hydrateCredentialVault } from './lib/credentialVault.js';
 import { openCommandPalette } from './lib/commandPalette.js';
 import { setDashboardScope } from './lib/dashboardPrefs.js';
 import { mergeState, classifyNavigation, targetScrollFor, createScrollStore } from './lib/scrollHistory.js';
@@ -42,14 +45,20 @@ export const SERVICE_META = {
   radarr: { logo: '/icons/radarr.svg', emoji: '', renderer: renderRadarr },
   lidarr: { logo: '/icons/lidarr.svg', emoji: '🎵', renderer: renderLidarr },
   readarr: { logo: '/icons/readarr.svg', emoji: '📚', renderer: renderReadarr },
+  bindery: { logo: '/icons/bindery.svg', emoji: '📚', renderer: renderBindery },
   overseerr: { logo: '/icons/overseerr.svg', emoji: '', renderer: renderOverseerr },
   sabnzbd: { logo: '/icons/sabnzbd.svg', emoji: '⬇', renderer: renderSabnzbd },
   tautulli: { logo: '/icons/tautulli.svg', emoji: '', renderer: renderTautulli },
   prowlarr: { logo: '/icons/prowlarr.png', emoji: '', renderer: renderProwlarr },
   bazarr: { logo: '/icons/bazarr.svg', emoji: '', renderer: renderBazarr },
   qbittorrent: { logo: '/icons/qbittorrent.svg', emoji: '⬇', renderer: renderQbittorrent },
+  transmission: { logo: '/icons/transmission.svg', emoji: '🧲', renderer: renderDownloadClient },
+  deluge: { logo: '/icons/deluge.svg', emoji: '🧲', renderer: renderDownloadClient },
+  nzbget: { logo: '/icons/nzbget.svg', emoji: '⬇', renderer: renderDownloadClient },
   indexer: { logo: '/icons/indexer.svg', emoji: '🔍', renderer: renderIndexer },
   plex: { logo: '/icons/plex.svg', emoji: '▶', renderer: renderPlex },
+  jellyfin: { logo: '/icons/jellyfin.svg', emoji: '▶', renderer: renderMediaServer },
+  emby: { logo: '/icons/emby.svg', emoji: '▶', renderer: renderMediaServer },
 };
 
 const state = {
@@ -406,13 +415,19 @@ const QUICK_ACTIONS = {
   radarr: [['movies', 'Library'], ['calendar', 'Calendar'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['history', 'History']],
   lidarr: [['library', 'Library'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['calendar', 'Calendar'], ['history', 'History']],
   readarr: [['library', 'Library'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['calendar', 'Calendar'], ['history', 'History']],
+  bindery: [['library', 'Library'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['calendar', 'Calendar'], ['history', 'History']],
   sabnzbd: [['queue', 'Queue'], ['history', 'History']],
   tautulli: [['streams', 'Active Streams'], ['history', 'History'], ['stats', 'Statistics'], ['graphs', 'Graphs']],
   qbittorrent: [['downloading', 'Downloading'], ['completed', 'Completed']],
+  transmission: [['active', 'Downloading'], ['completed', 'Completed']],
+  deluge: [['active', 'Downloading'], ['completed', 'Completed']],
+  nzbget: [['queue', 'Queue'], ['history', 'History']],
   overseerr: [['pending', 'Pending'], ['all', 'All Requests'], ['issues', 'Issues'], ['recent', 'Recently Added'], ['discover', 'Discover']],
   bazarr: [['series', 'Series'], ['movies', 'Movies'], ['wanted', 'Wanted'], ['history', 'History'], ['blacklist', 'Blacklist'], ['providers', 'Providers'], ['system', 'System']],
   prowlarr: [['indexers', 'Indexers'], ['search', 'Search'], ['history', 'History']],
   plex: [['watchlist', 'Watchlist'], ['duplicates', 'Duplicates'], ['users', 'Users'], ['friends', 'Friends'], ['sessions', 'Now Playing']],
+  jellyfin: [['libraries', 'Libraries'], ['latest', 'Recently Added'], ['sessions', 'Now Playing'], ['users', 'Users']],
+  emby: [['libraries', 'Libraries'], ['latest', 'Recently Added'], ['sessions', 'Now Playing'], ['users', 'Users']],
 };
 
 // Attach a press-and-hold gesture: fires `onLongPress` after ~550ms if the
@@ -1196,6 +1211,7 @@ async function init() {
   installHapticFeedback(document);
   initAppearance();
   initDensity();
+  await hydrateCredentialVault();
   installNativeKeyboardHandling(document.getElementById('bottom-nav'));
   // Own scroll restoration so route/history-aware logic (see navigate) controls
   // it instead of the browser guessing on Back/Forward.

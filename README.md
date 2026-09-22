@@ -1,8 +1,8 @@
 # 🎬 Arr Command Center
 
 A single, locally-hosted web dashboard to view and manage your whole media stack —
-**Sonarr**, **Radarr**, **Lidarr**, **Readarr**, **Overseerr/Seerr**, **SABnzbd**,
-**qBittorrent**, **Tautulli**, **Bazarr**, **Prowlarr**, **Plex**, and any Newznab
+**Sonarr**, **Radarr**, **Lidarr**, **Bindery** (with legacy **Readarr** fallback), **Overseerr/Seerr**, **SABnzbd**,
+**qBittorrent**, **Transmission**, **Deluge**, **NZBGet**, **Tautulli**, **Bazarr**, **Prowlarr**, **Plex**, **Jellyfin**, **Emby**, and any Newznab
 **indexer** — from one place.
 
 Built as a self-hosted replacement for the now-discontinued **LunaSea** iOS app. Because
@@ -119,7 +119,8 @@ npm run demo
 ```
 
 Then open <http://localhost:7373>. This spins up a full set of **bundled mock services**
-(Sonarr, Radarr, Lidarr, Readarr, Overseerr, SABnzbd, qBittorrent, Tautulli, Bazarr, and a
+(Sonarr, Radarr, Lidarr, Bindery, legacy Readarr, Overseerr, SABnzbd, qBittorrent,
+Transmission, Deluge, NZBGet, Jellyfin, Emby, Tautulli, Bazarr, and a
 Newznab indexer) with fake data so you can click around immediately. The mock services
 even *require* the injected API key and record the Cloudflare Access headers, proving the
 proxy works end-to-end.
@@ -153,9 +154,10 @@ Copy `config.example.json` → `config.json` and fill it in:
   "services": {
     "sonarr": {
       "label": "Sonarr",
-      "type": "sonarr",         // sonarr | radarr | lidarr | readarr | overseerr |
-                                //   sabnzbd | qbittorrent | tautulli | bazarr |
-                                //   prowlarr | indexer | plex
+      "type": "sonarr",         // sonarr | radarr | lidarr | bindery | readarr |
+                                //   overseerr | sabnzbd | qbittorrent | transmission |
+                                //   deluge | nzbget | jellyfin | emby | tautulli |
+                                //   bazarr | prowlarr | indexer | plex
       "enabled": true,
       "baseUrl": "https://sonarr.example.com",
       "apiKey": "YOUR_SONARR_API_KEY",
@@ -164,8 +166,8 @@ Copy `config.example.json` → `config.json` and fill it in:
         "clientSecret": "yyyyyyyy"
       }
     }
-    // ... radarr, lidarr, readarr, overseerr, sabnzbd, qbittorrent, tautulli,
-    //     bazarr, prowlarr, indexer, plex
+    // ... radarr, lidarr, bindery, readarr, overseerr, sabnzbd, qbittorrent,
+    //     transmission, deluge, nzbget, tautulli, bazarr, prowlarr, indexer, plex
   }
 }
 ```
@@ -177,15 +179,38 @@ Where to find each **API key**:
 | Sonarr      | Settings → General → API Key |
 | Radarr      | Settings → General → API Key |
 | Lidarr      | Settings → General → API Key |
-| Readarr     | Settings → General → API Key |
+| Bindery     | Settings → General → Security → API Key |
+| Readarr (legacy) | Settings → General → API Key |
 | Prowlarr    | Settings → General → API Key |
 | Overseerr   | Settings → General → API Key |
 | SABnzbd     | Config → General → API Key |
 | Tautulli    | Settings → Web Interface → API Key |
 | Bazarr      | Settings → General → API Key |
 | Indexer     | Newznab: your account's API key |
-| qBittorrent | Uses WebUI username/password (see `config.example.json`) |
+| qBittorrent | API key (5.2+) or WebUI username/password |
+| Transmission | Optional RPC Basic-auth username/password |
+| Deluge      | Deluge Web password |
+| NZBGet      | `ControlUsername` / `ControlPassword` |
 | Plex        | Signed in with your Plex account — no manual key needed |
+| Jellyfin    | Dashboard → API Keys |
+| Emby        | Dashboard → Advanced → Security → API Keys |
+
+### Migrating Readarr to Bindery
+
+Readarr was archived in June 2025. Arr Command Center keeps Readarr available as an
+explicit legacy fallback, but new book-manager setups should use Bindery.
+
+1. In Bindery, open **Settings → Import** and upload the old `readarr.db` (or run
+   `bindery migrate readarr /path/to/readarr.db`). Bindery imports authors, indexers,
+   download clients, and blocklist; existing files are attached later with its Library Scan.
+2. Add Bindery to Arr Command Center as a separate `bindery` service using the API key
+   from **Bindery → Settings → General → Security**.
+3. Keep the Readarr service enabled until you have verified the migrated catalogue and
+   downloads. The two pages remain separate: ArrCC never redirects searches or destructive
+   queue actions from one database to the other automatically.
+
+See Bindery's [official migration guide](https://github.com/vavallee/bindery/blob/main/docs/Migrating-From-Readarr-Wiki.md)
+for two-instance ebook/audiobook migrations and library-scan details.
 
 ### Environment variable overrides
 
@@ -194,8 +219,9 @@ Docker/secrets). See `.env.example`. Pattern:
 
 ```
 SONARR_BASE_URL, SONARR_API_KEY, SONARR_CF_CLIENT_ID, SONARR_CF_CLIENT_SECRET
-RADARR_...   LIDARR_...   READARR_...   OVERSEERR_...   SABNZBD_...
-TAUTULLI_... BAZARR_...   PROWLARR_...  QBITTORRENT_... INDEXER_...
+RADARR_...   LIDARR_...   BINDERY_...  READARR_...   OVERSEERR_...   SABNZBD_...
+TAUTULLI_... BAZARR_...   PROWLARR_...  QBITTORRENT_... TRANSMISSION_...
+DELUGE_...    NZBGET_...   JELLYFIN_... EMBY_... INDEXER_...
 ```
 
 Env values **override** the matching value in `config.json`.
@@ -302,13 +328,13 @@ internal traffic typically bypasses Cloudflare Access — in that case just omit
 **Unified dashboard**
 - **Overview** — live status of every service, versions, quick stats, and a filterable
   "what's happening now" activity feed.
-- **Customizable dashboards** — build multiple Overview layouts; drag to reorder widgets,
-  set per-widget width, and show/hide panels (Services, Activity, Seerr Requests & Issues,
-  Upcoming calendar, Quick Links, Status, Action Inbox).
+- **Overview workspaces** — build multiple layouts, attach only the service instances each
+  workspace needs, bind service-aware widgets to a specific instance, and drag to reorder,
+  resize, or hide widgets (Services, Activity, Seerr, Upcoming, Streams, Status, and Inbox).
 - **Organizr-style Quick Links** — add your own custom links to the Overview and manage
   them in Settings.
 
-**Library management (Sonarr / Radarr / Lidarr / Readarr)**
+**Library management (Sonarr / Radarr / Lidarr / Bindery / legacy Readarr)**
 - **Three view modes** — Hexagon, List, and a sortable **Table**, toggled per page and
   remembered.
 - **Filter & saved views** — instant title search + status dropdown; save filter/sort/view
@@ -328,11 +354,17 @@ internal traffic typically bypasses Cloudflare Access — in that case just omit
   issues, recently added, and a **discover** search to create new requests.
 - **Plex** — watchlist, shared users, and now-playing sessions, with a server-side image
   proxy so posters render (Plex token never touches the browser).
+- **Jellyfin & Emby** — shared library browser, recently added media, users, and live
+  sessions with direct-play/transcode state; artwork streams through the authenticated proxy.
 - **Tautulli** — active streams (direct-play/transcode, bandwidth), history, statistics,
   and graphs.
 - **SABnzbd** — live queue with **pause/resume**, per-item remove, **speed-limit** control,
   and download history.
 - **qBittorrent** — live torrent list with state, ratio, speeds, and controls.
+- **Transmission & Deluge** — shared live torrent UI with downloading/completed views,
+  global and per-item pause/resume, safe removal, ratio/speed/ETA details, and speed limits.
+- **NZBGet** — shared Usenet queue/history UI with pause/resume, group/history removal,
+  disk/remaining statistics, and absolute speed limits.
 - **Bazarr** — subtitle wanted/history management.
 - **Prowlarr** — indexer overview.
 - **Newznab indexer** — search a public/private Usenet indexer directly.

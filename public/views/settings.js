@@ -12,7 +12,9 @@ import { renderQueueCleaner, renderHunting } from '../lib/automationUI.js';
 import { dashboardSettingsCard } from '../lib/dashboardSettings.js';
 import { getSysmonPrefs, setSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
 import { getAppMode, setAppMode, isLocalMode, getConnection, getConnections, setConnection, removeConnection, LOCAL_SERVICE_DEFS, localServiceDef } from '../lib/connections.js';
+import { normalizeCustomHeaders } from '../lib/customHeaders.js';
 
+import { portableBackupPayload, encryptPortableBackup, decryptPortableBackup, applyPortableBackup } from '../lib/configBackup.js';
 export async function renderSettings(root, ctx) {
   const { api, state } = ctx;
   ctx.setActions(
@@ -93,6 +95,7 @@ export async function renderSettings(root, ctx) {
       h('div', { class: 'meta-line', style: { marginTop: '10px' } },
         svc.configured ? h('span', { class: 'pill ok' }, '✓ Configured') : h('span', { class: 'pill warn' }, 'Not configured'),
         svc.hasCloudflareAccess ? h('span', { class: 'pill info' }, 'Cloudflare Access') : h('span', { class: 'pill muted' }, 'No CF Access'),
+        svc.hasCustomHeaders ? h('span', { class: 'pill info' }, 'Custom headers') : null,
         svc.embed ? h('span', { class: 'pill muted' }, 'Embedded') : null,
         hidden ? h('span', { class: 'pill muted' }, 'Hidden from nav') : null,
       ),
@@ -392,6 +395,18 @@ function serverOnlyCard(what) {
   );
 }
 
+function parseCustomHeadersInput(value) {
+  const text = String(value || '').trim();
+  if (!text) return {};
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { throw new Error('Custom headers must be valid JSON'); }
+  return normalizeCustomHeaders(parsed);
+}
+function formatCustomHeaders(value) {
+  try { return Object.keys(value || {}).length ? JSON.stringify(value, null, 2) : ''; }
+  catch { return ''; }
+}
+
 // Connection mode: Server (proxy through the backend) vs Local (talk directly to
 // services from this device — currently Sonarr). In local mode a connection
 // form is shown; server-only features are greyed out elsewhere.
@@ -408,8 +423,10 @@ function connectionModeCard(root, ctx) {
         ? 'Local mode talks directly to your services from this device — no backend proxy. Enter each service below. Server-only features (system monitor, notifications, automation) are unavailable.'
         : 'Server mode routes everything through the Arr Command Center backend (API keys + Cloudflare Access injected server-side).'),
   ];
-  if (mode === 'local') rows.push(localConnectionsPanel(root, ctx));
-  else if (isNativeApp()) rows.push(h('div', { id: 'local-fallback-panel', class: 'local-fallback-panel' }, h('div', { class: 'dim' }, 'Loading local fallback status…')));
+  if (mode === 'local') {
+    rows.push(localConnectionsPanel(root, ctx));
+    rows.push(encryptedBackupPanel(root, ctx));
+  } else if (isNativeApp()) rows.push(h('div', { id: 'local-fallback-panel', class: 'local-fallback-panel' }, h('div', { class: 'dim' }, 'Loading local fallback status…')));
   return h('div', { class: 'card' }, ...rows);
 }
 
@@ -485,13 +502,141 @@ async function hydrateLocalFallbackPanel(ctx) {
   );
 }
 
+// Encrypted, portable backup of local-mode connections + safe UI preferences.
+// Export: passphrase-derived AES-GCM envelope downloaded as a .arrccbackup file.
+// Import: decrypt + strictly validate, then require an explicit replace
+// confirmation before overwriting the on-device connections/credentials.
+function encryptedBackupPanel(root, ctx) {
+  const conns = getConnections();
+  const serviceCount = Object.keys(conns).length;
+
+  const exportPass = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Passphrase (min 8 characters)' });
+  const exportPass2 = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Confirm passphrase' });
+  const status = h('div', { class: 'dim', style: { marginTop: '8px', minHeight: '18px' } });
+
+  const setStatus = (message, kind) => {
+    status.textContent = message || '';
+    status.style.color = kind === 'error' ? 'var(--danger, #e5484d)' : '';
+    status.style.marginTop = '8px';
+    status.style.minHeight = '18px';
+  };
+
+  const doExport = async () => {
+    const pass = exportPass.value;
+    if (String(pass || '').length < 8) { setStatus('Passphrase must be at least 8 characters', 'error'); return; }
+    if (pass !== exportPass2.value) { setStatus('Passphrases do not match', 'error'); return; }
+    setStatus('Encrypting backup…');
+    try {
+      const payload = portableBackupPayload(localStorage, { dashboardUser: ctx.state.config?.auth?.user });
+      const envelope = await encryptPortableBackup(payload, pass);
+      const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const a = h('a', { href: url, download: `arr-command-center-${stamp}.arrccbackup` });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      exportPass.value = '';
+      exportPass2.value = '';
+      toast('Encrypted backup downloaded', 'success', 3200);
+      setStatus(`Exported ${serviceCount} service${serviceCount === 1 ? '' : 's'}.`);
+    } catch (error) {
+      setStatus(error.message || 'Could not create backup', 'error');
+    }
+  };
+
+  const fileInput = h('input', { type: 'file', accept: '.arrccbackup,application/json,.json', style: { display: 'none' } });
+  const importPass = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Backup passphrase' });
+  const importStatus = h('div', { class: 'dim', style: { marginTop: '8px', minHeight: '18px' } });
+  const setImportStatus = (message, kind) => {
+    importStatus.textContent = message || '';
+    importStatus.style.color = kind === 'error' ? 'var(--danger, #e5484d)' : '';
+    importStatus.style.marginTop = '8px';
+    importStatus.style.minHeight = '18px';
+  };
+
+  const doImport = async () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) { setImportStatus('Choose a .arrccbackup file first', 'error'); return; }
+    if (String(importPass.value || '').length < 8) { setImportStatus('Enter the backup passphrase', 'error'); return; }
+    if (file.size > 6_000_000) { setImportStatus('Backup file is too large', 'error'); return; }
+    setImportStatus('Decrypting backup…');
+    let decrypted;
+    try {
+      const text = await file.text();
+      let envelope;
+      try { envelope = JSON.parse(text); } catch { throw new Error('That file is not a valid ArrCC backup'); }
+      decrypted = await decryptPortableBackup(envelope, importPass.value);
+    } catch (error) {
+      setImportStatus(error.message || 'Could not decrypt backup', 'error');
+      return;
+    }
+    const count = Object.keys(decrypted.connections).length;
+    confirmModal({
+      title: 'Replace local connections?',
+      message: `This will replace ALL local-mode connections and their stored credentials on this device with the ${count} service${count === 1 ? '' : 's'} from the backup, and overwrite matching interface preferences. This cannot be undone.`,
+      confirmLabel: 'Replace connections',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          const result = await applyPortableBackup(decrypted, localStorage);
+          toast(`Imported ${result.serviceCount} service${result.serviceCount === 1 ? '' : 's'} from backup`, 'success', 3200);
+          location.reload();
+        } catch (error) {
+          setImportStatus(error.message || 'Could not import backup', 'error');
+        }
+      },
+    });
+  };
+
+  const fileLabel = h('span', { class: 'dim', style: { alignSelf: 'center' } }, 'No file selected');
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files && fileInput.files[0];
+    fileLabel.textContent = file ? file.name : 'No file selected';
+    setImportStatus('');
+  });
+
+  return h('div', { style: { marginTop: '14px', borderTop: '1px dashed var(--border)', paddingTop: '12px' } },
+    h('div', { style: { fontWeight: '700', marginBottom: '4px' } }, 'Encrypted backup'),
+    h('p', { class: 'dim settings-copy' }, 'Export your local connections, credentials, and safe interface preferences into a passphrase-encrypted file (AES-256-GCM). Import it on another device to restore them. The passphrase is never stored — keep it safe, as the backup cannot be recovered without it.'),
+
+    h('div', { style: { fontWeight: '600', margin: '10px 0 2px' } }, 'Export'),
+    serviceCount === 0
+      ? h('div', { class: 'dim' }, 'Add at least one local connection above to export a backup.')
+      : h('div', {},
+          field('Passphrase', exportPass),
+          field('Confirm passphrase', exportPass2),
+          h('button', { class: 'btn sm primary hex-btn', onclick: doExport }, 'Download encrypted backup'),
+          status,
+        ),
+
+    h('div', { style: { fontWeight: '600', margin: '14px 0 2px' } }, 'Import'),
+    h('div', {},
+      h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', margin: '8px 0' } },
+        h('button', { class: 'btn sm hex-btn', onclick: () => fileInput.click() }, 'Choose backup file'),
+        fileLabel,
+      ),
+      fileInput,
+      field('Passphrase', importPass),
+      h('button', { class: 'btn sm danger hex-btn', onclick: doImport }, 'Decrypt & import'),
+      importStatus,
+    ),
+  );
+}
+
 function localConnectionsPanel(root, ctx) {
   const defs = LOCAL_SERVICE_DEFS;
 
 
   const label = h('input', { class: 'input' });
-  const url = h('input', { class: 'input', type: 'url', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' });
-  const key = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' });
+  const localUrl = h('input', { class: 'input', type: 'url', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' });
+  const remoteUrl = h('input', { class: 'input', type: 'url', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'https://remote.example.com (optional)' });
+  const policy = h('select', { class: 'input' }, h('option', { value: 'auto' }, 'Auto (local, then remote)'), h('option', { value: 'local' }, 'Local only'), h('option', { value: 'remote' }, 'Remote only'));
+  const customHeaders = h('textarea', { class: 'input', rows: '5', spellcheck: 'false', placeholder: '{ "X-Custom-Token": "value" }' });
+  const key = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' });
+  const username = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Username (Transmission/NZBGet)' });
+  const password = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Password (Transmission/Deluge/NZBGet)' });
   const cfId = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'CF-Access-Client-Id (optional)' });
   const cfSecret = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'CF-Access-Client-Secret (optional)' });
   const status = h('div', { class: 'dim', style: { fontSize: '12px', minHeight: '16px', margin: '2px 0' } });
@@ -501,10 +646,15 @@ function localConnectionsPanel(root, ctx) {
     const d = localServiceDef(t) || defs[0];
     const c = getConnection(t) || {};
     label.value = c.label || d.name;
-    url.value = c.baseUrl || '';
-    url.placeholder = d.urlPlaceholder;
+    localUrl.value = c.localUrl || c.baseUrl || '';
+    localUrl.placeholder = d.urlPlaceholder;
+    remoteUrl.value = c.remoteUrl || '';
+    policy.value = c.connectionPolicy || 'auto';
+    customHeaders.value = formatCustomHeaders(c.customHeaders);
     key.value = c.apiKey || '';
     key.placeholder = d.keyHint || `${d.name} API key`;
+    username.value = c.username || '';
+    password.value = c.password || '';
     cfId.value = c.cfClientId || '';
     cfSecret.value = c.cfClientSecret || '';
     status.textContent = '';
@@ -518,22 +668,38 @@ function localConnectionsPanel(root, ctx) {
     return {
       type: t,
       label: (label.value || d.name).trim(),
-      baseUrl: (url.value || '').trim().replace(/\/+$/, ''),
+      localUrl: (localUrl.value || '').trim().replace(/\/+$/, ''),
+      remoteUrl: (remoteUrl.value || '').trim().replace(/\/+$/, ''),
+      connectionPolicy: policy.value,
       apiKey: (key.value || '').trim(),
+      username: (username.value || '').trim(),
+      password: (password.value || '').trim(),
       cfClientId: (cfId.value || '').trim(),
       cfClientSecret: (cfSecret.value || '').trim(),
+      customHeaders: parseCustomHeadersInput(customHeaders.value),
     };
   };
+  const credentialError = (c) => {
+    if (c.type === 'transmission') return (!!c.username === !!c.password) ? '' : 'Enter both Transmission username and password, or leave both blank';
+    if (c.type === 'deluge') return c.password ? '' : 'Deluge Web password is required';
+    if (c.type === 'nzbget') return c.username && c.password ? '' : 'NZBGet username and password are required';
+    return c.apiKey ? '' : 'API key is required';
+  };
   const save = () => {
-    const c = collect();
-    if (!/^https?:\/\/.+/i.test(c.baseUrl)) { status.textContent = 'Enter a valid URL (http(s)://…)'; return; }
-    if (!c.apiKey) { status.textContent = 'API key is required'; return; }
+    let c;
+    try { c = collect(); } catch (error) { status.textContent = error.message; return; }
+    if (![c.localUrl, c.remoteUrl].some((value) => /^https?:\/\/.+/i.test(value))) { status.textContent = 'Enter at least one valid local or remote URL'; return; }
+    const authError = credentialError(c);
+    if (authError) { status.textContent = authError; return; }
     setConnection(c.type, c);
     location.reload();
   };
   const test = async () => {
-    const c = collect();
-    if (!/^https?:\/\/.+/i.test(c.baseUrl) || !c.apiKey) { status.textContent = 'Enter URL and API key first'; return; }
+    let c;
+    try { c = collect(); } catch (error) { status.textContent = error.message; return; }
+    if (![c.localUrl, c.remoteUrl].some((value) => /^https?:\/\/.+/i.test(value))) { status.textContent = 'Enter a local or remote URL first'; return; }
+    const authError = credentialError(c);
+    if (authError) { status.textContent = authError; return; }
     setConnection(c.type, c);
     status.textContent = 'Testing…';
     try {
@@ -554,7 +720,7 @@ function localConnectionsPanel(root, ctx) {
         return h('div', { class: 'local-conn-row' },
           h('span', { class: 'local-conn-name' }, c.label || k),
           h('span', { class: 'pill muted' }, c.type),
-          h('span', { class: 'dim local-conn-url' }, c.baseUrl || ''),
+          h('span', { class: 'dim local-conn-url' }, c.connectionPolicy === 'remote' ? (c.remoteUrl || c.localUrl) : (c.localUrl || c.remoteUrl)),
           h('span', { class: 'local-conn-actions' },
             h('button', { class: 'btn sm hex-btn', onclick: () => selectType(c.type) }, 'Edit'),
             h('button', { class: 'btn sm danger hex-btn', onclick: () => { removeConnection(k); location.reload(); } }, 'Remove'),
@@ -577,10 +743,15 @@ function localConnectionsPanel(root, ctx) {
       h('div', { style: { fontWeight: '700', marginBottom: '4px' } }, 'Add / edit a service'),
       field('Service', typeSel),
       field('Label', label),
-      field('Server URL', url),
-      field('API key', key),
+      field('Local URL', localUrl),
+      field('Remote URL', remoteUrl),
+      field('Connection policy', policy),
+      field('API key (most services)', key),
+      field('Username (Transmission / NZBGet)', username),
+      field('Password (Transmission / Deluge / NZBGet)', password),
       field('Cloudflare Access — Client Id', cfId),
       field('Cloudflare Access — Client Secret', cfSecret),
+      field('Custom headers (JSON)', customHeaders),
       status,
       h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
         h('button', { class: 'btn sm primary hex-btn', onclick: save }, 'Save'),
@@ -789,7 +960,7 @@ async function hydrateNotifications(ctx) {
   render();
 }
 
-const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'lidarr', 'readarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'indexer', 'plex'];
+const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'jellyfin', 'emby', 'indexer', 'plex'];
 
 function field(label, control, hint) {
   return h('label', { class: 'pw-field' },
@@ -810,16 +981,28 @@ function openServiceForm(root, ctx, existingKey, existing) {
   const password = h('input', { class: 'input', type: 'password', placeholder: existing && existing.type === 'qbittorrent' ? '•••• (leave blank to keep)' : 'WebUI password' });
   const cfId = h('input', { class: 'input', placeholder: existing && existing.hasCloudflareAccess ? '•••• (leave blank to keep)' : 'CF-Access-Client-Id (optional)' });
   const cfSecret = h('input', { class: 'input', type: 'password', placeholder: existing && existing.hasCloudflareAccess ? '•••• (leave blank to keep)' : 'CF-Access-Client-Secret (optional)' });
+  const customHeaders = h('textarea', { class: 'input', rows: '5', spellcheck: 'false', placeholder: existing && existing.hasCustomHeaders ? '•••• (leave blank to keep; enter {} to clear)' : '{ "X-Custom-Token": "value" }' });
   const enabled = h('input', { type: 'checkbox', checked: (existing ? existing : { }) && (!existing || existing.enabled !== false) ? 'checked' : null });
 
-  // Username/password are only relevant to qBittorrent (and only as a fallback
-  // for versions before its API key support). Hide them for every other type.
-  const qbitCreds = h('div', { style: { display: typeSel.value === 'qbittorrent' ? '' : 'none' } },
-    field('Username', username),
-    field('Password', password),
-    h('div', { class: 'dim', style: { fontSize: '11px', marginTop: '-4px' } }, 'Only needed for qBittorrent versions without an API key — prefer the API key above.'),
-  );
-  typeSel.addEventListener('change', () => { qbitCreds.style.display = typeSel.value === 'qbittorrent' ? '' : 'none'; });
+  const credentialTypes = new Set(['qbittorrent', 'transmission', 'deluge', 'nzbget']);
+  const usernameWrap = h('div', {}, field('Username', username));
+  const passwordWrap = h('div', {}, field('Password', password));
+  const credentialHint = h('div', { class: 'dim', style: { fontSize: '11px', marginTop: '-4px' } });
+  const loginCreds = h('div', {}, usernameWrap, passwordWrap, credentialHint);
+  const updateCredentialFields = () => {
+    const type = typeSel.value;
+    loginCreds.style.display = credentialTypes.has(type) ? '' : 'none';
+    usernameWrap.style.display = type === 'deluge' ? 'none' : '';
+    credentialHint.textContent = type === 'qbittorrent'
+      ? 'Only needed for qBittorrent versions without an API key; prefer an API key.'
+      : type === 'transmission'
+        ? 'Optional if Transmission RPC authentication is disabled.'
+        : type === 'deluge'
+          ? 'Enter the Deluge Web password; Deluge does not use a username here.'
+          : 'Use NZBGet ControlUsername and ControlPassword.';
+  };
+  typeSel.addEventListener('change', updateCredentialFields);
+  updateCredentialFields();
 
   const save = async () => {
     const key = (existingKey || keyInput.value || '').trim();
@@ -834,6 +1017,10 @@ function openServiceForm(root, ctx, existingKey, existing) {
     if (username.value.trim()) service.username = username.value.trim();
     if (password.value.trim()) service.password = password.value.trim();
     if (cfId.value.trim() || cfSecret.value.trim()) service.cloudflareAccess = { clientId: cfId.value.trim(), clientSecret: cfSecret.value.trim() };
+    if (customHeaders.value.trim()) {
+      try { service.customHeaders = parseCustomHeadersInput(customHeaders.value); }
+      catch (error) { toast(error.message, 'error'); return; }
+    }
     try {
       await ctx.api.saveService(key, service);
       ctx.state.config = await ctx.api.config();
@@ -860,10 +1047,11 @@ function openServiceForm(root, ctx, existingKey, existing) {
     field('Label', label),
     field('Type', typeSel),
     field('URL', baseUrl),
-    field('API key', apiKey, 'qBittorrent ≥ v5.2.0: generate an API key in WebUI settings. Otherwise use username/password below.'),
-    qbitCreds,
+    field('API key', apiKey, 'Required for API-key services. Leave blank for Transmission/Deluge/NZBGet and use credentials below.'),
+    loginCreds,
     field('CF Access ID', cfId),
     field('CF Access secret', cfSecret),
+    field('Custom headers (JSON)', customHeaders, 'Cloudflare Access headers remain managed by the dedicated fields above and cannot be overridden.'),
     field('Enabled', h('span', { class: 'pw-toggle' }, enabled)),
     h('div', { class: 'dim', style: { fontSize: '12px', marginTop: '4px' } }, 'Saved to config.json on the server. Secrets are never sent back to the browser.'),
   );

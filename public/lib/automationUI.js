@@ -49,7 +49,7 @@ export async function renderQueueCleaner(root) {
   const lastRun = (status.runs && status.runs.queueCleaner) || null;
 
   mount(root,
-    h('p', { class: 'dim', style: { margin: '0 0 12px', lineHeight: '1.6' } }, 'Flags stalled/errored downloads across all Sonarr/Radarr/Lidarr/Readarr instances, applies a strike each run, and removes them once they hit the strike limit.'),
+    h('p', { class: 'dim', style: { margin: '0 0 12px', lineHeight: '1.6' } }, 'Flags stalled/errored downloads across all Sonarr/Radarr/Lidarr/Readarr/Bindery instances, applies a strike each run, and removes them once they hit the strike limit.'),
     h('div', { class: 'pw-form' },
       toggle('Enabled (scheduled)', cfg.enabled, (v) => { cfg.enabled = v; }),
       toggle('Dry run (preview only, never removes)', cfg.dryRun, (v) => { cfg.dryRun = v; }),
@@ -83,7 +83,7 @@ export async function renderHunting(root) {
   const lastRun = (status.runs && status.runs.hunting) || null;
 
   mount(root,
-    h('p', { class: 'dim', style: { margin: '0 0 12px', lineHeight: '1.6' } }, 'Periodically triggers a search for wanted/missing (and optionally cutoff-unmet) items on each Sonarr/Radarr/Lidarr/Readarr instance.'),
+    h('p', { class: 'dim', style: { margin: '0 0 12px', lineHeight: '1.6' } }, 'Periodically triggers a search for wanted/missing (and optionally cutoff-unmet) items on each Sonarr/Radarr/Lidarr/Readarr/Bindery instance.'),
     h('div', { class: 'pw-form' },
       toggle('Enabled (scheduled)', cfg.enabled, (v) => { cfg.enabled = v; }),
       h('label', { class: 'setting-row' }, h('span', {}, 'Search for'), h('span', { class: 'right' }, modeSel)),

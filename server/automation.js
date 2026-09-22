@@ -15,8 +15,8 @@ const CFG_NS = 'automation';
 const STRIKES_NS = 'automationStrikes';
 const RUN_NS = 'automationRuns';
 
-const ARR_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr'];
-const apiBase = (type) => (type === 'lidarr' || type === 'readarr') ? 'api/v1' : 'api/v3';
+const ARR_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery'];
+const apiBase = (type) => (type === 'lidarr' || type === 'readarr' || type === 'bindery') ? 'api/v1' : 'api/v3';
 
 const DEFAULT_CONFIG = {
   queueCleaner: { enabled: false, dryRun: true, maxStrikes: 3, removeFromClient: true, blocklist: false, intervalMinutes: 15 },
@@ -84,9 +84,14 @@ export async function runQueueCleanerOnce(cfg, opts = {}) {
   for (const svc of arrInstances(cfg)) {
     const base = apiBase(svc.type);
     let data;
-    try { data = await serviceGet(svc, `${base}/queue?page=1&pageSize=100&includeUnknownSeriesItems=true&includeUnknownMovieItems=true`); }
+    try {
+      const queuePath = svc.type === 'bindery'
+        ? `${base}/queue`
+        : `${base}/queue?page=1&pageSize=100&includeUnknownSeriesItems=true&includeUnknownMovieItems=true`;
+      data = await serviceGet(svc, queuePath);
+    }
     catch (e) { result.items.push({ svc: svc.label, error: e.message }); continue; }
-    const records = Array.isArray(data) ? data : (data.records || []);
+    const records = Array.isArray(data) ? data : (data.records || data.items || []);
     result.instances += 1;
     for (const rec of records) {
       result.checked += 1;
@@ -102,7 +107,10 @@ export async function runQueueCleanerOnce(cfg, opts = {}) {
         if (dryRun) { item.action = 'would remove'; }
         else {
           try {
-            await serviceRequest(svc, `${base}/queue/${rec.id}?removeFromClient=${c.removeFromClient}&blocklist=${c.blocklist}`, { method: 'DELETE' });
+            const removePath = svc.type === 'bindery'
+              ? `${base}/queue/${rec.id}?removeFromClient=${c.removeFromClient}&deleteFiles=false`
+              : `${base}/queue/${rec.id}?removeFromClient=${c.removeFromClient}&blocklist=${c.blocklist}`;
+            await serviceRequest(svc, removePath, { method: 'DELETE' });
             item.action = 'removed'; result.removed += 1; delete strikes[key];
           } catch (e) { item.action = 'error'; item.error = e.message; }
         }
@@ -136,9 +144,11 @@ export async function runHuntOnce(cfg, opts = {}) {
   for (const svc of arrInstances(cfg)) {
     const base = apiBase(svc.type);
     const collectIds = async (which) => {
+      if (svc.type === 'bindery' && which === 'cutoff') return [];
       try {
-        const data = await serviceGet(svc, `${base}/wanted/${which}?page=1&pageSize=${batch}`);
-        return (data.records || []).map((r) => r.id).filter((x) => x != null);
+        const query = svc.type === 'bindery' ? `limit=${batch}&offset=0` : `page=1&pageSize=${batch}`;
+        const data = await serviceGet(svc, `${base}/wanted/${which}?${query}`);
+        return (data.records || data.items || []).map((r) => r.id).filter((x) => x != null);
       } catch { return []; }
     };
     let ids = [];
@@ -147,11 +157,18 @@ export async function runHuntOnce(cfg, opts = {}) {
     ids = Array.from(new Set(ids)).slice(0, batch);
     result.instances += 1;
     if (!ids.length) { result.items.push({ svc: svc.label, count: 0 }); continue; }
-    const cmd = huntCommand(svc.type, ids);
     try {
-      await serviceRequest(svc, `${base}/command`, { method: 'POST', body: cmd });
+      let commandName;
+      if (svc.type === 'bindery') {
+        for (const id of ids) await serviceRequest(svc, `${base}/book/${id}/search`, { method: 'POST' });
+        commandName = 'BookSearch (resource)';
+      } else {
+        const cmd = huntCommand(svc.type, ids);
+        await serviceRequest(svc, `${base}/command`, { method: 'POST', body: cmd });
+        commandName = cmd.name;
+      }
       result.searched += ids.length;
-      result.items.push({ svc: svc.label, count: ids.length, command: cmd.name });
+      result.items.push({ svc: svc.label, count: ids.length, command: commandName });
     } catch (e) { result.items.push({ svc: svc.label, error: e.message }); }
   }
   recordRun('hunting', result);

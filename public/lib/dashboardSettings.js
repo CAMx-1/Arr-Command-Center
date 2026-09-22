@@ -20,10 +20,25 @@ function sizesFor(widgetId) {
   return HEX_CAPABLE.has(widgetId) ? [...SIZES, HEX_SIZE] : SIZES;
 }
 
+const WIDGET_SERVICE_TYPES = {
+  streams: new Set(['tautulli']),
+  seerr: new Set(['overseerr']),
+  upcoming: new Set(['sonarr', 'radarr']),
+  activity: null,
+  status: null,
+  inbox: null,
+};
+function bindingOptions(widgetId, services) {
+  if (!(widgetId in WIDGET_SERVICE_TYPES)) return [];
+  const types = WIDGET_SERVICE_TYPES[widgetId];
+  return services.filter((service) => !types || types.has(service.type));
+}
+
 export function dashboardSettingsCard(ctx) {
   const card = h('div', { class: 'card dashboard-settings-card' });
   let state = loadDashboards();
   let draftWidgets = [];
+  let draftServiceKeys = null;
   let draftName = '';
   let draftId = '';
 
@@ -31,6 +46,7 @@ export function dashboardSettingsCard(ctx) {
     const dashboard = activeDashboard(state);
     draftId = dashboard.id;
     draftName = dashboard.name;
+    draftServiceKeys = Array.isArray(dashboard.serviceKeys) ? [...dashboard.serviceKeys] : null;
     draftWidgets = dashboard.widgets.map((widget) => ({ ...widget }));
   };
 
@@ -56,7 +72,7 @@ export function dashboardSettingsCard(ctx) {
     const input = h('input', { class: 'input', maxlength: '60', value: `${draftName} Copy`, placeholder: 'Dashboard name' });
     const duplicate = () => {
       try {
-        state = saveDashboards(createDashboard(state, input.value, draftWidgets));
+        state = saveDashboards(createDashboard(state, input.value, draftWidgets, draftServiceKeys));
         closeModal(); resetDraft(); render(); toast('Dashboard duplicated', 'success');
       } catch (error) { toast(error.message, 'error'); }
     };
@@ -66,8 +82,8 @@ export function dashboardSettingsCard(ctx) {
 
   const saveLayout = () => {
     const name = draftId === 'default' ? 'Overview' : draftName.trim();
-    if (!name) { toast('Dashboard name is required', 'error'); return; }
-    state = saveDashboards(updateDashboard(state, draftId, { name, widgets: draftWidgets }));
+    if (!name) { toast('Workspace name is required', 'error'); return; }
+    state = saveDashboards(updateDashboard(state, draftId, { name, serviceKeys: draftServiceKeys, widgets: draftWidgets }));
     resetDraft(); render(); toast('Dashboard layout saved', 'success');
   };
 
@@ -102,36 +118,59 @@ export function dashboardSettingsCard(ctx) {
       oninput: (event) => { draftName = event.target.value; },
     });
 
-    const rows = draftWidgets.map((widget, index) => h('div', {
-      class: 'dashboard-edit-row', draggable: 'true', dataset: { widget: widget.id },
-      ondragstart: (event) => { event.dataTransfer.setData('text/plain', widget.id); event.dataTransfer.effectAllowed = 'move'; event.currentTarget.classList.add('dragging'); },
-      ondragend: (event) => event.currentTarget.classList.remove('dragging'),
-      ondragover: (event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; },
-      ondrop: (event) => {
-        event.preventDefault();
-        const source = event.dataTransfer.getData('text/plain');
-        const from = draftWidgets.findIndex((entry) => entry.id === source);
-        const to = draftWidgets.findIndex((entry) => entry.id === widget.id);
-        if (from >= 0 && to >= 0 && from !== to) move(source, to - from);
+    const allServices = ctx.state?.services || [];
+    const attachedServices = draftServiceKeys === null ? allServices : allServices.filter((service) => draftServiceKeys.includes(service.key));
+    const attachmentRows = allServices.map((service) => {
+      const checked = draftServiceKeys === null || draftServiceKeys.includes(service.key);
+      return h('label', { class: 'dashboard-visible' }, h('input', {
+        type: 'checkbox', checked,
+        onchange: (event) => {
+          if (draftServiceKeys === null) draftServiceKeys = allServices.map((entry) => entry.key);
+          draftServiceKeys = event.target.checked ? [...new Set([...draftServiceKeys, service.key])] : draftServiceKeys.filter((key) => key !== service.key);
+          render();
+        },
+      }), h('span', {}, service.label));
+    });
+
+    const rows = draftWidgets.map((widget, index) => {
+      const options = bindingOptions(widget.id, attachedServices);
+      const binding = options.length ? h('select', {
+        class: 'input dashboard-size-select', 'aria-label': `${widget.label} service instance`,
+        onchange: (event) => { widget.serviceKey = event.target.value; },
+      }, h('option', { value: '', selected: !widget.serviceKey }, 'All attached / automatic'),
+      ...options.map((service) => h('option', { value: service.key, selected: widget.serviceKey === service.key }, service.label))) : null;
+      return h('div', {
+        class: 'dashboard-edit-row', draggable: 'true', dataset: { widget: widget.id },
+        ondragstart: (event) => { event.dataTransfer.setData('text/plain', widget.id); event.dataTransfer.effectAllowed = 'move'; event.currentTarget.classList.add('dragging'); },
+        ondragend: (event) => event.currentTarget.classList.remove('dragging'),
+        ondragover: (event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; },
+        ondrop: (event) => {
+          event.preventDefault();
+          const source = event.dataTransfer.getData('text/plain');
+          const from = draftWidgets.findIndex((entry) => entry.id === source);
+          const to = draftWidgets.findIndex((entry) => entry.id === widget.id);
+          if (from >= 0 && to >= 0 && from !== to) move(source, to - from);
+        },
       },
-    },
-      h('span', { class: 'drag-handle', title: 'Drag to reorder' }, '⠿'),
-      h('label', { class: 'dashboard-visible' }, h('input', {
-        type: 'checkbox', checked: widget.visible,
-        onchange: (event) => { widget.visible = event.target.checked; },
-      }), h('span', {}, widget.label)),
-      h('select', {
-        class: 'input dashboard-size-select', 'aria-label': `${widget.label} size`,
-        onchange: (event) => { widget.size = event.target.value; },
-      }, ...sizesFor(widget.id).map((size) => h('option', { value: size.id, selected: widget.size === size.id }, size.label))),
-      h('button', { class: 'btn sm', disabled: index === 0, title: `Move ${widget.label} up`, onclick: () => move(widget.id, -1) }, '↑'),
-      h('button', { class: 'btn sm', disabled: index === draftWidgets.length - 1, title: `Move ${widget.label} down`, onclick: () => move(widget.id, 1) }, '↓'),
-    ));
+        h('span', { class: 'drag-handle', title: 'Drag to reorder' }, '⠿'),
+        h('label', { class: 'dashboard-visible' }, h('input', {
+          type: 'checkbox', checked: widget.visible,
+          onchange: (event) => { widget.visible = event.target.checked; },
+        }), h('span', {}, widget.label)),
+        h('select', {
+          class: 'input dashboard-size-select', 'aria-label': `${widget.label} size`,
+          onchange: (event) => { widget.size = event.target.value; },
+        }, ...sizesFor(widget.id).map((size) => h('option', { value: size.id, selected: widget.size === size.id }, size.label))),
+        binding,
+        h('button', { class: 'btn sm', disabled: index === 0, title: `Move ${widget.label} up`, onclick: () => move(widget.id, -1) }, '↑'),
+        h('button', { class: 'btn sm', disabled: index === draftWidgets.length - 1, title: `Move ${widget.label} down`, onclick: () => move(widget.id, 1) }, '↓'),
+      );
+    });
 
     mount(card,
       h('div', { class: 'dashboard-settings-head' },
-        h('div', {}, h('h3', { style: { margin: 0 } }, 'Overview dashboards'),
-          h('p', { class: 'dim', style: { margin: '5px 0 0' } }, 'Choose the dashboard shown on Overview, then arrange, resize, or hide its widgets here.')),
+        h('div', {}, h('h3', { style: { margin: 0 } }, 'Overview workspaces'),
+          h('p', { class: 'dim', style: { margin: '5px 0 0' } }, 'Attach service instances, bind service-aware widgets, then arrange and resize the workspace.')),
         h('button', { class: 'btn sm', onclick: () => ctx.go('home') }, 'Open Overview'),
       ),
       h('div', { class: 'dashboard-settings-toolbar' },
@@ -141,10 +180,16 @@ export function dashboardSettingsCard(ctx) {
         draftId !== 'default' ? h('button', { class: 'btn sm danger', onclick: deleteCurrent }, 'Delete') : null,
         h('button', { class: 'btn sm', onclick: resetOverview }, 'Reset Overview'),
       ),
-      settingLine('Dashboard name', nameInput),
+      settingLine('Workspace name', nameInput),
+      h('div', { class: 'dashboard-settings-note dim' }, 'Attached services scope this workspace. A widget binding can narrow a service-aware widget to one attached instance.'),
+      h('div', { class: 'card', style: { margin: '10px 0' } },
+        h('div', { class: 'section-title' }, 'Attached service instances'),
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '12px' } }, ...attachmentRows),
+        h('button', { class: 'btn sm', style: { marginTop: '10px' }, onclick: () => { draftServiceKeys = null; render(); } }, 'Attach all services'),
+      ),
       h('div', { class: 'dashboard-settings-note dim' }, 'Drag widgets to reorder them. Arrow buttons provide the same control on touch devices. Hidden widgets remain available here.'),
       h('div', { class: 'dashboard-editor' }, ...rows),
-      h('div', { class: 'dashboard-settings-save' }, h('button', { class: 'btn primary', onclick: saveLayout }, 'Save dashboard layout')),
+      h('div', { class: 'dashboard-settings-save' }, h('button', { class: 'btn primary', onclick: saveLayout }, 'Save workspace')),
     );
   };
 

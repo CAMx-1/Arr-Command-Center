@@ -78,8 +78,21 @@ export const api = {
       del: (p, body) => this.proxy(service, `api/v1/${p}`, { method: 'DELETE', body }),
     };
   },
-  // Pick the right client for any *arr service by type.
+
+  // Bindery also lives under /api/v1, but its list envelopes and resource
+  // actions are intentionally adapted in bookServices.js rather than treated
+  // as Readarr-compatible wire contracts.
+  bindery(service) {
+    return {
+      get: (p) => this.proxy(service, `api/v1/${p}`),
+      post: (p, body) => this.proxy(service, `api/v1/${p}`, { method: 'POST', body }),
+      put: (p, body) => this.proxy(service, `api/v1/${p}`, { method: 'PUT', body }),
+      del: (p, body) => this.proxy(service, `api/v1/${p}`, { method: 'DELETE', body }),
+    };
+  },
+  // Pick the right client for any *arr-style service by type.
   arrByType(type, service) {
+    if (type === 'bindery') return this.bindery(service);
     return (type === 'lidarr' || type === 'readarr') ? this.arrV1(service) : this.arr(service);
   },
 
@@ -123,6 +136,47 @@ export const api = {
   indexer(service, params = {}) {
     const qs = new URLSearchParams({ o: 'json', ...params });
     return this.proxy(service, `api?${qs.toString()}`);
+  },
+
+  // ---- RPC download clients ----
+  transmission(service) {
+    return {
+      call: async (method, args = {}) => {
+        const data = await this.proxy(service, 'transmission/rpc', { method: 'POST', body: { method, arguments: args } });
+        if (!data || data.result !== 'success') throw new Error(data?.result || 'Transmission RPC error');
+        return data.arguments || {};
+      },
+    };
+  },
+
+  deluge(service) {
+    let id = 10;
+    return {
+      call: async (method, params = []) => {
+        const data = await this.proxy(service, 'json', { method: 'POST', body: { method, params, id: id++ } });
+        if (!data || data.error) throw new Error(data?.error?.message || 'Deluge JSON-RPC error');
+        return data.result;
+      },
+    };
+  },
+
+  nzbget(service) {
+    let id = 10;
+    return {
+      call: async (method, params = []) => {
+        const data = await this.proxy(service, 'jsonrpc', { method: 'POST', body: { method, params, id: id++ } });
+        if (!data || data.error) throw new Error(data?.error?.message || 'NZBGet JSON-RPC error');
+        return data.result;
+      },
+    };
+  },
+
+  // ---- Jellyfin / Emby shared MediaBrowser API ----
+  mediaServer(service) {
+    return {
+      get: (path) => this.proxy(service, path),
+      post: (path, body) => this.proxy(service, path, { method: 'POST', body }),
+    };
   },
 
   // ---- SABnzbd helper (query-based API) ----
