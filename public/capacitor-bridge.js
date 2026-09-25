@@ -199,14 +199,20 @@
     var err = document.getElementById('acc-connect-err');
     var go = document.getElementById('acc-connect-go');
     var localBtn = document.getElementById('acc-connect-local');
-    if (localBtn) localBtn.addEventListener('click', function () {
-      Promise.resolve(persistMode('local')).then(function () {
-        window.__ACC_SETUP_REQUIRED__ = false;
-        window.__ACC_BOOTSTRAP_READY__ = true;
-        window.dispatchEvent(new Event('acc-bootstrap-ready'));
-        wrap.remove();
+    if (localBtn) {
+      // Dismiss the keyboard as soon as the button is pressed so a covering
+      // keyboard can't intercept the tap.
+      localBtn.addEventListener('pointerdown', function () { try { input.blur(); } catch (e) {} });
+      localBtn.addEventListener('click', function () {
+        try { input.blur(); } catch (e) {}
+        Promise.resolve(persistMode('local')).then(function () {
+          window.__ACC_SETUP_REQUIRED__ = false;
+          window.__ACC_BOOTSTRAP_READY__ = true;
+          window.dispatchEvent(new Event('acc-bootstrap-ready'));
+          wrap.remove();
+        });
       });
-    });
+    }
     var submit = function () {
       var raw = (input.value || '').trim();
       var parsed;
@@ -222,7 +228,14 @@
     };
     go.addEventListener('click', submit);
     input.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
-    setTimeout(function () { try { input.focus(); } catch (e) {} }, 100);
+    // Tapping anywhere outside the input dismisses the iOS keyboard so the
+    // "Use local-only mode" button below is always reachable.
+    wrap.addEventListener('pointerdown', function (e) {
+      if (e.target !== input) { try { input.blur(); } catch (err2) {} }
+    });
+    // Note: we intentionally do NOT auto-focus the URL field. Auto-focusing
+    // raised the keyboard on first launch and covered the local-mode button
+    // with no way to dismiss it.
   };
 
   var start = function () {
