@@ -659,8 +659,8 @@ function localConnectionsPanel(root, ctx) {
     cfSecret.value = c.cfClientSecret || '';
     status.textContent = '';
   };
-  const selectType = (t) => { typeSel.value = t; fill(t); typeSel.scrollIntoView({ block: 'nearest' }); };
-  typeSel.addEventListener('change', () => fill(typeSel.value));
+  const selectType = (t) => { typeSel.value = t; fill(t); updateCredentialFields(); typeSel.scrollIntoView({ block: 'nearest' }); };
+  typeSel.addEventListener('change', () => { fill(typeSel.value); updateCredentialFields(); });
 
   const collect = () => {
     const t = typeSel.value;
@@ -733,7 +733,30 @@ function localConnectionsPanel(root, ctx) {
   const field = (lbl, input) => h('label', { class: 'pw-field', style: { display: 'block', margin: '8px 0' } },
     h('span', { class: 'dim', style: { fontSize: '12px', display: 'block', marginBottom: '4px' } }, lbl), input);
 
+  // Username/password only apply to a few download clients. Wrap each field so
+  // we can show or hide it based on the selected service's credential mode.
+  const usernameField = field('Username', username);
+  const passwordField = field('Password', password);
+  const credentialHint = h('div', { class: 'dim', style: { fontSize: '11px', margin: '-2px 0 6px' } });
+  // Show username/password only for services whose def declares a credentialMode
+  // (transmission = optional basic, deluge = password only, nzbget = basic).
+  const updateCredentialFields = () => {
+    const d = localServiceDef(typeSel.value) || defs[0];
+    const mode = d.credentialMode || null;
+    usernameField.style.display = (mode === 'basic' || mode === 'optional-basic') ? '' : 'none';
+    passwordField.style.display = mode ? '' : 'none';
+    credentialHint.style.display = mode ? '' : 'none';
+    credentialHint.textContent = mode === 'optional-basic'
+      ? 'Optional if Transmission RPC authentication is disabled — enter both or leave both blank.'
+      : mode === 'password'
+        ? 'Enter the Deluge Web password; Deluge does not use a username here.'
+        : mode === 'basic'
+          ? 'Use the NZBGet ControlUsername and ControlPassword.'
+          : '';
+  };
+
   fill(typeSel.value);
+  updateCredentialFields();
   renderList();
 
   return h('div', { class: 'local-conn', style: { marginTop: '12px', borderTop: '1px solid var(--border)', paddingTop: '12px' } },
@@ -747,8 +770,9 @@ function localConnectionsPanel(root, ctx) {
       field('Remote URL', remoteUrl),
       field('Connection policy', policy),
       field('API key (most services)', key),
-      field('Username (Transmission / NZBGet)', username),
-      field('Password (Transmission / Deluge / NZBGet)', password),
+      usernameField,
+      passwordField,
+      credentialHint,
       field('Cloudflare Access — Client Id', cfId),
       field('Cloudflare Access — Client Secret', cfSecret),
       field('Custom headers (JSON)', customHeaders),
