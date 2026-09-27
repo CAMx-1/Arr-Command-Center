@@ -2,12 +2,15 @@ import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, s
 import { SERVICE_META, attachLongPress, openServiceQuickActions, openInArr } from '../app.js';
 import { listFailed, removeFailed } from '../lib/failedRequests.js';
 import { visibleServices } from '../lib/servicePrefs.js';
-import { loadDashboards, activeDashboard } from '../lib/dashboardPrefs.js';
+import { loadDashboards, activeDashboard, workspaceServices, widgetServices } from '../lib/dashboardPrefs.js';
 import { actionGroup } from '../lib/actions.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { getSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
 import { persistentSWR } from '../lib/cache.js';
 import { seerrRequestBadge } from '../lib/seerrStatus.js';
+import { createBookServiceClient } from '../lib/bookServices.js';
+import { downloadClientFor } from '../lib/downloadClients.js';
+import { mediaServerFor } from '../lib/mediaServers.js';
 
 // ---- Activity source definitions ----
 const ACTIVITY_DEFS = [
@@ -48,7 +51,10 @@ export async function renderHome(root, ctx) {
   const sysInit = wantSys ? await api.system().catch(() => null) : null;
   if (sysInit) pushSysSample(sysInit);
 
-  const shown = visibleServices(state.services);
+  const workspaceState = { ...state, services: workspaceServices(dashboard, state.services) };
+  const workspaceCtx = { ...ctx, state: workspaceState, workspace: dashboard };
+  const widgetCtx = (id) => ({ ...workspaceCtx, state: { ...workspaceState, services: widgetServices(dashboard, id, workspaceState.services) } });
+  const shown = visibleServices(workspaceState.services);
   // Build every tile once (service hexes + optional system-monitor hexes), then
   // lay them into as-wide-as-fits rows via layoutHoneycomb so the honeycomb
   // fills the width before wrapping to another row. The live sampler patches the
@@ -70,13 +76,13 @@ export async function renderHome(root, ctx) {
       h('div', { class: 'card panel-bare dashboard-feed-panel', id: 'activity-panel' }, h('div', { class: 'dim' }, 'Loading activity…')),
     ),
     upcoming: h('div', { class: 'dashboard-feed' },
-      upcomingHeader(ctx),
+      upcomingHeader(widgetCtx('upcoming')),
       h('div', { class: 'card panel-bare dashboard-feed-panel', id: 'upcoming-panel' }, h('div', { class: 'dim' }, 'Loading calendar…')),
     ),
     links: h('div', { class: 'card', id: 'links-panel' }, h('div', { class: 'dim' }, 'Loading links…')),
     streams: h('div', { class: 'card panel-bare dashboard-feed-panel', id: 'streams-panel' }, h('div', { class: 'dim' }, 'Loading active streams…')),
   };
-  const hasTautulli = (state.services || []).some((s) => s.type === 'tautulli');
+  const hasTautulli = widgetServices(dashboard, 'streams', workspaceState.services).some((s) => s.type === 'tautulli');
   const widgets = dashboard.widgets
     .filter((widget) => widget.visible && (widget.id !== 'streams' || hasTautulli))
     .map((widget) => h('section', {
@@ -85,12 +91,12 @@ export async function renderHome(root, ctx) {
   mount(root, h('div', { class: 'dashboard-grid', dataset: { dashboard: dashboard.id } }, ...widgets));
 
   layoutHoneycomb(honeycomb, tileEls);
-  for (const svc of shown) hydrateCardStats(svc, ctx);
-  hydrateOperations(ctx);
-  hydrateUpcoming(ctx);
-  hydrateLinks(ctx);
-  hydrateStreams(ctx);
-  hydrateSystem(ctx);
+  for (const svc of shown) hydrateCardStats(svc, workspaceCtx);
+  hydrateOperations(workspaceCtx);
+  hydrateUpcoming(widgetCtx('upcoming'));
+  hydrateLinks(workspaceCtx);
+  hydrateStreams(widgetCtx('streams'));
+  hydrateSystem(workspaceCtx);
   if (ctx.params.focus) requestAnimationFrame(() => document.querySelector(`.widget-${CSS.escape(ctx.params.focus)}`)?.scrollIntoView({ block: 'start' }));
 }
 
@@ -908,14 +914,14 @@ async function hydrateCardStats(svc, ctx) {
       const count = Array.isArray(items) ? items.length : 0;
       const q = (queue && queue.records) ? queue.records.length : 0;
       mount(el, stat(count, svc.type === 'sonarr' ? 'Series' : 'Movies'), stat(q, 'Queue'));
-    } else if (svc.type === 'lidarr' || svc.type === 'readarr') {
-      const arr = api.arrV1(svc.key);
+    } else if (svc.type === 'lidarr' || svc.type === 'readarr' || svc.type === 'bindery') {
+      const manager = createBookServiceClient(api, svc);
       const [items, queue] = await Promise.all([
-        arr.get(svc.type === 'lidarr' ? 'artist' : 'author'),
-        arr.get('queue').catch(() => ({ records: [] })),
+        manager.library(),
+        manager.queue().catch(() => []),
       ]);
       const count = Array.isArray(items) ? items.length : 0;
-      const q = (queue && queue.records) ? queue.records.length : 0;
+      const q = Array.isArray(queue) ? queue.length : 0;
       mount(el, stat(count, svc.type === 'lidarr' ? 'Artists' : 'Authors'), stat(q, 'Queue'));
     } else if (svc.type === 'overseerr') {
       const cacheKey = `acc:overview:v1:${overviewScope(ctx)}:seerr-count:${svc.key}`;
@@ -951,6 +957,15 @@ async function hydrateCardStats(svc, ctx) {
       const active = (Array.isArray(torrents) ? torrents : []).filter((t) => (t.dlspeed || 0) > 0 || (t.upspeed || 0) > 0).length;
       const dl = Number(info.dl_info_speed) || 0;
       mount(el, stat(active, 'Active'), stat(dl > 0 ? `${fmtBytes(dl)}/s` : '0', 'Down'));
+    } else if (['transmission', 'deluge', 'nzbget'].includes(svc.type)) {
+      const adapter = downloadClientFor(api, svc);
+      const data = await adapter.load(svc.type === 'nzbget' ? 'queue' : 'active');
+      const dl = Number(data.session?.dlSpeed) || 0;
+      mount(el, stat(data.session?.activeCount || 0, 'Active'), stat(dl > 0 ? `${fmtBytes(dl)}/s` : '0', 'Down'));
+    } else if (svc.type === 'jellyfin' || svc.type === 'emby') {
+      const media = mediaServerFor(api, svc);
+      const [sessions, libraries] = await Promise.all([media.sessions(), media.libraries()]);
+      mount(el, stat(sessions.length, 'Streams'), stat(libraries.length, 'Libraries'));
     } else {
       clear(el);
     }

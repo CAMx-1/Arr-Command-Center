@@ -37,6 +37,17 @@
         "clientSecret": "YOUR_CF_ACCESS_CLIENT_SECRET"
       }
     },
+    "bindery": {
+      "label": "Bindery",
+      "type": "bindery",
+      "enabled": true,
+      "baseUrl": "https://bindery.example.com",
+      "apiKey": "YOUR_BINDERY_API_KEY",
+      "cloudflareAccess": {
+        "clientId": "YOUR_CF_ACCESS_CLIENT_ID.access",
+        "clientSecret": "YOUR_CF_ACCESS_CLIENT_SECRET"
+      }
+    },
     "overseerr": {
       "label": "Seerr",
       "type": "overseerr",
@@ -58,6 +69,43 @@
         "clientId": "YOUR_CF_ACCESS_CLIENT_ID.access",
         "clientSecret": "YOUR_CF_ACCESS_CLIENT_SECRET"
       }
+    },
+    "transmission": {
+      "label": "Transmission",
+      "type": "transmission",
+      "enabled": true,
+      "baseUrl": "http://transmission:9091",
+      "username": "YOUR_TRANSMISSION_USERNAME",
+      "password": "YOUR_TRANSMISSION_PASSWORD"
+    },
+    "deluge": {
+      "label": "Deluge",
+      "type": "deluge",
+      "enabled": true,
+      "baseUrl": "http://deluge:8112",
+      "password": "YOUR_DELUGE_WEB_PASSWORD"
+    },
+    "nzbget": {
+      "label": "NZBGet",
+      "type": "nzbget",
+      "enabled": true,
+      "baseUrl": "http://nzbget:6789",
+      "username": "YOUR_NZBGET_CONTROL_USERNAME",
+      "password": "YOUR_NZBGET_CONTROL_PASSWORD"
+    },
+    "jellyfin": {
+      "label": "Jellyfin",
+      "type": "jellyfin",
+      "enabled": true,
+      "baseUrl": "http://jellyfin:8096",
+      "apiKey": "YOUR_JELLYFIN_API_KEY"
+    },
+    "emby": {
+      "label": "Emby",
+      "type": "emby",
+      "enabled": true,
+      "baseUrl": "http://emby:8096/emby",
+      "apiKey": "YOUR_EMBY_API_KEY"
     },
     "tautulli": {
       "label": "Tautulli",

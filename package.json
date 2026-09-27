@@ -1,6 +1,6 @@
 {
   "name": "arr-command-center",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "A locally-hosted dashboard to manage Sonarr, Radarr, Overseerr/Seerr and SABnzbd behind Cloudflare Access. A self-hosted LunaSea replacement.",
   "type": "module",
   "main": "server/index.js",
@@ -21,6 +21,7 @@
     "node": ">=23"
   },
   "dependencies": {
+    "@aparajita/capacitor-secure-storage": "6.0.1",
     "@capacitor/app": "6.0.3",
     "@capacitor/browser": "^6.0.6",
     "@capacitor/core": "^6.2.2",

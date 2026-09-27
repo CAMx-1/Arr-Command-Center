@@ -14,9 +14,10 @@
 // so /api/auth/* gets 302'd to the Access login). Keeping the global fetch
 // native-free preserves cookie sharing for server mode; only local-mode direct
 // service calls opt into native HTTP here.
-import { isLocalMode, getConnections, buildDirectRequest } from './connections.js';
+import { isLocalMode, getConnections, buildDirectRequestCandidates } from './connections.js';
 
 let _origFetch = null;
+const activeBases = new Map();
 
 // Native HTTP plugin accessor (present only in the Capacitor app). Used to make
 // cross-origin direct service calls without tripping CORS.
@@ -58,6 +59,62 @@ async function directFetch(url, opts = {}) {
     return new Response(JSON.stringify({ error: (e && e.message) || 'Network error' }), { status: 502, headers: { 'content-type': 'application/json' } });
   }
 }
+const directTransmissionSessions = new Map();
+const directDelugeSessions = new Map();
+const directSessionKey = (conn, baseUrl) => `${conn.key}@${baseUrl}`;
+
+async function directDelugeLogin(conn, request) {
+  const headers = { ...request.headers, 'content-type': 'application/json', accept: 'application/json' };
+  delete headers.Cookie;
+  const response = await directFetch(`${request.baseUrl}/json`, {
+    method: 'POST', headers, credentials: 'include',
+    body: JSON.stringify({ method: 'auth.login', params: [conn.password || ''], id: 1 }),
+  });
+  const data = await response.clone().json().catch(() => null);
+  if (!response.ok || data?.error || data?.result !== true) throw new Error(data?.error?.message || 'Deluge login failed (check password)');
+  const setCookie = response.headers.get('set-cookie') || '';
+  const match = /(?:^|[;,]\s*)_session_id=([^;,]+)/i.exec(setCookie);
+  return match ? match[1] : '';
+}
+
+async function directServiceFetch(conn, request, opts = {}) {
+  const key = directSessionKey(conn, request.baseUrl);
+  if (conn.type === 'transmission') {
+    const run = (sessionId) => directFetch(request.url, {
+      ...opts,
+      headers: { ...(opts.headers || {}), ...(sessionId ? { 'X-Transmission-Session-Id': sessionId } : {}) },
+    });
+    let response = await run(directTransmissionSessions.get(key) || '');
+    if (response.status === 409) {
+      const next = response.headers.get('x-transmission-session-id') || '';
+      if (next) directTransmissionSessions.set(key, next);
+      if (next) response = await run(next);
+    }
+    return response;
+  }
+  if (conn.type === 'deluge') {
+    let cookie;
+    if (directDelugeSessions.has(key)) cookie = directDelugeSessions.get(key);
+    else { cookie = await directDelugeLogin(conn, request); directDelugeSessions.set(key, cookie); }
+    const run = (value) => {
+      const headers = { ...(opts.headers || {}) };
+      // Cookie is a forbidden browser header, but CapacitorHttp accepts it.
+      // Browser local mode relies on credentials:include and the cookie jar.
+      if (value && nativeHttp()) headers.Cookie = `_session_id=${value}`;
+      return directFetch(request.url, { ...opts, headers, credentials: 'include' });
+    };
+    let response = await run(cookie);
+    let data = await response.clone().json().catch(() => null);
+    if (Number(data?.error?.code) === 1) {
+      cookie = await directDelugeLogin(conn, request);
+      directDelugeSessions.set(key, cookie);
+      response = await run(cookie);
+    }
+    return response;
+  }
+  return directFetch(request.url, opts);
+}
+
 let _installed = false;
 
 function json(data, status = 200) {
@@ -69,12 +126,13 @@ function json(data, status = 200) {
 export function synthConfig(connections) {
   const services = {};
   for (const [key, c] of Object.entries(connections || {})) {
+
     services[key] = {
       key: key,
       label: c.label || key,
       type: c.type,
       hasCloudflareAccess: !!(c.cfClientId && c.cfClientSecret),
-      configured: !!c.baseUrl && !!c.apiKey,
+      configured: !!c.baseUrl && (c.type === 'transmission' || (c.type === 'deluge' ? !!c.password : c.type === 'nzbget' ? !!(c.username && c.password) : !!c.apiKey)),
       sample: false,
       embed: false,
       embedUrl: undefined,
@@ -106,13 +164,17 @@ export function classifyLocalPath(pathname) {
 // Per-type health endpoint for status pings.
 export function statusPath(type) {
   switch (type) {
-    case 'lidarr': case 'readarr': return 'api/v1/system/status';
+    case 'lidarr': case 'readarr': case 'bindery': return 'api/v1/system/status';
     case 'overseerr': return 'api/v1/status';
     case 'prowlarr': return 'api/v1/system/status';
     case 'sabnzbd': return 'api?mode=version&output=json';
     case 'tautulli': return 'api/v2?cmd=status';
     case 'bazarr': return 'api/system/status';
     case 'qbittorrent': return 'api/v2/app/version';
+    case 'jellyfin': case 'emby': return 'System/Info';
+    case 'transmission': return 'transmission/rpc';
+    case 'deluge': return 'json';
+    case 'nzbget': return 'jsonrpc';
     case 'indexer': return 'api?t=caps&o=json';
     default: return 'api/v3/system/status'; // sonarr / radarr
   }
@@ -121,12 +183,35 @@ export function statusPath(type) {
 async function pingConnection(conn) {
   const started = Date.now();
   try {
-    const { url, headers } = buildDirectRequest(`/api/proxy/${conn.key}/${statusPath(conn.type)}`, conn);
-    const r = await directFetch(url, { headers: { accept: 'application/json', ...headers } });
-    let version;
-    try { const d = await r.clone().json(); version = d && (d.version || d.data?.version); } catch { /* non-json */ }
-    const error = r.ok ? undefined : (r.status === 401 || r.status === 403) ? 'Auth / access denied' : `HTTP ${r.status}`;
-    return { label: conn.label || conn.key, type: conn.type, ok: r.ok, status: r.status, ms: Date.now() - started, version, error };
+    const requests = buildDirectRequestCandidates(`/api/proxy/${conn.key}/${statusPath(conn.type)}`, conn, { preferredBaseUrl: activeBases.get(conn.key) });
+    const rpc = conn.type === 'transmission'
+      ? { method: 'POST', body: JSON.stringify({ method: 'session-get', arguments: {} }) }
+      : conn.type === 'deluge'
+        ? { method: 'POST', body: JSON.stringify({ method: 'web.connected', params: [], id: 1 }) }
+        : conn.type === 'nzbget'
+          ? { method: 'POST', body: JSON.stringify({ method: 'version', params: [], id: 1 }) }
+          : {};
+    let r; let used;
+    for (const request of requests) {
+      const opts = { ...rpc, headers: { accept: 'application/json', ...request.headers } };
+      if (rpc.body) opts.headers['content-type'] = 'application/json';
+      try { r = await directServiceFetch(conn, request, opts); }
+      catch { r = new Response('', { status: 502 }); }
+      if (r.status !== 502 && r.status !== 504) { used = request.baseUrl; break; }
+    }
+    if (!r) r = new Response('', { status: 502 });
+    if (used) activeBases.set(conn.key, used);
+    let data; let version; let rpcError;
+    try {
+      data = await r.clone().json();
+      version = data && (data.version || data.arguments?.version || (conn.type === 'nzbget' ? data.result : undefined) || data.data?.version);
+      if (conn.type === 'transmission' && data.result !== 'success') rpcError = data.result || 'Transmission RPC error';
+      if (conn.type === 'deluge' && (data.error || data.result !== true)) rpcError = data.error?.message || 'Deluge Web is not connected to a daemon';
+      if (conn.type === 'nzbget' && data.error) rpcError = data.error.message || 'NZBGet RPC error';
+    } catch { /* non-json */ }
+    const ok = r.ok && !rpcError;
+    const error = ok ? undefined : (r.status === 401 || r.status === 403) ? 'Auth / access denied' : rpcError || `HTTP ${r.status}`;
+    return { label: conn.label || conn.key, type: conn.type, ok, status: r.status, ms: Date.now() - started, version, error };
   } catch (e) {
     return { label: conn.label || conn.key, type: conn.type, ok: false, status: 0, ms: Date.now() - started, error: (e && e.message) || 'unreachable' };
   }
@@ -163,15 +248,22 @@ async function handleLocal(u, input, init) {
     const key = pathname.split('/')[3];
     const c = conns[key];
     if (!c) return json({ error: `No local connection for “${key}”. Add it in Settings.` }, 502);
-    const { url, headers } = buildDirectRequest(pathname + u.search, c);
-    const opts = { method: reqMethod(input, init), headers: { ...headers } };
+    const requests = buildDirectRequestCandidates(pathname + u.search, c, { preferredBaseUrl: activeBases.get(key) });
     const src = init || (typeof input === 'object' ? input : null);
-    if (src) {
-      const ct = headerVal(src.headers, 'content-type'); if (ct) opts.headers['content-type'] = ct;
-      const acc = headerVal(src.headers, 'accept'); if (acc) opts.headers['accept'] = acc;
-      if (src.body !== undefined && src.body !== null) opts.body = src.body;
+    let last = null;
+    for (const request of requests) {
+      const opts = { method: reqMethod(input, init), headers: { ...request.headers } };
+      if (src) {
+        const ct = headerVal(src.headers, 'content-type'); if (ct) opts.headers['content-type'] = ct;
+        const acc = headerVal(src.headers, 'accept'); if (acc) opts.headers['accept'] = acc;
+        if (src.body !== undefined && src.body !== null) opts.body = src.body;
+      }
+      try { last = await directServiceFetch(c, request, opts); }
+      catch { last = new Response(JSON.stringify({ error: 'Network error' }), { status: 502, headers: { 'content-type': 'application/json' } }); }
+      if (last.status !== 502 && last.status !== 504) { activeBases.set(key, request.baseUrl); return last; }
+      if (c.connectionPolicy !== 'auto') return last;
     }
-    return directFetch(url, opts);
+    return last || json({ error: 'No local or remote URL configured' }, 502);
   }
   if (kind === 'operations') {
     return json({ summary: { total: 0, critical: 0, warning: 0, health: 0, missing: 0 }, inbox: [], seerr: [], seerrSummary: { requests: 0, pending: 0, issues: 0 }, activity: [] });

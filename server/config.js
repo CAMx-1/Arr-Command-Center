@@ -5,6 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { MOCK_PORTS } from './mock/mockServices.js';
+import { normalizeCustomHeaders, hasCustomHeaders } from '../public/lib/customHeaders.js';
 
 const fsp = fs.promises;
 
@@ -30,7 +31,7 @@ export function loadDotEnv() {
   }
 }
 
-const SERVICE_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'indexer', 'plex'];
+const SERVICE_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'jellyfin', 'emby', 'indexer', 'plex'];
 export const ALLOWED_SERVICE_TYPES = SERVICE_TYPES;
 export const CONFIG_PATH = path.join(ROOT, 'config.json');
 
@@ -144,8 +145,10 @@ export function buildServiceUpdate(key, service, prev = {}, { isHttpUrl = defaul
   const suppliedPassword = !!service.password;
   const suppliedCf = !!(service.cloudflareAccess &&
     (service.cloudflareAccess.clientId || service.cloudflareAccess.clientSecret));
+  const suppliedCustomHeaders = Object.prototype.hasOwnProperty.call(service, 'customHeaders');
   const prevHasCf = !!(prev.cloudflareAccess &&
     (prev.cloudflareAccess.clientId || prev.cloudflareAccess.clientSecret));
+  const prevHasCustomHeaders = hasCustomHeaders(prev.customHeaders);
 
   if (originChanged) {
     // Refuse to carry any previously-stored secret over to a new origin unless
@@ -155,6 +158,7 @@ export function buildServiceUpdate(key, service, prev = {}, { isHttpUrl = defaul
     if (prev.username && !suppliedUsername) missing.push('username');
     if (prev.password && !suppliedPassword) missing.push('password');
     if (prevHasCf && !suppliedCf) missing.push('cloudflareAccess');
+    if (prevHasCustomHeaders && !suppliedCustomHeaders) missing.push('customHeaders');
     if (missing.length) {
       return {
         error: `Upstream origin changed to ${new URL(baseUrl).origin}; ` +
@@ -190,6 +194,15 @@ export function buildServiceUpdate(key, service, prev = {}, { isHttpUrl = defaul
     clean.cloudflareAccess = prev.cloudflareAccess;
   }
 
+  try {
+    if (suppliedCustomHeaders) clean.customHeaders = normalizeCustomHeaders(service.customHeaders);
+    else if (prevHasCustomHeaders && !originChanged) clean.customHeaders = normalizeCustomHeaders(prev.customHeaders);
+  } catch (error) { return { error: error.message }; }
+
+  if (clean.type === 'deluge' && !clean.password) return { error: 'Deluge Web password is required' };
+  if (clean.type === 'nzbget' && (!clean.username || !clean.password)) return { error: 'NZBGet ControlUsername and ControlPassword are required' };
+  if (clean.type === 'transmission' && (!!clean.username !== !!clean.password)) return { error: 'Enter both Transmission username and password, or leave both blank' };
+
   return { clean };
 }
 
@@ -205,10 +218,15 @@ function applyServiceEnv(key, svc) {
   const cfSecret = process.env[envKey(key, 'CF_CLIENT_SECRET')];
   const username = process.env[envKey(key, 'USERNAME')];
   const password = process.env[envKey(key, 'PASSWORD')];
+  const customHeaders = process.env[envKey(key, 'CUSTOM_HEADERS')];
   if (base) svc.baseUrl = base;
   if (apiKey) svc.apiKey = apiKey;
   if (username) svc.username = username;
   if (password) svc.password = password;
+  if (customHeaders) {
+    try { svc.customHeaders = normalizeCustomHeaders(JSON.parse(customHeaders)); }
+    catch (error) { console.warn(`[config] ignoring invalid ${envKey(key, 'CUSTOM_HEADERS')}: ${error.message}`); }
+  }
   if (cfId || cfSecret) {
     svc.cloudflareAccess = svc.cloudflareAccess || {};
     if (cfId) svc.cloudflareAccess.clientId = cfId;
@@ -226,6 +244,11 @@ function buildMockConfig() {
     apiKey: 'MOCK_API_KEY',
     cloudflareAccess: { clientId: 'mock.access', clientSecret: 'mock-secret' },
   });
+  const mkLogin = (label, type, port, username, password) => ({
+    label, type, enabled: true, baseUrl: `http://127.0.0.1:${port}`,
+    ...(username ? { username } : {}), password,
+    cloudflareAccess: { clientId: 'mock.access', clientSecret: 'mock-secret' },
+  });
   return {
     port: Number(process.env.PORT) || 7373,
     host: process.env.HOST || '127.0.0.1',
@@ -237,12 +260,18 @@ function buildMockConfig() {
       radarr: mk('radarr', 'Radarr', 'radarr', MOCK_PORTS.radarr),
       'radarr-4k': mk('radarr-4k', 'Radarr (4K)', 'radarr', MOCK_PORTS.radarr4k),
       lidarr: mk('lidarr', 'Lidarr', 'lidarr', MOCK_PORTS.lidarr),
-      readarr: mk('readarr', 'Readarr', 'readarr', MOCK_PORTS.readarr),
+      readarr: mk('readarr', 'Readarr (Legacy)', 'readarr', MOCK_PORTS.readarr),
+      bindery: mk('bindery', 'Bindery', 'bindery', MOCK_PORTS.bindery),
       overseerr: mk('overseerr', 'Overseerr', 'overseerr', MOCK_PORTS.overseerr),
       sabnzbd: mk('sabnzbd', 'SABnzbd', 'sabnzbd', MOCK_PORTS.sabnzbd),
       tautulli: mk('tautulli', 'Tautulli', 'tautulli', MOCK_PORTS.tautulli),
       bazarr: mk('bazarr', 'Bazarr', 'bazarr', MOCK_PORTS.bazarr),
       qbittorrent: mk('qbittorrent', 'qBittorrent', 'qbittorrent', MOCK_PORTS.qbittorrent),
+      transmission: mkLogin('Transmission', 'transmission', MOCK_PORTS.transmission, 'admin', 'transmission'),
+      deluge: mkLogin('Deluge', 'deluge', MOCK_PORTS.deluge, '', 'deluge'),
+      nzbget: mkLogin('NZBGet', 'nzbget', MOCK_PORTS.nzbget, 'nzbget', 'nzbget'),
+      jellyfin: mk('jellyfin', 'Jellyfin', 'jellyfin', MOCK_PORTS.jellyfin),
+      emby: mk('emby', 'Emby', 'emby', MOCK_PORTS.emby),
       // Public Usenet indexer (e.g. NZBGeek) — Newznab-compatible API, no custom headers.
       indexer: { label: 'Indexer', type: 'indexer', enabled: true, baseUrl: `http://127.0.0.1:${MOCK_PORTS.indexer}`, apiKey: 'MOCK_API_KEY' },
     },
@@ -304,6 +333,14 @@ export function isInsecureExposure(cfg, anyAuth) {
   return !localOnly && !anyAuth && !allowInsecure;
 }
 
+export function serviceConfigured(svc = {}) {
+  if (!svc.baseUrl) return false;
+  if (svc.type === 'transmission') return true; // Basic auth is optional.
+  if (svc.type === 'deluge') return !!svc.password;
+  if (svc.type === 'nzbget') return !!(svc.username && svc.password);
+  return !!svc.apiKey || !!(svc.username && svc.password);
+}
+
 // Public-safe view of the config for the frontend (no secrets).
 export function publicConfig(cfg) {
   const services = {};
@@ -314,7 +351,8 @@ export function publicConfig(cfg) {
       label: svc.label || key,
       type: svc.type,
       hasCloudflareAccess: !!(svc.cloudflareAccess && svc.cloudflareAccess.clientId),
-      configured: !!svc.baseUrl && (!!svc.apiKey || (!!svc.username && !!svc.password)),
+      hasCustomHeaders: hasCustomHeaders(svc.customHeaders),
+      configured: serviceConfigured(svc),
       // A sample service renders built-in demo data client-side (no backend).
       sample: !!svc.sample,
       // When embed is enabled, expose the browser-reachable URL so the UI can
@@ -333,8 +371,8 @@ export function publicConfig(cfg) {
 // sync endpoint. This is deliberately separate from publicConfig(), which must
 // remain secret-free for every normal page/config request.
 const LOCAL_FALLBACK_TYPES = new Set([
-  'sonarr', 'radarr', 'lidarr', 'readarr', 'overseerr', 'prowlarr',
-  'bazarr', 'sabnzbd', 'qbittorrent', 'tautulli', 'indexer',
+  'sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'prowlarr',
+  'bazarr', 'sabnzbd', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'jellyfin', 'emby', 'tautulli', 'indexer',
 ]);
 
 function fallbackHttpUrl(value) {
@@ -360,12 +398,19 @@ export function localFallbackConfig(cfg, { now = Date.now() } = {}) {
     const baseUrl = fallbackHttpUrl(svc.baseUrl);
     if (!baseUrl) { reason('Missing or invalid service URL'); continue; }
     const apiKey = String(svc.apiKey || '').trim();
-    if (!apiKey) {
-      reason(svc.type === 'qbittorrent' && (svc.username || svc.password)
+    const username = String(svc.username || '').trim();
+    const password = String(svc.password || '').trim();
+    if (svc.type === 'qbittorrent' && !apiKey) {
+      reason((username || password)
         ? 'qBittorrent username/password login is not supported in local mode; configure an API key'
         : 'API key is required for local mode');
       continue;
     }
+    if (svc.type === 'deluge' && !password) { reason('Deluge Web password is required for local mode'); continue; }
+    if (svc.type === 'nzbget' && (!username || !password)) { reason('NZBGet username and password are required for local mode'); continue; }
+    if (svc.type === 'transmission' && (!!username !== !!password)) { reason('Transmission Basic auth credentials are incomplete'); continue; }
+    const loginType = ['transmission', 'deluge', 'nzbget'].includes(svc.type);
+    if (!loginType && !apiKey) { reason('API key is required for local mode'); continue; }
 
     const cf = svc.cloudflareAccess || {};
     const cfClientId = String(cf.clientId || '').trim();
@@ -377,8 +422,11 @@ export function localFallbackConfig(cfg, { now = Date.now() } = {}) {
       type: svc.type,
       label: String(svc.label || key).slice(0, 60),
       baseUrl: baseUrl.slice(0, 500),
-      apiKey: apiKey.slice(0, 1000),
+      ...(apiKey ? { apiKey: apiKey.slice(0, 1000) } : {}),
+      ...(username ? { username: username.slice(0, 120) } : {}),
+      ...(password ? { password: password.slice(0, 1000) } : {}),
       ...(cfClientId ? { cfClientId: cfClientId.slice(0, 1000), cfClientSecret: cfClientSecret.slice(0, 1000) } : {}),
+      ...(hasCustomHeaders(svc.customHeaders) ? { customHeaders: normalizeCustomHeaders(svc.customHeaders) } : {}),
     };
   }
 

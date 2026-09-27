@@ -12,11 +12,17 @@ export const MOCK_PORTS = {
   radarr4k: 17879,
   lidarr: 18686,
   readarr: 18787,
+  bindery: 18788,
   overseerr: 15055,
   sabnzbd: 18080,
   tautulli: 18181,
   bazarr: 16767,
   qbittorrent: 18081,
+  transmission: 19091,
+  deluge: 18112,
+  nzbget: 16789,
+  jellyfin: 18096,
+  emby: 18097,
   indexer: 16060,
 };
 
@@ -765,6 +771,153 @@ function makeQbittorrent() {
   return app;
 }
 
+// ---------------- Transmission ----------------
+function makeTransmission() {
+  const app = express();
+  app.use(express.json());
+  const sessionId = 'mock-transmission-session';
+  let dlLimit = 0; let upLimit = 0;
+  let torrents = [
+    { id: 1, hashString: 'tr-a1', name: 'Fedora-Workstation.iso', status: 4, percentDone: 0.56, rateDownload: 7340032, rateUpload: 65536, eta: 420, totalSize: 4294967296, leftUntilDone: 1889785610, uploadRatio: 0.12, error: 0, errorString: '', isStalled: false, peersConnected: 18, labels: ['linux'] },
+    { id: 2, hashString: 'tr-b2', name: 'Big Buck Bunny', status: 6, percentDone: 1, rateDownload: 0, rateUpload: 262144, eta: -1, totalSize: 355566592, leftUntilDone: 0, uploadRatio: 2.3, error: 0, errorString: '', isStalled: false, peersConnected: 4, labels: ['movies'] },
+  ];
+  app.use((req, res, next) => {
+    recordCf('transmission', req);
+    const expected = `Basic ${Buffer.from('admin:transmission').toString('base64')}`;
+    if (req.headers.authorization !== expected) return res.status(401).json({ error: 'Unauthorized' });
+    if (req.headers['x-transmission-session-id'] !== sessionId) {
+      res.set('X-Transmission-Session-Id', sessionId);
+      return res.status(409).send('Conflict');
+    }
+    next();
+  });
+  app.post('/transmission/rpc', (req, res) => {
+    const method = req.body?.method; const args = req.body?.arguments || {};
+    const selected = () => {
+      if (!args.ids) return torrents;
+      const ids = Array.isArray(args.ids) ? args.ids : [args.ids];
+      return torrents.filter((torrent) => ids.includes(torrent.id) || ids.includes(torrent.hashString));
+    };
+    if (method === 'session-get') return res.json({ result: 'success', arguments: { version: '4.0.6', 'rpc-version': 17, 'speed-limit-down': dlLimit, 'speed-limit-down-enabled': dlLimit > 0, 'speed-limit-up': upLimit, 'speed-limit-up-enabled': upLimit > 0 } });
+    if (method === 'session-stats') return res.json({ result: 'success', arguments: { activeTorrentCount: torrents.filter((t) => t.status === 4 || t.status === 6).length, downloadSpeed: torrents.reduce((n, t) => n + t.rateDownload, 0), pausedTorrentCount: torrents.filter((t) => t.status === 0).length, torrentCount: torrents.length, uploadSpeed: torrents.reduce((n, t) => n + t.rateUpload, 0) } });
+    if (method === 'torrent-get') return res.json({ result: 'success', arguments: { torrents: selected() } });
+    if (method === 'torrent-start') { selected().forEach((t) => { t.status = t.percentDone >= 1 ? 6 : 4; }); return res.json({ result: 'success', arguments: {} }); }
+    if (method === 'torrent-stop') { selected().forEach((t) => { t.status = 0; t.rateDownload = 0; t.rateUpload = 0; }); return res.json({ result: 'success', arguments: {} }); }
+    if (method === 'torrent-remove') { const remove = new Set(selected().map((t) => t.hashString)); torrents = torrents.filter((t) => !remove.has(t.hashString)); return res.json({ result: 'success', arguments: {} }); }
+    if (method === 'session-set') { dlLimit = args['speed-limit-down-enabled'] ? Number(args['speed-limit-down']) || 0 : 0; upLimit = args['speed-limit-up-enabled'] ? Number(args['speed-limit-up']) || 0 : 0; return res.json({ result: 'success', arguments: {} }); }
+    return res.json({ result: `method not found: ${method}`, arguments: {} });
+  });
+  return app;
+}
+
+// ---------------- Deluge Web ----------------
+function makeDeluge() {
+  const app = express();
+  app.use(express.json());
+  const sessionId = 'mock-deluge-session';
+  let paused = false; let maxDownload = -1; let maxUpload = -1;
+  let torrents = {
+    'de-a1': { name: 'Debian-12.iso', state: 'Downloading', progress: 38, total_size: 2147483648, total_done: 816043786, download_payload_rate: 5242880, upload_payload_rate: 32768, eta: 270, ratio: 0.04, num_seeds: 31, num_peers: 7, label: 'linux', is_finished: false },
+    'de-b2': { name: 'Sintel', state: 'Seeding', progress: 100, total_size: 1342177280, total_done: 1342177280, download_payload_rate: 0, upload_payload_rate: 131072, eta: 0, ratio: 1.8, num_seeds: 9, num_peers: 2, label: 'movies', is_finished: true },
+  };
+  const reply = (res, id, result, error = null) => res.json({ result, error, id });
+  app.use((req, res, next) => { recordCf('deluge', req); next(); });
+  app.post('/json', (req, res) => {
+    const { method, params = [], id = null } = req.body || {};
+    if (method === 'auth.login') {
+      if (params[0] !== 'deluge') return reply(res, id, false);
+      res.setHeader('Set-Cookie', `_session_id=${sessionId}; HttpOnly; Path=/json`);
+      return reply(res, id, true);
+    }
+    if (!String(req.headers.cookie || '').includes(`_session_id=${sessionId}`)) return reply(res, id, null, { code: 1, message: 'Not authenticated' });
+    if (method === 'web.connected') return reply(res, id, true);
+    if (method === 'web.update_ui') return reply(res, id, { connected: true, torrents, stats: { download_rate: Object.values(torrents).reduce((n, t) => n + t.download_payload_rate, 0), upload_rate: Object.values(torrents).reduce((n, t) => n + t.upload_payload_rate, 0), free_space: 536870912000, num_connections: 38 } });
+    if (method === 'core.is_session_paused') return reply(res, id, paused);
+    if (method === 'core.get_config_values') return reply(res, id, { max_download_speed: maxDownload, max_upload_speed: maxUpload });
+    if (method === 'core.pause_session') { paused = true; return reply(res, id, null); }
+    if (method === 'core.resume_session') { paused = false; return reply(res, id, null); }
+    if (method === 'core.pause_torrent' || method === 'core.resume_torrent') { const hash = params[0]; if (torrents[hash]) torrents[hash].state = method.includes('pause') ? 'Paused' : (torrents[hash].progress >= 100 ? 'Seeding' : 'Downloading'); return reply(res, id, null); }
+    if (method === 'core.remove_torrent') { delete torrents[params[0]]; return reply(res, id, true); }
+    if (method === 'core.set_config') { const cfg = params[0] || {}; if (cfg.max_download_speed != null) maxDownload = Number(cfg.max_download_speed); if (cfg.max_upload_speed != null) maxUpload = Number(cfg.max_upload_speed); return reply(res, id, null); }
+    return reply(res, id, null, { code: 2, message: 'Unknown method' });
+  });
+  return app;
+}
+
+// ---------------- NZBGet ----------------
+function makeNzbget() {
+  const app = express();
+  app.use(express.json());
+  let paused = false; let rateKiB = 0;
+  let groups = [
+    { NZBID: 71, NZBName: 'Foundation.S03E01.1080p', Status: 'DOWNLOADING', Category: 'tv', FileSizeMB: 2048, RemainingSizeMB: 614, DownloadTimeSec: 420, ActiveDownloads: 4 },
+    { NZBID: 72, NZBName: 'Dune.Messiah.EPUB', Status: 'PAUSED', Category: 'books', FileSizeMB: 8, RemainingSizeMB: 8, DownloadTimeSec: 0, ActiveDownloads: 0 },
+  ];
+  let history = [
+    { NZBID: 81, Name: 'Oppenheimer.2023.2160p', NZBName: 'Oppenheimer.2023.2160p', Status: 'SUCCESS/ALL', Category: 'movies', FileSizeMB: 28672, HistoryTime: Math.floor(Date.now() / 1000) - 3600 },
+    { NZBID: 82, Name: 'Broken.Release', NZBName: 'Broken.Release', Status: 'FAILURE/UNPACK', Category: 'tv', FileSizeMB: 1024, HistoryTime: Math.floor(Date.now() / 1000) - 7200 },
+  ];
+  app.use((req, res, next) => {
+    recordCf('nzbget', req);
+    const expected = `Basic ${Buffer.from('nzbget:nzbget').toString('base64')}`;
+    if (req.headers.authorization !== expected) return res.status(401).json({ error: { message: 'Unauthorized' }, result: null, id: req.body?.id });
+    next();
+  });
+  app.post('/jsonrpc', (req, res) => {
+    const { method, params = [], id = 1 } = req.body || {};
+    const ok = (result) => res.json({ version: '1.1', result, error: null, id });
+    if (method === 'version') return ok('24.6');
+    if (method === 'status') return ok({ DownloadRate: paused ? 0 : 9437184, DownloadLimit: rateKiB * 1024, DownloadPaused: paused, RemainingSizeMB: groups.reduce((n, g) => n + g.RemainingSizeMB, 0), FreeDiskSpaceMB: 524288, ServerStandBy: paused || groups.length === 0 });
+    if (method === 'listgroups') return ok(groups);
+    if (method === 'history') return ok(history);
+    if (method === 'pausedownload') { paused = true; return ok(true); }
+    if (method === 'resumedownload') { paused = false; return ok(true); }
+    if (method === 'rate') { rateKiB = Number(params[0]) || 0; return ok(true); }
+    if (method === 'editqueue') {
+      const [command, , ids = []] = params; const selected = new Set(ids.map(Number));
+      if (command === 'GroupPause' || command === 'GroupResume') groups.forEach((g) => { if (selected.has(g.NZBID)) g.Status = command === 'GroupPause' ? 'PAUSED' : 'QUEUED'; });
+      if (command === 'GroupDelete' || command === 'GroupFinalDelete') groups = groups.filter((g) => !selected.has(g.NZBID));
+      if (command === 'HistoryDelete' || command === 'HistoryFinalDelete') history = history.filter((g) => !selected.has(g.NZBID));
+      return ok(true);
+    }
+    return res.json({ version: '1.1', result: null, error: { code: 1, message: `Unknown method ${method}` }, id });
+  });
+  return app;
+}
+
+// ---------------- Jellyfin / Emby ----------------
+function makeMediaServer(kind) {
+  const app = express();
+  const isEmby = kind === 'emby';
+  const now = Date.now();
+  const items = [
+    { Id: `${kind}-movie-1`, Name: 'Arrival', Type: 'Movie', ProductionYear: 2016, RunTimeTicks: 69600000000, CommunityRating: 7.9, ImageTags: { Primary: 'img1' }, Overview: 'A linguist works with the military to communicate with alien lifeforms.' },
+    { Id: `${kind}-series-1`, Name: 'Severance', Type: 'Series', ProductionYear: 2022, CommunityRating: 8.7, ImageTags: { Primary: 'img2' } },
+    { Id: `${kind}-episode-1`, Name: 'Hello, Ms. Cobel', SeriesName: 'Severance', Type: 'Episode', RunTimeTicks: 31200000000, ImageTags: { Primary: 'img3' } },
+  ];
+  app.use((req, res, next) => {
+    recordCf(kind, req);
+    if (req.headers['x-emby-token'] !== 'MOCK_API_KEY') return res.status(401).json({ error: 'Unauthorized' });
+    next();
+  });
+  app.get('/System/Info', (req, res) => res.json({ ServerName: `${isEmby ? 'Emby' : 'Jellyfin'} Mock`, Version: isEmby ? '4.9.0.30' : '10.10.7', Id: `${kind}-server` }));
+  app.get('/Library/VirtualFolders', (req, res) => res.json([
+    { Name: 'Movies', CollectionType: 'movies', ItemId: `${kind}-movies`, Locations: ['/media/movies'] },
+    { Name: 'TV Shows', CollectionType: 'tvshows', ItemId: `${kind}-tv`, Locations: ['/media/tv'] },
+  ]));
+  app.get('/Items/Latest', (req, res) => res.json(items));
+  app.get('/Items', (req, res) => res.json({ Items: items, TotalRecordCount: items.length, StartIndex: 0 }));
+  app.get('/Sessions', (req, res) => res.json([
+    { Id: `${kind}-session`, UserName: 'cameron', Client: isEmby ? 'Emby Theater' : 'Jellyfin Web', DeviceName: 'Living Room', NowPlayingItem: items[0], PlayState: { IsPaused: false, PositionTicks: 24000000000 }, TranscodingInfo: { VideoCodec: 'h264', Bitrate: 8000000 } },
+  ]));
+  app.get('/Users', (req, res) => res.json([
+    { Id: `${kind}-admin`, Name: 'cameron', PrimaryImageTag: 'user1', LastLoginDate: new Date(now - 3600000).toISOString(), Policy: { IsAdministrator: true, IsDisabled: false } },
+    { Id: `${kind}-guest`, Name: 'Guest', LastLoginDate: new Date(now - 86400000).toISOString(), Policy: { IsAdministrator: false, IsDisabled: false } },
+  ]));
+  app.get(['/Items/:id/Images/Primary', '/Users/:id/Images/Primary'], (req, res) => res.type('image/svg+xml').send('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450"><rect width="100%" height="100%" fill="#334155"/><text x="50%" y="50%" fill="white" text-anchor="middle">MEDIA</text></svg>'));
+  return app;
+}
+
 // ---------------- Usenet indexer (search; public indexers like NZBGeek) ----------------
 function makeIndexer() {
   const app = express();
@@ -933,6 +1086,45 @@ function makeReadarr(opts = {}) {
   return app;
 }
 
+// ---------------- Bindery (Readarr successor, API v1) ----------------
+function makeBindery() {
+  const app = express();
+  app.use(express.json());
+  const now = Date.now();
+  const authors = [
+    { id: 11, authorName: 'N. K. Jemisin', foreignAuthorId: 'OL6813008A', monitored: true, statistics: { bookCount: 9, availableBookCount: 7, wantedBookCount: 2 } },
+    { id: 12, authorName: 'Martha Wells', foreignAuthorId: 'OL3396730A', monitored: true, statistics: { bookCount: 14, availableBookCount: 12, wantedBookCount: 2 } },
+  ];
+  const books = [
+    { id: 21, title: 'The Stone Sky', authorId: 11, author: authors[0], monitored: true, status: 'imported', releaseDate: '2017-08-15', mediaType: 'ebook' },
+    { id: 22, title: 'The Fifth Season', authorId: 11, author: authors[0], monitored: true, status: 'wanted', releaseDate: new Date(now + 5 * 86400000).toISOString(), mediaType: 'audiobook' },
+  ];
+  let queue = [
+    { id: 31, title: 'Martha Wells - Network Effect [EPUB]', status: 'downloading', size: 5242880, percentage: '72.5', timeLeft: '00:00:25', protocol: 'usenet', book: { id: 22, title: 'Network Effect', authorId: 12, authorName: 'Martha Wells' } },
+  ];
+  const page = (items, req) => ({ items, total: items.length, limit: Number(req.query.limit) || 50, offset: Number(req.query.offset) || 0 });
+  app.use((req, res, next) => { recordCf('bindery', req); if (req.headers['x-api-key'] !== 'MOCK_API_KEY') return res.status(401).json({ error: 'Unauthorized' }); next(); });
+  app.get('/__debug', (req, res) => res.json({ cf: cfSeen.bindery || null }));
+  app.get('/api/v1/health', (req, res) => res.json({ status: 'ok', version: '1.37.0' }));
+  app.get('/api/v1/system/status', (req, res) => res.json({ version: '1.37.0', commit: 'mock', buildDate: new Date(0).toISOString() }));
+  app.get('/api/v1/author', (req, res) => res.json(page(authors, req)));
+  app.get('/api/v1/book', (req, res) => {
+    let result = books;
+    if (req.query.status) result = result.filter((book) => book.status === req.query.status);
+    if (req.query.releaseFrom) result = result.filter((book) => new Date(book.releaseDate) >= new Date(String(req.query.releaseFrom)));
+    if (req.query.releaseBefore) result = result.filter((book) => new Date(book.releaseDate) < new Date(String(req.query.releaseBefore)));
+    res.json(page(result, req));
+  });
+  app.get('/api/v1/wanted/missing', (req, res) => res.json(page(books.filter((book) => book.status === 'wanted'), req)));
+  app.post('/api/v1/book/:id/search', (req, res) => res.status(202).json({ bookId: Number(req.params.id), status: 'queued' }));
+  app.get('/api/v1/queue', (req, res) => res.json({ items: queue, partial: false, staleClients: [] }));
+  app.delete('/api/v1/queue/:id', (req, res) => { queue = queue.filter((item) => item.id !== Number(req.params.id)); res.json({ ok: true }); });
+  app.get('/api/v1/history', (req, res) => res.json(page([
+    { id: 41, bookId: 21, eventType: 'bookImported', sourceTitle: 'The Stone Sky [EPUB]', createdAt: new Date(now - 3600000).toISOString(), book: { id: 21, title: 'The Stone Sky', authorId: 11, authorName: 'N. K. Jemisin' } },
+  ], req)));
+  return app;
+}
+
 export function startMockServices() {
   const librarySize = Number.parseInt(process.env.MOCK_LIBRARY_SIZE || '', 10);
   const primaryLibraryOptions = Number.isFinite(librarySize) && librarySize > 0 ? { librarySize } : {};
@@ -951,11 +1143,17 @@ export function startMockServices() {
     ] }), MOCK_PORTS.radarr4k],
     ['lidarr', makeLidarr(), MOCK_PORTS.lidarr],
     ['readarr', makeReadarr(), MOCK_PORTS.readarr],
+    ['bindery', makeBindery(), MOCK_PORTS.bindery],
     ['overseerr', makeOverseerr(), MOCK_PORTS.overseerr],
     ['sabnzbd', makeSab(), MOCK_PORTS.sabnzbd],
     ['tautulli', makeTautulli(), MOCK_PORTS.tautulli],
     ['bazarr', makeBazarr(), MOCK_PORTS.bazarr],
     ['qbittorrent', makeQbittorrent(), MOCK_PORTS.qbittorrent],
+    ['transmission', makeTransmission(), MOCK_PORTS.transmission],
+    ['deluge', makeDeluge(), MOCK_PORTS.deluge],
+    ['nzbget', makeNzbget(), MOCK_PORTS.nzbget],
+    ['jellyfin', makeMediaServer('jellyfin'), MOCK_PORTS.jellyfin],
+    ['emby', makeMediaServer('emby'), MOCK_PORTS.emby],
     ['indexer', makeIndexer(), MOCK_PORTS.indexer],
   ];
   const servers = [];

@@ -24,7 +24,7 @@ const V2_DEFAULT_WIDGETS = [
   { id: 'status', visible: false, size: 'full' },
   { id: 'inbox', visible: false, size: 'full' },
 ];
-export const DASHBOARD_PREFS_VERSION = 3;
+export const DASHBOARD_PREFS_VERSION = 4;
 let dashboardScope = 'local';
 const storageKey = () => `acc:dashboards:${dashboardScope}`;
 export function setDashboardScope(user) {
@@ -40,7 +40,12 @@ function normalizeWidgets(widgets) {
   return DEFAULT_WIDGETS.map((base) => {
     const value = supplied.get(base.id) || {};
     const addedWidgetDefault = hasSuppliedLayout && !supplied.has(base.id) && base.id === 'seerr' ? false : base.visible;
-    return { ...base, visible: value.visible === undefined ? addedWidgetDefault : value.visible !== false, size: sizes.has(value.size) ? value.size : base.size };
+    return {
+      ...base,
+      visible: value.visible === undefined ? addedWidgetDefault : value.visible !== false,
+      size: sizes.has(value.size) ? value.size : base.size,
+      serviceKey: /^[a-z0-9._-]{1,80}$/i.test(value.serviceKey || '') ? value.serviceKey : '',
+    };
   }).sort((a, b) => {
     const order = Array.isArray(widgets) ? widgets.map((widget) => widget.id) : [];
     const ai = order.indexOf(a.id); const bi = order.indexOf(b.id);
@@ -64,8 +69,24 @@ function isUntouchedV2Default(widgets) {
   });
 }
 
+function normalizeServiceKeys(value) {
+  if (!Array.isArray(value)) return null; // null means every available service (legacy/default behavior)
+  return [...new Set(value.map(String).filter((key) => /^[a-z0-9._-]{1,80}$/i.test(key)))].slice(0, 100);
+}
+
+export function workspaceServices(workspace, services = []) {
+  const keys = normalizeServiceKeys(workspace?.serviceKeys);
+  return keys === null ? [...services] : services.filter((service) => keys.includes(service.key));
+}
+
+export function widgetServices(workspace, widgetId, services = []) {
+  const attached = workspaceServices(workspace, services);
+  const key = workspace?.widgets?.find((widget) => widget.id === widgetId)?.serviceKey;
+  return key ? attached.filter((service) => service.key === key) : attached;
+}
+
 export function defaultDashboardState() {
-  return { version: DASHBOARD_PREFS_VERSION, activeId: 'default', dashboards: [{ id: 'default', name: 'Overview', widgets: normalizeWidgets() }] };
+  return { version: DASHBOARD_PREFS_VERSION, activeId: 'default', dashboards: [{ id: 'default', name: 'Overview', serviceKeys: null, widgets: normalizeWidgets() }] };
 }
 
 export function loadDashboards(storage) {
@@ -78,7 +99,8 @@ export function loadDashboards(storage) {
         && (isUntouchedLegacyDefault(dashboard.widgets) || isUntouchedV2Default(dashboard.widgets));
       return {
         ...dashboard,
-        name: String(dashboard.name || 'Dashboard').slice(0, 60),
+        name: String(dashboard.name || 'Workspace').slice(0, 60),
+        serviceKeys: normalizeServiceKeys(dashboard.serviceKeys),
         widgets: normalizeWidgets(resetBuiltIn ? undefined : dashboard.widgets),
       };
     });
@@ -94,11 +116,11 @@ export function saveDashboards(state, storage) {
 
 export function activeDashboard(state) { return state.dashboards.find((d) => d.id === state.activeId) || state.dashboards[0]; }
 
-export function createDashboard(state, name, widgets) {
+export function createDashboard(state, name, widgets, serviceKeys = null) {
   const normalized = String(name || '').trim().slice(0, 60);
-  if (!normalized) throw new Error('Dashboard name is required');
+  if (!normalized) throw new Error('Workspace name is required');
   const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-  return { ...state, activeId: id, dashboards: [...state.dashboards, { id, name: normalized, widgets: normalizeWidgets(widgets) }] };
+  return { ...state, activeId: id, dashboards: [...state.dashboards, { id, name: normalized, serviceKeys: normalizeServiceKeys(serviceKeys), widgets: normalizeWidgets(widgets) }] };
 }
 
 export function removeDashboard(state, id) {
@@ -108,7 +130,7 @@ export function removeDashboard(state, id) {
 }
 
 export function updateDashboard(state, id, patch) {
-  return { ...state, dashboards: state.dashboards.map((dashboard) => dashboard.id === id ? { ...dashboard, ...patch, widgets: patch.widgets ? normalizeWidgets(patch.widgets) : dashboard.widgets } : dashboard) };
+  return { ...state, dashboards: state.dashboards.map((dashboard) => dashboard.id === id ? { ...dashboard, ...patch, serviceKeys: patch.serviceKeys === undefined ? dashboard.serviceKeys : normalizeServiceKeys(patch.serviceKeys), widgets: patch.widgets ? normalizeWidgets(patch.widgets) : dashboard.widgets } : dashboard) };
 }
 
 export function moveWidget(widgets, id, delta) {
@@ -121,7 +143,7 @@ export function moveWidget(widgets, id, delta) {
 
 export function resetBuiltInDashboard(state) {
   const hasDefault = state.dashboards.some((dashboard) => dashboard.id === 'default');
-  const dashboard = { id: 'default', name: 'Overview', widgets: normalizeWidgets() };
+  const dashboard = { id: 'default', name: 'Overview', serviceKeys: null, widgets: normalizeWidgets() };
   return {
     ...state,
     activeId: 'default',

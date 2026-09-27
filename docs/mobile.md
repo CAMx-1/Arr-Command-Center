@@ -90,7 +90,7 @@ ios/                           # generated native Xcode project (committed)
 ## Roadmap
 
 - **Direct mode (no backend):** talk straight to Sonarr/Radarr/Overseerr/SABnzbd/
-  qBittorrent/Tautulli/Plex from the device (native HTTP plugin bypasses CORS and
+  qBittorrent/Transmission/Deluge/NZBGet/Tautulli/Plex from the device (native HTTP plugin bypasses CORS and
   sets `X-Api-Key` / Cloudflare Access headers), storing per-service credentials
   in the iOS Keychain. The backend container then becomes optional — needed only
   for host system metrics and scheduled automation.
