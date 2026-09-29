@@ -13,6 +13,7 @@ import { dashboardSettingsCard } from '../lib/dashboardSettings.js';
 import { getSysmonPrefs, setSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
 import { getAppMode, setAppMode, isLocalMode, getConnection, getConnections, setConnection, removeConnection, LOCAL_SERVICE_DEFS, localServiceDef } from '../lib/connections.js';
 import { normalizeCustomHeaders } from '../lib/customHeaders.js';
+import { appLockAvailable, getLockStatus, enableLock, disableLock, changeLockPasscode, setLockTimeout, lockNow, newPasscodeError, isValidPasscode, lockErrorMessage, timeoutLabel, TIMEOUT_OPTIONS, PASSCODE_LENGTH } from '../lib/appLock.js';
 
 import { portableBackupPayload, encryptPortableBackup, decryptPortableBackup, applyPortableBackup } from '../lib/configBackup.js';
 export async function renderSettings(root, ctx) {
@@ -141,6 +142,7 @@ export async function renderSettings(root, ctx) {
     general,
     h('div', { class: 'section-title', id: 'settings-mobile' }, 'Mobile app'),
     h('div', { class: 'card', id: 'mobile-app-panel' }, h('div', { class: 'dim' }, 'Loading app information…')),
+    appLockAvailable() ? h('div', { class: 'card', id: 'app-lock-panel' }, h('div', { class: 'dim' }, 'Loading passcode settings…')) : null,
     h('div', { class: 'section-title', id: 'settings-favorites' }, 'Favorites & navigation'),
     favoriteNavigationCard(ctx),
     h('div', { class: 'section-title', id: 'settings-connection' }, 'Connection'),
@@ -172,6 +174,7 @@ export async function renderSettings(root, ctx) {
   );
 
   hydrateMobileAppPanel(ctx);
+  hydrateAppLockPanel();
   if (!localMode) hydrateLocalFallbackPanel(ctx);
 
   if (!localMode) hydrateDiagnostics(ctx);
@@ -263,6 +266,101 @@ async function hydrateMobileAppPanel(ctx) {
     actions,
     h('p', { class: 'dim settings-copy' }, 'Copied diagnostics are redacted and stay on this device until you choose to share them. API keys, cookies, and Cloudflare secrets are never included.'),
   );
+}
+
+// ---- Passcode lock (native app only) -------------------------------------
+// The lock screen, hashing and attempt throttling are native (AppLock.swift);
+// this card toggles it, changes the passcode and picks the lock-after delay.
+async function hydrateAppLockPanel() {
+  const panel = document.getElementById('app-lock-panel');
+  if (!panel) return;
+  let status;
+  try { status = await getLockStatus(); }
+  catch (e) { mount(panel, h('h3', {}, 'Passcode lock'), h('div', { class: 'dim' }, lockErrorMessage(e))); return; }
+
+  const toggle = h('input', { type: 'checkbox', role: 'switch', 'aria-label': 'Require passcode' });
+  toggle.checked = status.enabled;
+  toggle.addEventListener('change', () => {
+    toggle.checked = status.enabled; // reflect only after the modal succeeds
+    if (status.enabled) openPasscodeModal('disable'); else openPasscodeModal('enable');
+  });
+
+  const timeout = h('select', { class: 'input', 'aria-label': 'Lock after', style: { width: 'auto' } },
+    ...TIMEOUT_OPTIONS.map((m) => h('option', { value: String(m) }, timeoutLabel(m))));
+  timeout.value = String(status.timeoutMinutes);
+  timeout.disabled = !status.enabled;
+  timeout.addEventListener('change', async () => {
+    try { await setLockTimeout(Number(timeout.value)); toast(`Locks ${timeoutLabel(Number(timeout.value)).toLowerCase()} in the background`, 'success'); }
+    catch (e) { toast(lockErrorMessage(e), 'error'); timeout.value = String(status.timeoutMinutes); }
+  });
+
+  mount(panel,
+    h('h3', {}, 'Passcode lock'),
+    settingRow('Require passcode', h('span', { class: 'pw-toggle' }, toggle)),
+    settingRow('Lock after', timeout),
+    status.enabled ? h('div', { class: 'settings-action-grid' },
+      h('button', { class: 'btn sm', type: 'button', onclick: () => openPasscodeModal('change') }, 'Change passcode'),
+      h('button', { class: 'btn sm', type: 'button', onclick: async () => { try { await lockNow(); } catch (e) { toast(lockErrorMessage(e), 'error'); } } }, 'Lock now'),
+    ) : null,
+    h('p', { class: 'dim settings-copy' },
+      status.enabled
+        ? 'The app asks for your passcode when it opens and after it has been in the background for the selected time. The screen is hidden in the app switcher.'
+        : `Protect the app with a ${PASSCODE_LENGTH}-digit passcode. It is stored only on this device, in the iOS Keychain.`),
+    h('p', { class: 'dim settings-copy' }, 'Forgot it? Deleting and reinstalling the app removes the passcode (you will need to reconnect to your server).'),
+  );
+
+  function openPasscodeModal(kind) {
+    const error = h('div', { role: 'alert', 'aria-live': 'polite', style: { color: 'var(--red)', minHeight: '20px', fontSize: '13px' } });
+    const digits = (label) => h('input', {
+      class: 'input', type: 'password', inputmode: 'numeric', pattern: '[0-9]*', autocomplete: kind === 'enable' ? 'new-password' : 'off',
+      maxlength: String(PASSCODE_LENGTH), 'aria-label': label, placeholder: '••••••', style: { letterSpacing: '6px', fontSize: '20px', textAlign: 'center' },
+      oninput: (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, PASSCODE_LENGTH); error.textContent = ''; },
+    });
+    const field = (label, input) => h('label', { style: { display: 'grid', gap: '6px', marginBottom: '12px' } }, h('span', { class: 'dim', style: { fontSize: '13px' } }, label), input);
+    const current = kind === 'enable' ? null : digits('Current passcode');
+    const next = kind === 'disable' ? null : digits('New passcode');
+    const confirm = kind === 'disable' ? null : digits('Confirm new passcode');
+    const pick = kind === 'enable' ? h('select', { class: 'input', 'aria-label': 'Lock after' }, ...TIMEOUT_OPTIONS.map((m) => h('option', { value: String(m) }, timeoutLabel(m)))) : null;
+    if (pick) pick.value = String(status.timeoutMinutes);
+    const titles = { enable: 'Turn on passcode', disable: 'Turn off passcode', change: 'Change passcode' };
+    const labels = { enable: 'Turn on', disable: 'Turn off', change: 'Save' };
+    const submit = h('button', { class: `btn ${kind === 'disable' ? 'danger' : 'primary'}`, type: 'button' }, labels[kind]);
+
+    const save = async () => {
+      error.textContent = '';
+      if (current && !isValidPasscode(current.value)) { error.textContent = `Enter your current ${PASSCODE_LENGTH}-digit passcode`; return; }
+      if (next) { const problem = newPasscodeError(next.value, confirm.value); if (problem) { error.textContent = problem; return; } }
+      submit.disabled = true;
+      try {
+        if (kind === 'enable') await enableLock(next.value, Number(pick.value));
+        else if (kind === 'disable') await disableLock(current.value);
+        else await changeLockPasscode(current.value, next.value);
+        closeModal();
+        toast(kind === 'enable' ? 'Passcode lock is on' : kind === 'disable' ? 'Passcode lock is off' : 'Passcode changed', 'success');
+        hydrateAppLockPanel();
+      } catch (e) {
+        error.textContent = lockErrorMessage(e);
+        if (current) current.value = '';
+        submit.disabled = false;
+      }
+    };
+    submit.onclick = save;
+    const inputs = [current, next, confirm].filter(Boolean);
+    inputs.forEach((el, i) => el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); (inputs[i + 1] || submit).focus(); if (!inputs[i + 1]) save(); } }));
+
+    openModal({
+      title: titles[kind],
+      body: h('div', {},
+        kind === 'enable' ? h('p', { class: 'dim settings-copy', style: { marginTop: 0 } }, `Choose a ${PASSCODE_LENGTH}-digit passcode. There is no way to recover it except reinstalling the app.`) : null,
+        current ? field('Current passcode', current) : null,
+        next ? field('New passcode', next) : null,
+        confirm ? field('Confirm new passcode', confirm) : null,
+        pick ? field('Lock after', pick) : null,
+        error),
+      footer: h('div', { class: 'modal-actions' }, h('button', { class: 'btn', type: 'button', onclick: closeModal }, 'Cancel'), submit),
+    });
+    requestAnimationFrame(() => inputs[0]?.focus());
+  }
 }
 
 async function hydrateLinksAdmin(ctx) {

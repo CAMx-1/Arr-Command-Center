@@ -1211,6 +1211,11 @@ button, [role="button"], input, select, textarea { touch-action: manipulation; }
 .conn-retry { border: 1px solid rgba(255,255,255,.55); border-radius: 999px; color: #fff; background: rgba(255,255,255,.12); min-height: 32px; padding: 5px 12px; font-weight: 750; cursor: pointer; }
 .conn-banner[data-mode="server"], .conn-banner[data-mode="auth"] { background: linear-gradient(160deg, #e11d48, #9f1239); }
 .native-keyboard-open .modal { max-height: calc(100vh - var(--keyboard-height) - env(safe-area-inset-top)); }
+/* Keyboard.resize is "none", so the WebView doesn't shrink when the keyboard
+   opens. Lift modals (bottom sheets on phones) above it instead of letting it
+   cover their fields and buttons. The search overlay manages its own layout. */
+.native-keyboard-open .modal-overlay:not(.search-modal-overlay) { padding-bottom: var(--keyboard-height); transition: padding-bottom 0.25s var(--ease); }
+.native-keyboard-open .modal-overlay:not(.search-modal-overlay) .modal-foot { padding-bottom: 15px; }
 
 
 .local-fallback-panel { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }

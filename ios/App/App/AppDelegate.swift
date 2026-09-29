@@ -11,6 +11,13 @@ import Capacitor
 final class AppBridgeViewController: CAPBridgeViewController {
     private var startupCachePurgeStarted = false
 
+    // Register the in-app passcode lock plugin (window.Capacitor.Plugins.AppLock).
+    // registerPluginInstance also exports it to server-origin pages.
+    override func capacitorDidLoad() {
+        super.capacitorDidLoad()
+        bridge?.registerPluginInstance(AppLockPlugin())
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         // The first-run connect screen and external authentication pages do not
@@ -45,18 +52,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // Cover the UI before the first frame if the passcode lock is on.
+        DispatchQueue.main.async { AppLockManager.shared.appDidLaunch() }
         return true
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
         // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
         // Use this method to pause ongoing tasks, disable timers, and invalidate graphics rendering callbacks. Games should use this method to pause the game.
+        AppLockManager.shared.appWillResignActive()
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
         // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
         // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
+        AppLockManager.shared.appDidEnterBackground()
     }
 
     func applicationWillEnterForeground(_ application: UIApplication) {
@@ -65,6 +75,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        AppLockManager.shared.appDidBecomeActive()
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
