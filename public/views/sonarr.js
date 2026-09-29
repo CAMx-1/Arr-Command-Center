@@ -7,7 +7,8 @@ import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, cachedList, invalidate } from '../lib/cache.js';
 import { libraryFilter, consumePendingFilter } from '../lib/libraryFilter.js';
-import { tagEditor, arrCommandBar, loadTags, openManualImport } from '../lib/arrActions.js';
+import { tagEditor, arrCommandBar, loadTags, queueImportAction, queueStatePill, queueStuckReason } from '../lib/arrActions.js';
+import { isImportStuck } from '../lib/manualImport.js';
 import { compactTable } from '../lib/tableView.js';
 import { savedViewsControl } from '../lib/savedViews.js';
 import { comparisonBar } from '../lib/comparisonDrawer.js';
@@ -261,7 +262,7 @@ async function tabQueue(root, arr, ctx) {
 // instances never clobber each other.
 const _queueIssueState = new Map(); // serviceKey -> Set of currently-bad keys
 function queueAttentionBanner(records, ctx) {
-  const bad = records.filter((r) => /warning|stalled|failed|error/i.test(`${r.status} ${r.trackedDownloadStatus} ${(r.statusMessages || []).map((m) => m.title).join(' ')} ${r.errorMessage || ''}`));
+  const bad = records.filter((r) => isImportStuck(r) || /warning|stalled|failed|error/i.test(`${r.status} ${r.trackedDownloadStatus} ${(r.statusMessages || []).map((m) => m.title).join(' ')} ${r.errorMessage || ''}`));
   const byKey = new Map();
   for (const r of bad) byKey.set(`${ctx.service.key}:${r.downloadId || r.id}`, r);
   const emitKeys = reconcileQueueIssues(_queueIssueState, ctx.service.key, byKey.keys());
@@ -287,16 +288,17 @@ function queueRow(r, arr, ctx) {
     h('div', { class: 'row-main' },
       h('div', { class: 'row-title' }, r.title),
       h('div', { class: 'meta-line', style: { marginTop: '4px' } },
-        h('span', { class: 'pill info' }, r.status || 'unknown'),
+        queueStatePill(r),
         h('span', {}, r.indexer || ''),
         h('span', {}, `${fmtBytes(r.sizeleft || 0)} left`),
         r.timeleft ? h('span', {}, `ETA ${r.timeleft}`) : null,
       ),
+      queueStuckReason(r),
       h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })),
     ),
     actionGroup([
-      { label: '\u21E9 Import', title: 'Manually import completed files', onClick: () => openManualImport(arr, 'series', { downloadId: r.downloadId, title: r.title }) },
-      { label: '\u2715 Remove', variant: 'danger', primary: true, onClick: remove },
+      queueImportAction(arr, 'series', r, ctx),
+      { label: '\u2715 Remove', variant: 'danger', primary: !isImportStuck(r), onClick: remove },
       { label: '\u26D4 Blocklist & search', title: 'Blocklist this release and search for a replacement', onClick: async () => {
         try {
           await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=true`);

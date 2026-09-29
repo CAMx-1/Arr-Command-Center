@@ -108,6 +108,64 @@ function fillRadarrLibrary(movies, requestedSize) {
 }
 
 // ---------------- Sonarr ----------------
+// Shared manual-import endpoints for the Sonarr/Radarr mocks. Mirrors the real
+// v3 contract closely enough to exercise ACC's Fix-import flow end-to-end:
+//   GET  manualimport?downloadId=…   candidates for a stuck download
+//   POST manualimport [items]        reprocess (re-evaluate rejections)
+//   GET  qualitydefinition           quality picker
+//   POST command {ManualImport}      imports + drops the queue item
+//   GET  command/:id                 completes on the second poll
+function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, library }) {
+  const commands = new Map();
+  let nextCmd = 1000;
+  const qualities = [
+    { id: 1, quality: { id: 1, name: 'SDTV' }, title: 'SDTV' },
+    { id: 2, quality: { id: 4, name: 'HDTV-720p' }, title: 'HDTV-720p' },
+    { id: 3, quality: { id: 6, name: 'WEBDL-1080p' }, title: 'WEBDL-1080p' },
+    { id: 4, quality: { id: 7, name: 'Bluray-1080p' }, title: 'Bluray-1080p' },
+    { id: 5, quality: { id: 18, name: 'WEBDL-2160p' }, title: 'WEBDL-2160p' },
+    { id: 6, quality: { id: 19, name: 'Bluray-2160p' }, title: 'Bluray-2160p' },
+  ];
+  app.get('/api/v3/qualitydefinition', (req, res) => res.json(qualities));
+  app.get('/api/v3/manualimport', (req, res) => {
+    const id = String(req.query.downloadId || '');
+    res.json(JSON.parse(JSON.stringify(candidates[id] || candidates.default || [])));
+  });
+  app.post('/api/v3/manualimport', (req, res) => {
+    const items = Array.isArray(req.body) ? req.body : [];
+    res.json(items.map((it) => {
+      const rejections = [];
+      if (kind === 'series') {
+        if (!it.seriesId) rejections.push({ reason: 'Unknown Series', type: 'permanent' });
+        else if (!(it.episodeIds || []).length) rejections.push({ reason: 'No episodes selected', type: 'permanent' });
+        const s = library().find((x) => x.id === it.seriesId);
+        return { ...it, series: s ? { id: s.id, title: s.title } : undefined, episodes: (it.episodeIds || []).map((eid) => ({ id: eid, seasonNumber: it.seasonNumber, episodeNumber: (eid % 100) || 1 })), episodeIds: undefined, rejections };
+      }
+      if (!it.movieId) rejections.push({ reason: 'Unknown Movie', type: 'permanent' });
+      const m = library().find((x) => x.id === it.movieId);
+      return { ...it, movie: m ? { id: m.id, title: m.title, year: m.year } : undefined, rejections };
+    }));
+  });
+  app.post('/api/v3/command', (req, res) => {
+    const body = req.body || {};
+    const cmd = { id: nextCmd++, name: body.name, status: 'queued', polls: 0, body };
+    commands.set(cmd.id, cmd);
+    if (body.name === 'ManualImport') {
+      const ids = new Set((body.files || []).map((f) => f.downloadId).filter(Boolean));
+      if (ids.size) setQueue(getQueue().filter((q) => !ids.has(q.downloadId)));
+    }
+    res.status(201).json({ id: cmd.id, name: cmd.name, status: cmd.status });
+  });
+  app.get('/api/v3/command/:id', (req, res) => {
+    const cmd = commands.get(Number(req.params.id));
+    if (!cmd) return res.status(404).json({ message: 'Command not found' });
+    cmd.polls += 1;
+    if (cmd.polls >= 2) cmd.status = 'completed';
+    else cmd.status = 'started';
+    res.json({ id: cmd.id, name: cmd.name, status: cmd.status, message: cmd.status === 'completed' ? 'Completed' : 'Processing', body: cmd.body });
+  });
+}
+
 function makeSonarr(opts = {}) {
   const app = express();
   app.use(express.json());
@@ -120,7 +178,9 @@ function makeSonarr(opts = {}) {
   if (opts.series) series = opts.series.map((s) => ({ ...s }));
   else series = fillSonarrLibrary(series, opts.librarySize);
   let queue = [
-    { id: 101, title: 'Severance S02E10', seriesId: 1, status: 'downloading', trackedDownloadState: 'downloading', size: 2147483648, sizeleft: 536870912, timeleft: '00:04:12', estimatedCompletionTime: new Date(Date.now() + 252000).toISOString(), downloadClient: 'SABnzbd', indexer: 'NZBgeek' },
+    { id: 101, title: 'Severance S02E10', seriesId: 1, downloadId: 'SABnzbd_nzo_sev0210', status: 'downloading', trackedDownloadStatus: 'ok', trackedDownloadState: 'downloading', size: 2147483648, sizeleft: 536870912, timeleft: '00:04:12', estimatedCompletionTime: new Date(Date.now() + 252000).toISOString(), downloadClient: 'SABnzbd', indexer: 'NZBgeek' },
+    { id: 102, title: 'The.Bear.S03E05.Children.1080p.WEB.h264-ETHEL', seriesId: 2, downloadId: 'SABnzbd_nzo_bear0305', status: 'completed', trackedDownloadStatus: 'warning', trackedDownloadState: 'importBlocked', size: 1610612736, sizeleft: 0, downloadClient: 'SABnzbd', indexer: 'NZBgeek', statusMessages: [{ title: 'The.Bear.S03E05.Children.1080p.WEB.h264-ETHEL', messages: ['Found matching series via grab history, but release was matched to series by ID. Automatic import is not possible.'] }] },
+    { id: 103, title: 'Unknown.Show.2024.S01E01.720p.HDTV', downloadId: 'qbit_hash_unknown0101', status: 'completed', trackedDownloadStatus: 'warning', trackedDownloadState: 'importPending', size: 734003200, sizeleft: 0, downloadClient: 'qBittorrent', indexer: 'Torznab', statusMessages: [{ title: 'Unknown.Show.2024.S01E01.720p.HDTV', messages: ['Unknown Series'] }] },
   ];
 
   app.use((req, res, next) => {
@@ -157,7 +217,6 @@ function makeSonarr(opts = {}) {
     { id: 2, eventType: 'downloadFailed', sourceTitle: 'The.Bear.S03E05.1080p', date: new Date(Date.now() - 9000000).toISOString(), quality: { quality: { name: 'WEBDL-1080p' } }, series: { title: 'The Bear' }, episode: { seasonNumber: 3, episodeNumber: 5 } },
     { id: 3, eventType: 'grabbed', sourceTitle: 'Foundation.S02E01.2160p', date: new Date(Date.now() - 18000000).toISOString(), quality: { quality: { name: 'WEBDL-2160p' } }, series: { title: 'Foundation' }, episode: { seasonNumber: 2, episodeNumber: 1 } },
   ] }));
-  app.post('/api/v3/command', (req, res) => res.status(201).json({ id: Math.floor(Math.random() * 1000), name: req.body.name, status: 'queued' }));
   app.get('/api/v3/episode', (req, res) => {
     const season = Number(req.query.seasonNumber) || 1;
     res.json(Array.from({ length: 8 }, (_, i) => ({ id: 5000 + season * 100 + i + 1, seriesId: Number(req.query.seriesId) || 1, seasonNumber: season, episodeNumber: i + 1, title: `Episode ${i + 1}`, airDateUtc: new Date(Date.now() - (8 - i) * 86400000).toISOString(), hasFile: i % 3 !== 0, monitored: true })));
@@ -192,10 +251,19 @@ function makeSonarr(opts = {}) {
     { episodeFileId: 501, seriesId: Number(req.query.seriesId) || 1, existingPath: 'Season 02/severance.s02e10.1080p.web.mkv', newPath: 'Season 02/Severance - S02E10 - Cold Harbor [WEBDL-1080p].mkv' },
   ]));
   app.put('/api/v3/episode/monitor', (req, res) => res.json({ updated: ((req.body && req.body.episodeIds) || []).length, monitored: !!(req.body && req.body.monitored) }));
-  app.get('/api/v3/manualimport', (req, res) => res.json([
-    { id: 1, path: '/downloads/complete/Severance.S02E10.1080p.WEB.mkv', name: 'Severance.S02E10.1080p.WEB-DL', size: 2147483648, quality: { quality: { id: 6, name: 'WEBDL-1080p' }, revision: { version: 1 } }, languages: [{ id: 1, name: 'English' }], series: { id: 1, title: 'Severance' }, seasonNumber: 2, episodes: [{ id: 1, episodeNumber: 10, seasonNumber: 2, title: 'Cold Harbor' }], releaseGroup: 'NTb', rejections: [] },
-    { id: 2, path: '/downloads/complete/sample.mkv', name: 'sample.mkv', size: 26214400, quality: { quality: { id: 0, name: 'Unknown' } }, languages: [{ id: 1, name: 'English' }], series: null, episodes: [], rejections: [{ reason: 'Sample file', type: 'permanent' }] },
-  ]));
+  mountManualImportMock(app, {
+    kind: 'series', library: () => series, getQueue: () => queue, setQueue: (q) => { queue = q; },
+    candidates: {
+      SABnzbd_nzo_bear0305: [
+        { id: 1, path: '/downloads/complete/The.Bear.S03E05.Children.1080p.WEB.h264-ETHEL/the.bear.s03e05.1080p.web.h264-ethel.mkv', relativePath: 'the.bear.s03e05.1080p.web.h264-ethel.mkv', folderName: 'The.Bear.S03E05.Children.1080p.WEB.h264-ETHEL', name: 'the.bear.s03e05.1080p.web.h264-ethel', size: 1598029824, quality: { quality: { id: 6, name: 'WEBDL-1080p' }, revision: { version: 1, real: 0, isRepack: false } }, languages: [{ id: 1, name: 'English' }], series: { id: 2, title: 'The Bear' }, seasonNumber: 3, episodes: [{ id: 5305, seasonNumber: 3, episodeNumber: 5, title: 'Children' }], releaseGroup: 'ETHEL', indexerFlags: 0, releaseType: 'singleEpisode', downloadId: 'SABnzbd_nzo_bear0305', rejections: [] },
+        { id: 2, path: '/downloads/complete/The.Bear.S03E05.Children.1080p.WEB.h264-ETHEL/sample.mkv', relativePath: 'sample.mkv', folderName: 'The.Bear.S03E05.Children.1080p.WEB.h264-ETHEL', name: 'sample', size: 26214400, quality: { quality: { id: 6, name: 'WEBDL-1080p' }, revision: { version: 1, real: 0, isRepack: false } }, languages: [{ id: 1, name: 'English' }], series: { id: 2, title: 'The Bear' }, seasonNumber: 3, episodes: [{ id: 5305, seasonNumber: 3, episodeNumber: 5, title: 'Children' }], releaseGroup: 'ETHEL', downloadId: 'SABnzbd_nzo_bear0305', rejections: [{ reason: 'Sample', type: 'permanent' }] },
+      ],
+      qbit_hash_unknown0101: [
+        { id: 3, path: '/downloads/torrents/Unknown.Show.2024.S01E01.720p.HDTV/unknown.show.2024.s01e01.720p.hdtv.mkv', relativePath: 'unknown.show.2024.s01e01.720p.hdtv.mkv', folderName: 'Unknown.Show.2024.S01E01.720p.HDTV', name: 'unknown.show.2024.s01e01.720p.hdtv', size: 734003200, quality: { quality: { id: 4, name: 'HDTV-720p' }, revision: { version: 1, real: 0, isRepack: false } }, languages: [{ id: 1, name: 'English' }], series: null, episodes: [], releaseGroup: '', downloadId: 'qbit_hash_unknown0101', rejections: [{ reason: 'Unknown Series', type: 'permanent' }] },
+      ],
+      default: [],
+    },
+  });
   app.get('/api/v3/wanted/missing', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 2, records: [
     { id: 7001, seriesId: 1, seasonNumber: 2, episodeNumber: 10, title: 'Cold Harbor', airDateUtc: new Date(Date.now() - 86400000).toISOString(), series: { title: 'Severance' } },
     { id: 7002, seriesId: 2, seasonNumber: 3, episodeNumber: 5, title: 'Children', airDateUtc: new Date(Date.now() - 2 * 86400000).toISOString(), series: { title: 'The Bear' } },
@@ -220,7 +288,8 @@ function makeRadarr(opts = {}) {
   if (opts.movies) movies = opts.movies.map((m) => ({ ...m }));
   else movies = fillRadarrLibrary(movies, opts.librarySize);
   let queue = [
-    { id: 201, title: 'Furiosa 2024 2160p', movieId: 3, status: 'downloading', trackedDownloadState: 'downloading', size: 21474836480, sizeleft: 6442450944, timeleft: '00:11:38', downloadClient: 'SABnzbd', indexer: 'DrunkenSlug' },
+    { id: 201, title: 'Furiosa 2024 2160p', movieId: 3, downloadId: 'SABnzbd_nzo_furiosa', status: 'downloading', trackedDownloadStatus: 'ok', trackedDownloadState: 'downloading', size: 21474836480, sizeleft: 6442450944, timeleft: '00:11:38', downloadClient: 'SABnzbd', indexer: 'DrunkenSlug' },
+    { id: 202, title: 'Furiosa.A.Mad.Max.Saga.2024.1080p.BluRay.x264-GROUP', movieId: 3, downloadId: 'qbit_hash_furiosa1080', status: 'completed', trackedDownloadStatus: 'warning', trackedDownloadState: 'importBlocked', size: 12884901888, sizeleft: 0, downloadClient: 'qBittorrent', indexer: 'Torznab', statusMessages: [{ title: 'Furiosa.A.Mad.Max.Saga.2024.1080p.BluRay.x264-GROUP', messages: ['Not a Custom Format upgrade for existing movie file(s)', 'Movie title mismatch, automatic import is not possible'] }] },
   ];
 
   app.use((req, res, next) => {
@@ -260,7 +329,6 @@ function makeRadarr(opts = {}) {
   app.post('/api/v3/movie', (req, res) => { const m = { id: movies.length + 1, ...req.body, hasFile: false, sizeOnDisk: 0 }; movies.push(m); res.status(201).json(m); });
   app.get('/api/v3/release', (req, res) => res.json(mockReleases('Furiosa')));
   app.post('/api/v3/release', (req, res) => res.status(201).json({ guid: req.body.guid, approved: true }));
-  app.post('/api/v3/command', (req, res) => res.status(201).json({ id: Math.floor(Math.random() * 1000), name: req.body.name, status: 'queued' }));
   app.get('/api/v3/health', (req, res) => res.json([]));
   app.put('/api/v3/movie/editor', (req, res) => {
     const ids = (req.body && req.body.movieIds) || [];
@@ -286,9 +354,15 @@ function makeRadarr(opts = {}) {
   app.get('/api/v3/rename', (req, res) => res.json([
     { movieFileId: 601, movieId: Number(req.query.movieId) || 1, existingPath: 'furiosa.2024.2160p.mkv', newPath: 'Furiosa A Mad Max Saga (2024) [Bluray-2160p].mkv' },
   ]));
-  app.get('/api/v3/manualimport', (req, res) => res.json([
-    { id: 1, path: '/downloads/complete/Furiosa.2024.2160p.BluRay.mkv', name: 'Furiosa.2024.2160p.BluRay', size: 32212254720, quality: { quality: { id: 19, name: 'Bluray-2160p' }, revision: { version: 1 } }, languages: [{ id: 1, name: 'English' }], movie: { id: 1, title: 'Furiosa' }, releaseGroup: 'GROUP', rejections: [] },
-  ]));
+  mountManualImportMock(app, {
+    kind: 'movie', library: () => movies, getQueue: () => queue, setQueue: (q) => { queue = q; },
+    candidates: {
+      qbit_hash_furiosa1080: [
+        { id: 1, path: '/downloads/torrents/Furiosa.A.Mad.Max.Saga.2024.1080p.BluRay.x264-GROUP/furiosa.2024.1080p.bluray.x264-group.mkv', relativePath: 'furiosa.2024.1080p.bluray.x264-group.mkv', folderName: 'Furiosa.A.Mad.Max.Saga.2024.1080p.BluRay.x264-GROUP', name: 'furiosa.2024.1080p.bluray.x264-group', size: 12751020032, quality: { quality: { id: 7, name: 'Bluray-1080p' }, revision: { version: 1, real: 0, isRepack: false } }, languages: [{ id: 1, name: 'English' }], movie: null, releaseGroup: 'GROUP', indexerFlags: 0, downloadId: 'qbit_hash_furiosa1080', rejections: [{ reason: 'Movie title mismatch', type: 'permanent' }] },
+      ],
+      default: [],
+    },
+  });
   app.get('/api/v3/wanted/missing', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 1, records: [
     { id: 8001, title: 'Furiosa', year: 2024, digitalRelease: new Date(Date.now() - 3 * 86400000).toISOString() },
   ] }));
@@ -1165,3 +1239,6 @@ export function startMockServices() {
   }
   return servers;
 }
+
+// Exposed for tests (in-process, ephemeral ports).
+export { makeSonarr as _makeSonarrMock, makeRadarr as _makeRadarrMock };

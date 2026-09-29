@@ -55,7 +55,7 @@ async function collectArr(svc, serviceGet, now) {
     const title = q.title || q.sourceTitle || 'Queued download';
     const state = String(q.trackedDownloadState || q.status || '').toLowerCase();
     activity.push(item({ id: `${svc.key}:queue:${q.id}`, kind: 'queue', title, detail: `${q.status || 'queued'}${q.timeleft ? ` · ${q.timeleft} remaining` : ''}`, tab: 'queue' }, svc, now));
-    if (/fail|warn|stalled|error|importpending/.test(state)) inbox.push(item({ id: `${svc.key}:queue-problem:${q.id}`, kind: 'queue', severity: /fail|error/.test(state) ? 'critical' : 'warning', title, detail: q.statusMessages?.map((x) => x.title).join(' · ') || q.status || state, tab: 'queue' }, svc, now));
+    if (/fail|warn|stalled|error|importpending|importblocked/.test(state)) inbox.push(item({ id: `${svc.key}:queue-problem:${q.id}`, kind: 'queue', severity: /fail|error/.test(state) ? 'critical' : 'warning', title, detail: q.statusMessages?.map((x) => x.title).join(' · ') || q.status || state, tab: 'queue' }, svc, now));
   }
   for (const r of (history.records || [])) {
     if (!['downloadFolderImported', 'downloadFailed', 'grabbed'].includes(r.eventType)) continue;

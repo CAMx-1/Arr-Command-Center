@@ -38,7 +38,7 @@ store (`data/store.json`).
 - [ ] Per‑user "default page", pin/unpin sidebar, upload custom icons.
 
 ## Next — full *arr task coverage (via API)
-- [ ] **Manual import** (interactive import of downloaded files).
+- [x] **Manual import** — "Fix import" on stuck Sonarr/Radarr queue items (re-map series/episodes/movie + quality, reprocess, import, command tracking).
 - [ ] **Quality profiles / custom formats / release profiles** management (view + edit).
 - [ ] **Indexer management** (Prowlarr live: add/edit/test/sync, app sync).
 - [ ] **Download client settings**, remote path mappings.
