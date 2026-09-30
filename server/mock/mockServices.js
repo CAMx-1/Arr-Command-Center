@@ -4,6 +4,7 @@
 // proxy is correctly injecting auth end-to-end. Cloudflare Access headers are
 // recorded on a /__debug endpoint so you can confirm header injection too.
 import express from 'express';
+import { makeAutobrr, makeMaintainerr, makeTdarr, makeAudiobookshelf, makeFlood } from './extraMocks.js';
 
 export const MOCK_PORTS = {
   sonarr: 18989,
@@ -24,6 +25,11 @@ export const MOCK_PORTS = {
   jellyfin: 18096,
   emby: 18097,
   indexer: 16060,
+  flood: 13001,
+  audiobookshelf: 13378,
+  autobrr: 17474,
+  maintainerr: 16246,
+  tdarr: 18265,
 };
 
 const cfSeen = {}; // service -> last seen CF headers
@@ -1229,6 +1235,11 @@ export function startMockServices() {
     ['jellyfin', makeMediaServer('jellyfin'), MOCK_PORTS.jellyfin],
     ['emby', makeMediaServer('emby'), MOCK_PORTS.emby],
     ['indexer', makeIndexer(), MOCK_PORTS.indexer],
+    ['flood', makeFlood(), MOCK_PORTS.flood],
+    ['audiobookshelf', makeAudiobookshelf(), MOCK_PORTS.audiobookshelf],
+    ['autobrr', makeAutobrr(), MOCK_PORTS.autobrr],
+    ['maintainerr', makeMaintainerr(), MOCK_PORTS.maintainerr],
+    ['tdarr', makeTdarr(), MOCK_PORTS.tdarr],
   ];
   const servers = [];
   for (const [name, app, port] of defs) {

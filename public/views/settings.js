@@ -13,6 +13,7 @@ import { dashboardSettingsCard } from '../lib/dashboardSettings.js';
 import { getSysmonPrefs, setSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
 import { getAppMode, setAppMode, isLocalMode, getConnection, getConnections, setConnection, removeConnection, LOCAL_SERVICE_DEFS, localServiceDef } from '../lib/connections.js';
 import { normalizeCustomHeaders } from '../lib/customHeaders.js';
+import { hasRequiredCredentials } from '../lib/serviceKinds.js';
 import { appLockAvailable, getLockStatus, enableLock, disableLock, changeLockPasscode, setLockTimeout, lockNow, newPasscodeError, isValidPasscode, lockErrorMessage, timeoutLabel, TIMEOUT_OPTIONS, PASSCODE_LENGTH } from '../lib/appLock.js';
 
 import { portableBackupPayload, encryptPortableBackup, decryptPortableBackup, applyPortableBackup } from '../lib/configBackup.js';
@@ -733,8 +734,8 @@ function localConnectionsPanel(root, ctx) {
   const policy = h('select', { class: 'input' }, h('option', { value: 'auto' }, 'Auto (local, then remote)'), h('option', { value: 'local' }, 'Local only'), h('option', { value: 'remote' }, 'Remote only'));
   const customHeaders = h('textarea', { class: 'input', rows: '5', spellcheck: 'false', placeholder: '{ "X-Custom-Token": "value" }' });
   const key = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' });
-  const username = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Username (Transmission/NZBGet)' });
-  const password = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Password (Transmission/Deluge/NZBGet)' });
+  const username = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Username' });
+  const password = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Password' });
   const cfId = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'CF-Access-Client-Id (optional)' });
   const cfSecret = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'CF-Access-Client-Secret (optional)' });
   const status = h('div', { class: 'dim', style: { fontSize: '12px', minHeight: '16px', margin: '2px 0' } });
@@ -781,7 +782,8 @@ function localConnectionsPanel(root, ctx) {
     if (c.type === 'transmission') return (!!c.username === !!c.password) ? '' : 'Enter both Transmission username and password, or leave both blank';
     if (c.type === 'deluge') return c.password ? '' : 'Deluge Web password is required';
     if (c.type === 'nzbget') return c.username && c.password ? '' : 'NZBGet username and password are required';
-    return c.apiKey ? '' : 'API key is required';
+    if (c.type === 'flood') return c.username && c.password ? '' : 'Flood username and password are required';
+    return hasRequiredCredentials(c.type, c) ? '' : 'API key is required';
   };
   const save = () => {
     let c;
@@ -833,6 +835,8 @@ function localConnectionsPanel(root, ctx) {
 
   // Username/password only apply to a few download clients. Wrap each field so
   // we can show or hide it based on the selected service's credential mode.
+  const keyField = field('API key (most services)', key);
+  const keyHintEl = h('div', { class: 'dim', style: { fontSize: '11px', margin: '-2px 0 6px' } });
   const usernameField = field('Username', username);
   const passwordField = field('Password', password);
   const credentialHint = h('div', { class: 'dim', style: { fontSize: '11px', margin: '-2px 0 6px' } });
@@ -849,8 +853,10 @@ function localConnectionsPanel(root, ctx) {
       : mode === 'password'
         ? 'Enter the Deluge Web password; Deluge does not use a username here.'
         : mode === 'basic'
-          ? 'Use the NZBGet ControlUsername and ControlPassword.'
+          ? (d.type === 'flood' ? 'Use your Flood login username and password.' : 'Use the NZBGet ControlUsername and ControlPassword.')
           : '';
+    keyField.style.display = (d.keyMode === 'none' || mode) ? 'none' : '';
+    keyHintEl.textContent = d.keyMode === 'none' ? '' : d.keyMode === 'optional' ? 'Optional — only needed if the service has API authentication enabled.' : '';
   };
 
   fill(typeSel.value);
@@ -867,7 +873,8 @@ function localConnectionsPanel(root, ctx) {
       field('Local URL', localUrl),
       field('Remote URL', remoteUrl),
       field('Connection policy', policy),
-      field('API key (most services)', key),
+      keyField,
+      keyHintEl,
       usernameField,
       passwordField,
       credentialHint,
@@ -1082,7 +1089,14 @@ async function hydrateNotifications(ctx) {
   render();
 }
 
-const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'jellyfin', 'emby', 'indexer', 'plex'];
+const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex'];
+// Where to find the API key / what auth each newer integration expects.
+const SERVICE_KEY_HINTS = {
+  autobrr: 'Autobrr → Settings → API keys (sent as X-API-Token).',
+  audiobookshelf: 'Audiobookshelf → Settings → API Keys (v2.26+), or your user API token.',
+  tdarr: 'Only needed if Tdarr server auth is enabled (Tools → API Keys).',
+  maintainerr: 'Maintainerr has no API authentication; leave blank. Keep it off the public internet and rely on ACC’s own login.',
+};
 
 function field(label, control, hint) {
   return h('label', { class: 'pw-field' },
@@ -1106,7 +1120,11 @@ function openServiceForm(root, ctx, existingKey, existing) {
   const customHeaders = h('textarea', { class: 'input', rows: '5', spellcheck: 'false', placeholder: existing && existing.hasCustomHeaders ? '•••• (leave blank to keep; enter {} to clear)' : '{ "X-Custom-Token": "value" }' });
   const enabled = h('input', { type: 'checkbox', checked: (existing ? existing : { }) && (!existing || existing.enabled !== false) ? 'checked' : null });
 
-  const credentialTypes = new Set(['qbittorrent', 'transmission', 'deluge', 'nzbget']);
+  const credentialTypes = new Set(['qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood']);
+  const apiKeyHint = h('span', {});
+  const apiKeyWrap = h('div', {}, field('API key', apiKey, apiKeyHint));
+  const maintainerrWarn = h('div', { class: 'dim', style: { fontSize: '12px', margin: '4px 0 8px', color: 'var(--amber)' } },
+    'Maintainerr has no API authentication. Anyone who can reach its URL can control it, so keep it on your LAN/VPN.');
   const usernameWrap = h('div', {}, field('Username', username));
   const passwordWrap = h('div', {}, field('Password', password));
   const credentialHint = h('div', { class: 'dim', style: { fontSize: '11px', marginTop: '-4px' } });
@@ -1121,7 +1139,12 @@ function openServiceForm(root, ctx, existingKey, existing) {
         ? 'Optional if Transmission RPC authentication is disabled.'
         : type === 'deluge'
           ? 'Enter the Deluge Web password; Deluge does not use a username here.'
-          : 'Use NZBGet ControlUsername and ControlPassword.';
+          : type === 'flood'
+            ? 'Use your Flood login username and password; ACC signs in and keeps the session server-side.'
+            : 'Use NZBGet ControlUsername and ControlPassword.';
+    apiKeyWrap.style.display = (type === 'maintainerr' || ['transmission', 'deluge', 'nzbget', 'flood'].includes(type)) ? 'none' : '';
+    apiKeyHint.textContent = SERVICE_KEY_HINTS[type] || 'Required for API-key services.';
+    maintainerrWarn.style.display = type === 'maintainerr' ? '' : 'none';
   };
   typeSel.addEventListener('change', updateCredentialFields);
   updateCredentialFields();
@@ -1169,7 +1192,8 @@ function openServiceForm(root, ctx, existingKey, existing) {
     field('Label', label),
     field('Type', typeSel),
     field('URL', baseUrl),
-    field('API key', apiKey, 'Required for API-key services. Leave blank for Transmission/Deluge/NZBGet and use credentials below.'),
+    apiKeyWrap,
+    maintainerrWarn,
     loginCreds,
     field('CF Access ID', cfId),
     field('CF Access secret', cfSecret),

@@ -4,6 +4,7 @@ import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { downloadClientFor } from '../lib/downloadClients.js';
 
 const GRADIENT = {
+  flood: 'linear-gradient(160deg, #0891b2, #083344)',
   transmission: 'linear-gradient(160deg, #dc2626, #3f0d12)',
   deluge: 'linear-gradient(160deg, #2563eb, #082f49)',
   nzbget: 'linear-gradient(160deg, #16a34a, #052e16)',
@@ -34,7 +35,9 @@ export async function renderDownloadClient(root, ctx) {
 }
 
 function notConfigured(svc) {
-  const detail = svc.type === 'deluge'
+  const detail = svc.type === 'flood'
+    ? 'Add the Flood URL plus your Flood username and password in Settings.'
+    : svc.type === 'deluge'
     ? 'Add the Deluge Web URL and password in Settings.'
     : svc.type === 'nzbget'
       ? 'Add the NZBGet URL plus ControlUsername and ControlPassword in Settings.'
@@ -78,7 +81,7 @@ function statsHeader(adapter, session = {}, items = []) {
   ));
 }
 
-function statCard(label, value, cls) {
+export function statCard(label, value, cls) {
   const color = cls === 'ok' ? 'var(--green)' : cls === 'warn' ? 'var(--amber)' : cls === 'info' ? 'var(--blue)' : '';
   return h('div', { class: 'hex-cell hex-static' }, h('div', { class: 'hex-border' }), h('div', { class: 'hex-face' }, h('div', { class: 'hex-inner' },
     h('div', { class: 'stat' }, h('span', { class: 'stat-value', style: color ? { color } : {} }, String(value)), h('span', { class: 'stat-label' }, label)),

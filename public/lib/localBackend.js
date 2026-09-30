@@ -15,6 +15,7 @@
 // native-free preserves cookie sharing for server mode; only local-mode direct
 // service calls opt into native HTTP here.
 import { isLocalMode, getConnections, buildDirectRequestCandidates } from './connections.js';
+import { hasRequiredCredentials } from './serviceKinds.js';
 
 let _origFetch = null;
 const activeBases = new Map();
@@ -61,6 +62,7 @@ async function directFetch(url, opts = {}) {
 }
 const directTransmissionSessions = new Map();
 const directDelugeSessions = new Map();
+const directFloodSessions = new Map();
 const directSessionKey = (conn, baseUrl) => `${conn.key}@${baseUrl}`;
 
 async function directDelugeLogin(conn, request) {
@@ -74,6 +76,20 @@ async function directDelugeLogin(conn, request) {
   if (!response.ok || data?.error || data?.result !== true) throw new Error(data?.error?.message || 'Deluge login failed (check password)');
   const setCookie = response.headers.get('set-cookie') || '';
   const match = /(?:^|[;,]\s*)_session_id=([^;,]+)/i.exec(setCookie);
+  return match ? match[1] : '';
+}
+
+async function directFloodLogin(conn, request) {
+  const headers = { ...request.headers, 'content-type': 'application/json', accept: 'application/json' };
+  delete headers.Cookie;
+  const response = await directFetch(`${request.baseUrl}/api/auth/authenticate`, {
+    method: 'POST', headers, credentials: 'include',
+    body: JSON.stringify({ username: conn.username || '', password: conn.password || '' }),
+  });
+  if (response.status === 401) throw new Error('Flood login failed (check username and password)');
+  if (!response.ok) throw new Error(`Flood login failed (HTTP ${response.status})`);
+  const match = /(?:^|[;,]\s*)jwt=([^;,]+)/i.exec(response.headers.get('set-cookie') || '');
+  // Browser local mode can't read Set-Cookie; the cookie jar holds it instead.
   return match ? match[1] : '';
 }
 
@@ -112,6 +128,21 @@ async function directServiceFetch(conn, request, opts = {}) {
     }
     return response;
   }
+  if (conn.type === 'flood') {
+    const key = directSessionKey(conn, request.baseUrl);
+    const run = (value) => {
+      const headers = { ...(opts.headers || {}) };
+      if (value && nativeHttp()) headers.Cookie = `jwt=${value}`;
+      return directFetch(request.url, { ...opts, headers, credentials: 'include' });
+    };
+    if (!directFloodSessions.has(key)) directFloodSessions.set(key, await directFloodLogin(conn, request));
+    let response = await run(directFloodSessions.get(key));
+    if (response.status === 401) {
+      directFloodSessions.set(key, await directFloodLogin(conn, request));
+      response = await run(directFloodSessions.get(key));
+    }
+    return response;
+  }
   return directFetch(request.url, opts);
 }
 
@@ -132,7 +163,7 @@ export function synthConfig(connections) {
       label: c.label || key,
       type: c.type,
       hasCloudflareAccess: !!(c.cfClientId && c.cfClientSecret),
-      configured: !!c.baseUrl && (c.type === 'transmission' || (c.type === 'deluge' ? !!c.password : c.type === 'nzbget' ? !!(c.username && c.password) : !!c.apiKey)),
+      configured: !!c.baseUrl && hasRequiredCredentials(c.type, c),
       sample: false,
       embed: false,
       embedUrl: undefined,
@@ -172,6 +203,11 @@ export function statusPath(type) {
     case 'bazarr': return 'api/system/status';
     case 'qbittorrent': return 'api/v2/app/version';
     case 'jellyfin': case 'emby': return 'System/Info';
+    case 'flood': return 'api/client/connection-test';
+    case 'audiobookshelf': return 'status';
+    case 'autobrr': return 'api/config';
+    case 'maintainerr': return 'api/app/status';
+    case 'tdarr': return 'api/v2/status';
     case 'transmission': return 'transmission/rpc';
     case 'deluge': return 'json';
     case 'nzbget': return 'jsonrpc';
@@ -204,10 +240,12 @@ async function pingConnection(conn) {
     let data; let version; let rpcError;
     try {
       data = await r.clone().json();
-      version = data && (data.version || data.arguments?.version || (conn.type === 'nzbget' ? data.result : undefined) || data.data?.version);
+      if (typeof data === 'string') { try { data = JSON.parse(data); } catch { /* plain string */ } }
+      version = data && (data.serverVersion || data.version || data.arguments?.version || (conn.type === 'nzbget' ? data.result : undefined) || data.data?.version);
       if (conn.type === 'transmission' && data.result !== 'success') rpcError = data.result || 'Transmission RPC error';
       if (conn.type === 'deluge' && (data.error || data.result !== true)) rpcError = data.error?.message || 'Deluge Web is not connected to a daemon';
       if (conn.type === 'nzbget' && data.error) rpcError = data.error.message || 'NZBGet RPC error';
+      if (conn.type === 'flood' && data.isConnected !== true) rpcError = 'Flood is not connected to its torrent client';
     } catch { /* non-json */ }
     const ok = r.ok && !rpcError;
     const error = ok ? undefined : (r.status === 401 || r.status === 403) ? 'Auth / access denied' : rpcError || `HTTP ${r.status}`;

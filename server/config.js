@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { MOCK_PORTS } from './mock/mockServices.js';
 import { normalizeCustomHeaders, hasCustomHeaders } from '../public/lib/customHeaders.js';
+import { credentialRequirement, hasRequiredCredentials, usesLoginCredentials } from '../public/lib/serviceKinds.js';
 
 const fsp = fs.promises;
 
@@ -31,7 +32,7 @@ export function loadDotEnv() {
   }
 }
 
-const SERVICE_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'jellyfin', 'emby', 'indexer', 'plex'];
+const SERVICE_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex'];
 export const ALLOWED_SERVICE_TYPES = SERVICE_TYPES;
 export const CONFIG_PATH = path.join(ROOT, 'config.json');
 
@@ -202,6 +203,7 @@ export function buildServiceUpdate(key, service, prev = {}, { isHttpUrl = defaul
   if (clean.type === 'deluge' && !clean.password) return { error: 'Deluge Web password is required' };
   if (clean.type === 'nzbget' && (!clean.username || !clean.password)) return { error: 'NZBGet ControlUsername and ControlPassword are required' };
   if (clean.type === 'transmission' && (!!clean.username !== !!clean.password)) return { error: 'Enter both Transmission username and password, or leave both blank' };
+  if (clean.type === 'flood' && (!clean.username || !clean.password)) return { error: 'Flood username and password are required' };
 
   return { clean };
 }
@@ -270,6 +272,12 @@ function buildMockConfig() {
       transmission: mkLogin('Transmission', 'transmission', MOCK_PORTS.transmission, 'admin', 'transmission'),
       deluge: mkLogin('Deluge', 'deluge', MOCK_PORTS.deluge, '', 'deluge'),
       nzbget: mkLogin('NZBGet', 'nzbget', MOCK_PORTS.nzbget, 'nzbget', 'nzbget'),
+      flood: mkLogin('Flood', 'flood', MOCK_PORTS.flood, 'flood', 'flood'),
+      audiobookshelf: mk('audiobookshelf', 'Audiobookshelf', 'audiobookshelf', MOCK_PORTS.audiobookshelf),
+      autobrr: mk('autobrr', 'Autobrr', 'autobrr', MOCK_PORTS.autobrr),
+      // Maintainerr has no API auth, so no key is configured.
+      maintainerr: { label: 'Maintainerr', type: 'maintainerr', enabled: true, baseUrl: `http://127.0.0.1:${MOCK_PORTS.maintainerr}`, cloudflareAccess: { clientId: 'mock.access', clientSecret: 'mock-secret' } },
+      tdarr: mk('tdarr', 'Tdarr', 'tdarr', MOCK_PORTS.tdarr),
       jellyfin: mk('jellyfin', 'Jellyfin', 'jellyfin', MOCK_PORTS.jellyfin),
       emby: mk('emby', 'Emby', 'emby', MOCK_PORTS.emby),
       // Public Usenet indexer (e.g. NZBGeek) — Newznab-compatible API, no custom headers.
@@ -335,9 +343,9 @@ export function isInsecureExposure(cfg, anyAuth) {
 
 export function serviceConfigured(svc = {}) {
   if (!svc.baseUrl) return false;
-  if (svc.type === 'transmission') return true; // Basic auth is optional.
-  if (svc.type === 'deluge') return !!svc.password;
-  if (svc.type === 'nzbget') return !!(svc.username && svc.password);
+  const requirement = credentialRequirement(svc.type);
+  if (requirement !== 'api-key') return hasRequiredCredentials(svc.type, svc);
+  // qBittorrent may use a WebUI login instead of an API key.
   return !!svc.apiKey || !!(svc.username && svc.password);
 }
 
@@ -372,7 +380,8 @@ export function publicConfig(cfg) {
 // remain secret-free for every normal page/config request.
 const LOCAL_FALLBACK_TYPES = new Set([
   'sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'prowlarr',
-  'bazarr', 'sabnzbd', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'jellyfin', 'emby', 'tautulli', 'indexer',
+  'bazarr', 'sabnzbd', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'tautulli', 'indexer',
+  'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr',
 ]);
 
 function fallbackHttpUrl(value) {
@@ -409,8 +418,9 @@ export function localFallbackConfig(cfg, { now = Date.now() } = {}) {
     if (svc.type === 'deluge' && !password) { reason('Deluge Web password is required for local mode'); continue; }
     if (svc.type === 'nzbget' && (!username || !password)) { reason('NZBGet username and password are required for local mode'); continue; }
     if (svc.type === 'transmission' && (!!username !== !!password)) { reason('Transmission Basic auth credentials are incomplete'); continue; }
-    const loginType = ['transmission', 'deluge', 'nzbget'].includes(svc.type);
-    if (!loginType && !apiKey) { reason('API key is required for local mode'); continue; }
+    if (svc.type === 'flood' && (!username || !password)) { reason('Flood username and password are required for local mode'); continue; }
+    const loginType = usesLoginCredentials(svc.type);
+    if (!loginType && !hasRequiredCredentials(svc.type, { apiKey })) { reason('API key is required for local mode'); continue; }
 
     const cf = svc.cloudflareAccess || {};
     const cfClientId = String(cf.clientId || '').trim();

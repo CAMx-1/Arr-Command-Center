@@ -93,6 +93,41 @@
       "username": "YOUR_NZBGET_CONTROL_USERNAME",
       "password": "YOUR_NZBGET_CONTROL_PASSWORD"
     },
+    "flood": {
+      "label": "Flood",
+      "type": "flood",
+      "enabled": true,
+      "baseUrl": "http://flood:3000",
+      "username": "YOUR_FLOOD_USERNAME",
+      "password": "YOUR_FLOOD_PASSWORD"
+    },
+    "audiobookshelf": {
+      "label": "Audiobookshelf",
+      "type": "audiobookshelf",
+      "enabled": true,
+      "baseUrl": "http://audiobookshelf:13378",
+      "apiKey": "YOUR_AUDIOBOOKSHELF_API_KEY"
+    },
+    "autobrr": {
+      "label": "Autobrr",
+      "type": "autobrr",
+      "enabled": true,
+      "baseUrl": "http://autobrr:7474",
+      "apiKey": "YOUR_AUTOBRR_API_KEY"
+    },
+    "maintainerr": {
+      "label": "Maintainerr",
+      "type": "maintainerr",
+      "enabled": true,
+      "baseUrl": "http://maintainerr:6246"
+    },
+    "tdarr": {
+      "label": "Tdarr",
+      "type": "tdarr",
+      "enabled": true,
+      "baseUrl": "http://tdarr:8265",
+      "apiKey": "OPTIONAL_TDARR_API_KEY"
+    },
     "jellyfin": {
       "label": "Jellyfin",
       "type": "jellyfin",

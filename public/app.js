@@ -24,6 +24,7 @@ import { renderDownloadClient } from './views/downloadClient.js';
 import { renderIndexer } from './views/indexer.js';
 import { renderPlex } from './views/plex.js';
 import { renderMediaServer } from './views/mediaServer.js';
+import { renderAutobrr, renderMaintainerr, renderTdarr, renderAudiobookshelf } from './views/extraServices.js';
 import { renderEmbed } from './views/embed.js';
 import { renderSettings } from './views/settings.js';
 import { openDetailModal } from './views/detail.js';
@@ -55,6 +56,11 @@ export const SERVICE_META = {
   transmission: { logo: '/icons/transmission.svg', emoji: '🧲', renderer: renderDownloadClient },
   deluge: { logo: '/icons/deluge.svg', emoji: '🧲', renderer: renderDownloadClient },
   nzbget: { logo: '/icons/nzbget.svg', emoji: '⬇', renderer: renderDownloadClient },
+  flood: { logo: '/icons/flood.svg', emoji: '🌊', renderer: renderDownloadClient },
+  autobrr: { logo: '/icons/autobrr.svg', emoji: '📡', renderer: renderAutobrr },
+  maintainerr: { logo: '/icons/maintainerr.svg', emoji: '🧹', renderer: renderMaintainerr },
+  tdarr: { logo: '/icons/tdarr.svg', emoji: '🎞', renderer: renderTdarr },
+  audiobookshelf: { logo: '/icons/audiobookshelf.svg', emoji: '🎧', renderer: renderAudiobookshelf },
   indexer: { logo: '/icons/indexer.svg', emoji: '🔍', renderer: renderIndexer },
   plex: { logo: '/icons/plex.svg', emoji: '▶', renderer: renderPlex },
   jellyfin: { logo: '/icons/jellyfin.svg', emoji: '▶', renderer: renderMediaServer },
@@ -422,6 +428,11 @@ const QUICK_ACTIONS = {
   transmission: [['active', 'Downloading'], ['completed', 'Completed']],
   deluge: [['active', 'Downloading'], ['completed', 'Completed']],
   nzbget: [['queue', 'Queue'], ['history', 'History']],
+  flood: [['active', 'Downloading'], ['completed', 'Completed']],
+  autobrr: [['releases', 'Releases'], ['filters', 'Filters'], ['irc', 'IRC']],
+  maintainerr: [['leaving', 'Leaving soon'], ['collections', 'Collections']],
+  tdarr: [['workers', 'Workers'], ['queue', 'Queue'], ['errors', 'Errors']],
+  audiobookshelf: [['listening', 'Listening'], ['recent', 'Recently added'], ['libraries', 'Libraries']],
   overseerr: [['pending', 'Pending'], ['all', 'All Requests'], ['issues', 'Issues'], ['recent', 'Recently Added'], ['discover', 'Discover']],
   bazarr: [['series', 'Series'], ['movies', 'Movies'], ['wanted', 'Wanted'], ['history', 'History'], ['blacklist', 'Blacklist'], ['providers', 'Providers'], ['system', 'System']],
   prowlarr: [['indexers', 'Indexers'], ['search', 'Search'], ['history', 'History']],

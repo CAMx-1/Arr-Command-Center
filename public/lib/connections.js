@@ -29,9 +29,14 @@ export const LOCAL_SERVICE_DEFS = [
   { type: 'transmission', name: 'Transmission', urlPlaceholder: 'http://transmission.local:9091', credentialMode: 'optional-basic' },
   { type: 'deluge', name: 'Deluge', urlPlaceholder: 'http://deluge.local:8112', credentialMode: 'password' },
   { type: 'nzbget', name: 'NZBGet', urlPlaceholder: 'http://nzbget.local:6789', credentialMode: 'basic' },
+  { type: 'flood', name: 'Flood', urlPlaceholder: 'http://flood.local:3000', credentialMode: 'basic' },
   { type: 'jellyfin', name: 'Jellyfin', urlPlaceholder: 'http://jellyfin.local:8096' },
   { type: 'emby', name: 'Emby', urlPlaceholder: 'http://emby.local:8096' },
   { type: 'tautulli', name: 'Tautulli', urlPlaceholder: 'https://tautulli.example.com' },
+  { type: 'audiobookshelf', name: 'Audiobookshelf', urlPlaceholder: 'http://audiobookshelf.local:13378', keyHint: 'API key or user API token' },
+  { type: 'autobrr', name: 'Autobrr', urlPlaceholder: 'http://autobrr.local:7474', keyHint: 'Settings → API keys' },
+  { type: 'maintainerr', name: 'Maintainerr', urlPlaceholder: 'http://maintainerr.local:6246', keyMode: 'none' },
+  { type: 'tdarr', name: 'Tdarr', urlPlaceholder: 'http://tdarr.local:8265', keyMode: 'optional', keyHint: 'Only if Tdarr auth is enabled' },
   { type: 'indexer', name: 'Indexer (Newznab)', urlPlaceholder: 'https://indexer.example.com' },
 ];
 export const LOCAL_SUPPORTED = LOCAL_SERVICE_DEFS.map((d) => d.type);
@@ -109,6 +114,14 @@ export function authFor(conn, { baseUrl } = {}) {
     // auth.login + _session_id are handled by localBackend's direct transport.
   } else if (type === 'jellyfin' || type === 'emby') {
     if (conn.apiKey) generated['X-Emby-Token'] = conn.apiKey;
+  } else if (type === 'flood' || type === 'maintainerr') {
+    // Flood's jwt login is handled by localBackend; Maintainerr has no API auth.
+  } else if (type === 'autobrr') {
+    if (conn.apiKey) generated['X-API-Token'] = conn.apiKey;
+  } else if (type === 'audiobookshelf') {
+    if (conn.apiKey) generated.Authorization = `Bearer ${conn.apiKey}`;
+  } else if (type === 'tdarr') {
+    if (conn.apiKey) generated['x-api-key'] = conn.apiKey;
   } else if (conn && conn.apiKey) generated['X-Api-Key'] = conn.apiKey;
   const cf = {};
   if (conn && conn.cfClientId && conn.cfClientSecret) { cf['CF-Access-Client-Id'] = conn.cfClientId; cf['CF-Access-Client-Secret'] = conn.cfClientSecret; }

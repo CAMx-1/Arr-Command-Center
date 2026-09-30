@@ -1,4 +1,5 @@
 import { replaceConnections, replaceConnectionsSecure } from './connections.js';
+import { hasRequiredCredentials, usesLoginCredentials } from './serviceKinds.js';
 import { normalizeCustomHeaders } from './customHeaders.js';
 // Server-to-local fallback snapshot helpers. The credential-bearing server
 // response is strictly validated before it can replace local direct-mode state.
@@ -11,7 +12,8 @@ export const MODE_KEY = 'acc:app-mode';
 
 const SUPPORTED_TYPES = new Set([
   'sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'prowlarr',
-  'bazarr', 'sabnzbd', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'jellyfin', 'emby', 'tautulli', 'indexer',
+  'bazarr', 'sabnzbd', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'tautulli', 'indexer',
+  'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr',
 ]);
 const SAFE_PREF_KEYS = new Set([
   'theme', 'accent', 'acc:density', 'view-mode', 'svc-hidden', 'svc-order',
@@ -58,8 +60,9 @@ export function normalizeLocalFallbackExport(payload) {
     if (raw.type === 'deluge' && !password) throw new Error(`Local fallback service “${key}” is missing its Deluge password`);
     if (raw.type === 'nzbget' && (!username || !password)) throw new Error(`Local fallback service “${key}” is missing NZBGet credentials`);
     if (raw.type === 'transmission' && (!!username !== !!password)) throw new Error(`Local fallback service “${key}” has incomplete Transmission credentials`);
-    const loginType = ['transmission', 'deluge', 'nzbget'].includes(raw.type);
-    if (!loginType && !apiKey) throw new Error(`Local fallback service “${key}” is missing an API key`);
+    if (raw.type === 'flood' && (!username || !password)) throw new Error(`Local fallback service “${key}” is missing Flood credentials`);
+    const loginType = usesLoginCredentials(raw.type);
+    if (!loginType && !hasRequiredCredentials(raw.type, { apiKey })) throw new Error(`Local fallback service “${key}” is missing an API key`);
     const cfClientId = cleanString(raw.cfClientId, 1000);
     const cfClientSecret = cleanString(raw.cfClientSecret, 1000);
     if (!!cfClientId !== !!cfClientSecret) throw new Error(`Local fallback service “${key}” has incomplete Cloudflare credentials`);

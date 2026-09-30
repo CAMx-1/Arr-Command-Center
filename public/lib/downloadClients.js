@@ -173,9 +173,75 @@ function nzbgetAdapter(api, key) {
   };
 }
 
+// Flood status is an array of flags (downloading, seeding, checking, complete,
+// stopped, active, inactive, warning, error, moving); "stopped" is paused.
+export function floodState(status = [], message = '') {
+  const s = new Set((Array.isArray(status) ? status : []).map((x) => String(x).toLowerCase()));
+  if (s.has('error')) return rpcState('', { error: message || 'Error' });
+  if (s.has('checking')) return rpcState('checking');
+  if (s.has('moving')) return rpcState('moving');
+  if (s.has('stopped')) return rpcState('stopped');
+  if (s.has('seeding')) return rpcState('seeding');
+  if (s.has('complete')) return rpcState('complete');
+  if (s.has('downloading')) return rpcState('downloading', { stalled: s.has('inactive') });
+  return rpcState('queued');
+}
+
+export function normalizeFloodTorrent(hash, raw = {}) {
+  const progress = clamp(raw.percentComplete, 0, 100) / 100;
+  const stateInfo = floodState(raw.status, raw.message);
+  const size = Number(raw.sizeBytes) || 0;
+  const done = Number(raw.bytesDone) || size * progress;
+  const eta = Number(raw.eta);
+  return {
+    id: String(raw.hash || hash), name: raw.name || 'Unnamed torrent', ...stateInfo, progress,
+    size, sizeDone: done, sizeLeft: Math.max(0, size - done),
+    dlSpeed: Number(raw.downRate) || 0, upSpeed: Number(raw.upRate) || 0,
+    eta: eta > 0 ? eta : 0, category: (raw.tags || [])[0] || '',
+    seeds: Number(raw.seedsConnected) || 0, leechs: Number(raw.peersConnected) || 0, ratio: Number(raw.ratio) || 0,
+    failMessage: stateInfo.state === 'error' ? (raw.message || 'Error') : '',
+    completed: progress >= 1 || (raw.status || []).includes('complete'),
+    canPause: stateInfo.state !== 'paused', canResume: stateInfo.state === 'paused', history: false,
+  };
+}
+
+function floodAdapter(api, key) {
+  const call = (path, options) => api.proxy(key, `api/${path}`, options);
+  const post = (path, body) => call(path, { method: 'POST', body });
+  const allHashes = async () => Object.keys((await call('torrents'))?.torrents || {});
+  return {
+    type: 'flood', protocol: 'torrent', tabs: [{ id: 'active', label: 'Downloading' }, { id: 'completed', label: 'Completed' }],
+    capabilities: { upload: true, pauseItem: true, deleteData: true, speed: true },
+    async load(tab) {
+      const [list, settings] = await Promise.all([call('torrents'), call('client/settings').catch(() => ({}))]);
+      const all = Object.entries(list?.torrents || {}).map(([hash, t]) => normalizeFloodTorrent(hash, t));
+      const items = tab === 'completed' ? all.filter((item) => item.completed) : all.filter((item) => !item.completed);
+      return { items, all, session: {
+        paused: all.length > 0 && all.every((item) => item.state === 'paused'),
+        dlSpeed: all.reduce((n, item) => n + item.dlSpeed, 0),
+        upSpeed: all.reduce((n, item) => n + item.upSpeed, 0),
+        activeCount: all.filter((item) => item.dlSpeed > 0 || item.upSpeed > 0).length,
+        // Flood throttles are bytes/second; 0 = unlimited.
+        dlLimit: Number(settings?.throttleGlobalDownSpeed) || 0,
+        upLimit: Number(settings?.throttleGlobalUpSpeed) || 0,
+      } };
+    },
+    pauseAll: async () => { const hashes = await allHashes(); if (hashes.length) await post('torrents/stop', { hashes }); },
+    resumeAll: async () => { const hashes = await allHashes(); if (hashes.length) await post('torrents/start', { hashes }); },
+    pauseItem: (item) => post('torrents/stop', { hashes: [item.id] }),
+    resumeItem: (item) => post('torrents/start', { hashes: [item.id] }),
+    remove: (item, { deleteData = false } = {}) => post('torrents/delete', { hashes: [item.id], deleteData: !!deleteData }),
+    setSpeed: ({ downloadKiB = 0, uploadKiB = 0 }) => call('client/settings', { method: 'PATCH', body: {
+      throttleGlobalDownSpeed: Math.max(0, Math.round(Number(downloadKiB) || 0)) * 1024,
+      throttleGlobalUpSpeed: Math.max(0, Math.round(Number(uploadKiB) || 0)) * 1024,
+    } }),
+  };
+}
+
 export function downloadClientFor(api, service) {
   if (service?.type === 'transmission') return transmissionAdapter(api, service.key);
   if (service?.type === 'deluge') return delugeAdapter(api, service.key);
   if (service?.type === 'nzbget') return nzbgetAdapter(api, service.key);
+  if (service?.type === 'flood') return floodAdapter(api, service.key);
   throw new Error(`Unsupported download client: ${service?.type || 'unknown'}`);
 }

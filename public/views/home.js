@@ -10,6 +10,7 @@ import { persistentSWR } from '../lib/cache.js';
 import { seerrRequestBadge } from '../lib/seerrStatus.js';
 import { createBookServiceClient } from '../lib/bookServices.js';
 import { downloadClientFor } from '../lib/downloadClients.js';
+import { autobrrClient, maintainerrClient, tdarrClient, absClient, normalizeTdarrWorkers } from '../lib/extraServices.js';
 import { mediaServerFor } from '../lib/mediaServers.js';
 
 // ---- Activity source definitions ----
@@ -957,7 +958,24 @@ async function hydrateCardStats(svc, ctx) {
       const active = (Array.isArray(torrents) ? torrents : []).filter((t) => (t.dlspeed || 0) > 0 || (t.upspeed || 0) > 0).length;
       const dl = Number(info.dl_info_speed) || 0;
       mount(el, stat(active, 'Active'), stat(dl > 0 ? `${fmtBytes(dl)}/s` : '0', 'Down'));
-    } else if (['transmission', 'deluge', 'nzbget'].includes(svc.type)) {
+    } else if (svc.type === 'autobrr') {
+      const stats = await autobrrClient(api, svc.key).stats();
+      mount(el, stat(stats.push_approved_count ?? 0, 'Pushed'), stat(stats.push_error_count ?? 0, 'Errors'));
+    } else if (svc.type === 'maintainerr') {
+      const client = maintainerrClient(api, svc.key);
+      const collections = (await client.collections()).filter((c) => c.isActive);
+      const pages = await Promise.all(collections.filter((c) => c.deleteAfterDays != null).map((c) => client.media(c).then((r) => r.items).catch(() => [])));
+      const soon = pages.flat().filter((i) => i.daysLeft != null && i.daysLeft <= 7).length;
+      mount(el, stat(pages.flat().length, 'Scheduled'), stat(soon, 'This week'));
+    } else if (svc.type === 'tdarr') {
+      const client = tdarrClient(api, svc.key);
+      const [stats, nodes] = await Promise.all([client.stats().catch(() => null), client.nodes()]);
+      mount(el, stat(normalizeTdarrWorkers(nodes).length, 'Workers'), stat(stats ? fmtBytes(stats.spaceSaved) : '—', 'Saved'));
+    } else if (svc.type === 'audiobookshelf') {
+      const client = absClient(api, svc.key);
+      const [libraries, sessions] = await Promise.all([client.libraries(), client.sessions().catch(() => null)]);
+      mount(el, stat(sessions ? sessions.length : '—', 'Listening'), stat(libraries.length, 'Libraries'));
+    } else if (['transmission', 'deluge', 'nzbget', 'flood'].includes(svc.type)) {
       const adapter = downloadClientFor(api, svc);
       const data = await adapter.load(svc.type === 'nzbget' ? 'queue' : 'active');
       const dl = Number(data.session?.dlSpeed) || 0;

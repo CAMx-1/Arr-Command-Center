@@ -68,6 +68,20 @@ function authFor(svc) {
     // cookie is managed by the dedicated forwarder below.
   } else if (type === 'jellyfin' || type === 'emby') {
     if (svc.apiKey) headers['X-Emby-Token'] = svc.apiKey;
+  } else if (type === 'flood') {
+    // Flood authenticates with a login that sets a `jwt` cookie; managed by
+    // forwardFlood below.
+  } else if (type === 'autobrr') {
+    if (svc.apiKey) headers['X-API-Token'] = svc.apiKey;
+  } else if (type === 'audiobookshelf') {
+    // User API token or (v2.26+) API key, both sent as a Bearer token.
+    if (svc.apiKey) headers.Authorization = `Bearer ${svc.apiKey}`;
+  } else if (type === 'tdarr') {
+    // Only required when Tdarr server auth is enabled.
+    if (svc.apiKey) headers['x-api-key'] = svc.apiKey;
+  } else if (type === 'maintainerr') {
+    // Maintainerr has no API authentication. Nothing to inject; access control
+    // is ACC's own auth (and Cloudflare Access, if configured).
   } else {
     // Sonarr / Radarr / Overseerr use the X-Api-Key header.
     if (svc.apiKey) headers['X-Api-Key'] = svc.apiKey;
@@ -345,6 +359,125 @@ async function forwardDeluge(svc, serviceKey, subPath, req, res) {
   }
 }
 
+
+// ---- Flood login cookie ----------------------------------------------------
+// POST /api/auth/authenticate {username,password} sets a `jwt` cookie (7 days).
+// Cached per ROUTE service key; a 401 triggers one re-login + retry.
+const floodSession = new Map();
+const floodPending = new Map();
+export function _resetFloodSessions() { floodSession.clear(); floodPending.clear(); }
+export function _floodSessionSnapshot() { return new Map(floodSession); }
+export function _setFloodSession(key, cookie) { floodSession.set(key, cookie); }
+
+async function floodLogin(svc) {
+  const target = new URL(`${trimSlash(svc.baseUrl)}/api/auth/authenticate`);
+  const headers = combinedHeaders(svc, { 'content-type': 'application/json', accept: 'application/json' });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  let response;
+  try {
+    response = await fetch(target, {
+      method: 'POST', headers, redirect: 'manual', signal: controller.signal,
+      body: JSON.stringify({ username: svc.username || '', password: svc.password || '' }),
+    });
+  } finally { clearTimeout(timer); }
+  if (response.status === 401) throw new Error('Flood login failed (check username and password)');
+  if (!response.ok) throw new Error(`Flood login failed (HTTP ${response.status})`);
+  const match = /(?:^|[;,]\s*)jwt=([^;,\x00-\x1f]+)/i.exec(response.headers.get('set-cookie') || '');
+  if (!match) throw new Error('Flood login did not return a session cookie');
+  return match[1];
+}
+
+async function ensureFloodSession(svc, serviceKey, force = false, login = floodLogin) {
+  if (!force && floodSession.has(serviceKey)) return floodSession.get(serviceKey);
+  if (floodPending.has(serviceKey)) return floodPending.get(serviceKey);
+  const pending = login(svc)
+    .then((cookie) => { floodSession.set(serviceKey, cookie); floodPending.delete(serviceKey); return cookie; })
+    .catch((error) => { floodPending.delete(serviceKey); throw error; });
+  floodPending.set(serviceKey, pending);
+  return pending;
+}
+
+// Low-level authed Flood fetch with a single re-login on 401.
+async function floodFetch(svc, serviceKey, target, init, timeoutMs = 120000) {
+  const controller = init.signal ? null : new AbortController();
+  const run = async (cookie) => {
+    const headers = { ...init.headers, Cookie: `jwt=${cookie}` };
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try { return await fetch(target, { ...init, headers, redirect: 'manual', signal: init.signal || controller.signal }); }
+    finally { if (timer) clearTimeout(timer); }
+  };
+  let upstream = await run(await ensureFloodSession(svc, serviceKey));
+  if (upstream.status === 401) {
+    try { await upstream.arrayBuffer(); } catch { /* drain */ }
+    upstream = await run(await ensureFloodSession(svc, serviceKey, true));
+  }
+  return upstream;
+}
+
+async function forwardFlood(svc, serviceKey, subPath, req, res) {
+  const incomingQs = (req.originalUrl.split('?')[1]) || '';
+  const target = buildTargetUrl(svc, subPath, incomingQs);
+  const method = req.method.toUpperCase();
+  const controller = new AbortController();
+  const headers = combinedHeaders(svc, {});
+  if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
+  if (req.headers.accept) headers.accept = req.headers.accept;
+  const init = { method, headers, signal: controller.signal };
+  if (!['GET', 'HEAD'].includes(method) && req.body && req.body.length) init.body = req.body;
+  const timer = setTimeout(() => controller.abort(), 120000);
+  try {
+    const upstream = await floodFetch(svc, serviceKey, target, init);
+    clearTimeout(timer);
+    res.status(upstream.status);
+    const ct = upstream.headers.get('content-type');
+    if (ct) res.set('content-type', ct);
+    await pipeUpstream(upstream, res, controller);
+  } catch (err) {
+    clearTimeout(timer);
+    if (res.headersSent) { if (!res.writableEnded) res.destroy(err); return; }
+    const reason = classifyUpstreamError(err);
+    res.status(err.name === 'AbortError' ? 504 : 502).json({ error: reason, detail: reason, service: svc.label });
+  }
+}
+
+async function pingFlood(svc, serviceKey, started) {
+  try {
+    const target = new URL(`${trimSlash(svc.baseUrl)}/api/client/connection-test`);
+    const upstream = await floodFetch(svc, serviceKey, target, { method: 'GET', headers: combinedHeaders(svc, { accept: 'application/json' }) }, 8000);
+    const data = await upstream.json().catch(() => null);
+    const ok = upstream.ok && data?.isConnected === true;
+    return {
+      ok, status: upstream.status, ms: Date.now() - started,
+      error: ok ? undefined : upstream.status === 401 ? 'Auth / access denied' : upstream.ok ? 'Flood is not connected to its torrent client' : `HTTP ${upstream.status}`,
+    };
+  } catch (error) {
+    return { ok: false, status: 0, ms: Date.now() - started, error: classifyUpstreamError(error) };
+  }
+}
+
+// Tdarr: GET /api/v2/status (v2.25+), falling back to the legacy
+// POST /api/v2/is-server-alive on older servers.
+async function pingTdarr(svc, started) {
+  const { headers } = authFor(svc);
+  const base = trimSlash(svc.baseUrl);
+  const call = async (path, init) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try { return await fetch(`${base}/${path}`, { ...init, headers: { accept: 'application/json', ...headers, ...(init.headers || {}) }, signal: controller.signal }); }
+    finally { clearTimeout(timer); }
+  };
+  try {
+    let upstream = await call('api/v2/status', { method: 'GET' });
+    if (upstream.status === 404) upstream = await call('api/v2/is-server-alive', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const data = await upstream.json().catch(() => null);
+    const error = upstream.ok ? undefined : (upstream.status === 401 || upstream.status === 403) ? 'Auth / access denied (set the Tdarr API key)' : `HTTP ${upstream.status}`;
+    return { ok: upstream.ok, status: upstream.status, ms: Date.now() - started, version: data?.version || undefined, error };
+  } catch (error) {
+    return { ok: false, status: 0, ms: Date.now() - started, error: classifyUpstreamError(error) };
+  }
+}
+
 // Build the upstream URL for a service + sub-path + incoming query string.
 // IMPORTANT: we preserve the client's original query string verbatim rather than
 // round-tripping it through URLSearchParams. URLSearchParams re-encodes spaces as
@@ -372,6 +505,7 @@ async function forward(svc, serviceKey, subPath, req, res) {
   if (svc.type === 'qbittorrent') return forwardQbit(svc, serviceKey, subPath, req, res);
   if (svc.type === 'transmission') return forwardTransmission(svc, serviceKey, subPath, req, res);
   if (svc.type === 'deluge') return forwardDeluge(svc, serviceKey, subPath, req, res);
+  if (svc.type === 'flood') return forwardFlood(svc, serviceKey, subPath, req, res);
   const incomingQs = (req.originalUrl.split('?')[1]) || '';
   const target = buildTargetUrl(svc, subPath, incomingQs);
   const { headers: authHeaders } = authFor(svc);
@@ -436,6 +570,9 @@ const HEALTH_PATH = {
   qbittorrent: 'api/v2/app/version',
   jellyfin: 'System/Info',
   emby: 'System/Info',
+  audiobookshelf: 'status',
+  autobrr: 'api/config',
+  maintainerr: 'api/app/status',
   indexer: 'api?t=caps&o=json',
 };
 
@@ -593,6 +730,8 @@ export async function pingService(svc, serviceKey) {
   if (svc.type === 'transmission') return pingTransmission(svc, key, started);
   if (svc.type === 'deluge') return pingDeluge(svc, key, started);
   if (svc.type === 'nzbget') return pingNzbget(svc, started);
+  if (svc.type === 'flood') return pingFlood(svc, key, started);
+  if (svc.type === 'tdarr') return pingTdarr(svc, started);
   try {
     const path = HEALTH_PATH[svc.type] || '';
     const [p, q] = path.split('?');
@@ -605,8 +744,10 @@ export async function pingService(svc, serviceKey) {
     const ms = Date.now() - started;
     let version;
     try {
-      const data = await upstream.json();
-      version = data.version || data.Version || data.settings?.version || data.data?.bazarr_version || undefined;
+      let data = await upstream.json();
+      // Maintainerr's /api/app/status returns a JSON-encoded string.
+      if (typeof data === 'string') { try { data = JSON.parse(data); } catch { /* plain string */ } }
+      version = data.version || data.Version || data.serverVersion || data.settings?.version || data.data?.bazarr_version || undefined;
     } catch { /* non-json */ }
     const error = upstream.ok ? undefined
       : (upstream.status === 401 || upstream.status === 403) ? 'Auth / access denied'

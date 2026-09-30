@@ -2,8 +2,8 @@
 
 A single, locally-hosted web dashboard to view and manage your whole media stack —
 **Sonarr**, **Radarr**, **Lidarr**, **Bindery** (with legacy **Readarr** fallback), **Overseerr/Seerr**, **SABnzbd**,
-**qBittorrent**, **Transmission**, **Deluge**, **NZBGet**, **Tautulli**, **Bazarr**, **Prowlarr**, **Plex**, **Jellyfin**, **Emby**, and any Newznab
-**indexer** — from one place.
+**qBittorrent**, **Transmission**, **Deluge**, **NZBGet**, **Flood**, **Tautulli**, **Bazarr**, **Prowlarr**, **Plex**, **Jellyfin**, **Emby**,
+**Audiobookshelf**, **Autobrr**, **Maintainerr**, **Tdarr**, and any Newznab **indexer** — from one place.
 
 Built as a self-hosted replacement for the now-discontinued **LunaSea** iOS app. Because
 it's a responsive web app, it works from your phone's browser (and you can "Add to Home
@@ -131,8 +131,8 @@ npm run demo
 
 Then open <http://localhost:7373>. This spins up a full set of **bundled mock services**
 (Sonarr, Radarr, Lidarr, Bindery, legacy Readarr, Overseerr, SABnzbd, qBittorrent,
-Transmission, Deluge, NZBGet, Jellyfin, Emby, Tautulli, Bazarr, and a
-Newznab indexer) with fake data so you can click around immediately. The mock services
+Transmission, Deluge, NZBGet, Flood, Jellyfin, Emby, Audiobookshelf, Tautulli, Bazarr,
+Autobrr, Maintainerr, Tdarr, and a Newznab indexer) with fake data so you can click around immediately. The mock services
 even *require* the injected API key and record the Cloudflare Access headers, proving the
 proxy works end-to-end.
 
@@ -167,8 +167,9 @@ Copy `config.example.json` → `config.json` and fill it in:
       "label": "Sonarr",
       "type": "sonarr",         // sonarr | radarr | lidarr | bindery | readarr |
                                 //   overseerr | sabnzbd | qbittorrent | transmission |
-                                //   deluge | nzbget | jellyfin | emby | tautulli |
-                                //   bazarr | prowlarr | indexer | plex
+                                //   deluge | nzbget | flood | jellyfin | emby |
+                                //   audiobookshelf | tautulli | bazarr | prowlarr |
+                                //   autobrr | maintainerr | tdarr | indexer | plex
       "enabled": true,
       "baseUrl": "https://sonarr.example.com",
       "apiKey": "YOUR_SONARR_API_KEY",
@@ -205,6 +206,11 @@ Where to find each **API key**:
 | Plex        | Signed in with your Plex account — no manual key needed |
 | Jellyfin    | Dashboard → API Keys |
 | Emby        | Dashboard → Advanced → Security → API Keys |
+| Flood       | Your Flood login username/password (ACC keeps the session server-side) |
+| Audiobookshelf | Settings → API Keys (v2.26+), or your user's API token. Live sessions need an admin key |
+| Autobrr     | Settings → API keys |
+| Maintainerr | No API key — Maintainerr has no API auth, so keep it on your LAN/VPN |
+| Tdarr       | Only if server auth is enabled: Tools → API Keys |
 
 ### Migrating Readarr to Bindery
 
@@ -232,7 +238,8 @@ Docker/secrets). See `.env.example`. Pattern:
 SONARR_BASE_URL, SONARR_API_KEY, SONARR_CF_CLIENT_ID, SONARR_CF_CLIENT_SECRET
 RADARR_...   LIDARR_...   BINDERY_...  READARR_...   OVERSEERR_...   SABNZBD_...
 TAUTULLI_... BAZARR_...   PROWLARR_...  QBITTORRENT_... TRANSMISSION_...
-DELUGE_...    NZBGET_...   JELLYFIN_... EMBY_... INDEXER_...
+DELUGE_...    NZBGET_...   FLOOD_...    JELLYFIN_... EMBY_...
+AUDIOBOOKSHELF_... AUTOBRR_... MAINTAINERR_... TDARR_... INDEXER_...
 ```
 
 Env values **override** the matching value in `config.json`.
@@ -374,10 +381,22 @@ internal traffic typically bypasses Cloudflare Access — in that case just omit
 - **qBittorrent** — live torrent list with state, ratio, speeds, and controls.
 - **Transmission & Deluge** — shared live torrent UI with downloading/completed views,
   global and per-item pause/resume, safe removal, ratio/speed/ETA details, and speed limits.
+- **Flood** — the shared torrent UI (downloading/completed, pause/resume all or per item,
+  removal with optional data delete, global speed limits). ACC signs in with your Flood
+  login and keeps the session cookie server-side.
 - **NZBGet** — shared Usenet queue/history UI with pause/resume, group/history removal,
   disk/remaining statistics, and absolute speed limits.
 - **Bazarr** — subtitle wanted/history management.
 - **Prowlarr** — indexer overview.
+- **Autobrr** — recent releases with push outcome (pushed/rejected/error) and reason,
+  announce/push stats, enable/disable filters, and IRC network + channel health.
+- **Maintainerr** — "Leaving soon" list of everything scheduled for deletion with days left
+  and space freed, a **Keep** action (adds an exclusion), collection activate/deactivate,
+  and "Run rules now".
+- **Tdarr** — files, transcodes, space saved and error counts, per-node status, live worker
+  progress (fps, ETA, size estimate), and the transcode queue/error tables (read-only).
+- **Audiobookshelf** — who's listening now (admin key), continue-listening progress,
+  recently added per library with covers, and library stats.
 - **Newznab indexer** — search a public/private Usenet indexer directly.
 
 **Appearance & UX**
