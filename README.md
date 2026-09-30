@@ -16,7 +16,11 @@ Access, and secrets never touch the browser.
 
 ## Watch the promo
 
-[![Watch the Arr Command Center promo video (34 s)](docs/promo-poster.jpg)](docs/promo.mp4)
+
+
+https://github.com/user-attachments/assets/7a740e3c-3042-4dfe-b002-9ec1d6c8a551
+
+
 
 *34-second tour: unified dashboard, Seerr requests, SABnzbd downloads, Tautulli streams,
 and the iOS app with local-only mode. Click the image to play.*
