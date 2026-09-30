@@ -14,6 +14,13 @@ token** headers (`CF-Access-Client-Id` / `CF-Access-Client-Secret`) and each ser
 key on every request. That means your services can stay locked down behind Cloudflare
 Access, and secrets never touch the browser.
 
+## Watch the promo
+
+[![Watch the Arr Command Center promo video (34 s)](docs/promo-poster.jpg)](docs/promo.mp4)
+
+*34-second tour: unified dashboard, Seerr requests, SABnzbd downloads, Tautulli streams,
+and the iOS app with local-only mode. Click the image to play.*
+
 ---
 
 ## Screenshots
