@@ -164,7 +164,7 @@ function resultRow(it, ctx) {
     actionGroup([
       (it.comments || it.details) ? { label: `\uD83D\uDCAC${it.commentsCount ? ` ${it.commentsCount}` : ''}`, title: 'Read comments on the indexer', onClick: () => openLink(it.comments || it.details) } : null,
       { label: 'Details', title: 'View details', onClick: () => openDetailsModal(it, ctx) },
-      { label: '\uFF0B Send to SAB', title: 'Send to SABnzbd', variant: 'primary', primary: true, disabled: !it.url, onClick: () => sendToSab(ctx, it) },
+      { label: '+ Send to SAB', title: 'Send to SABnzbd', variant: 'primary', primary: true, disabled: !it.url, onClick: () => sendToSab(ctx, it) },
     ], { sheetTitle: it.title }),
   );
 }
@@ -196,7 +196,7 @@ function openDetailsModal(it, ctx) {
   const footer = h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end', width: '100%' } },
     (it.comments || it.details) ? h('button', { class: 'btn hex-btn', title: 'Read comments on the indexer', onclick: () => openLink(it.comments || it.details) }, `💬 Comments${it.commentsCount ? ` (${it.commentsCount})` : ''}`) : null,
     it.details ? h('button', { class: 'btn hex-btn', title: 'Open the release page on the indexer', onclick: () => openLink(it.details) }, '↗ View on indexer') : null,
-    h('button', { class: 'btn primary hex-btn', disabled: it.url ? null : 'disabled', onclick: () => { closeModal(); sendToSab(ctx, it); } }, '＋ Send to SAB'),
+    h('button', { class: 'btn primary hex-btn', disabled: it.url ? null : 'disabled', onclick: () => { closeModal(); sendToSab(ctx, it); } }, '+ Send to SAB'),
   );
   openModal({ title: it.title, body, footer, wide: true });
 }

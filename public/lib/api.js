@@ -1,11 +1,37 @@
 // Thin client over the backend proxy. All requests go to /api/proxy/<service>/...
 // so the server can attach API keys + Cloudflare Access headers.
 
+// Turn an error response body into a short, human-readable message. Upstream
+// HTML error pages (404s, Cloudflare/reverse-proxy pages) must never be shown
+// verbatim in a toast; *arr validation errors arrive as [{ errorMessage }].
+export function errorMessage(data, status, statusText = '') {
+  const fallback = `HTTP ${status}${statusText ? ` ${statusText}` : ''}`;
+  if (Array.isArray(data)) {
+    const msgs = data.map((d) => d && (d.errorMessage || d.message)).filter(Boolean);
+    return msgs.length ? msgs.join('; ') : fallback;
+  }
+  if (data && typeof data === 'object') {
+    const m = data.error || data.message || data.title;
+    return typeof m === 'string' && m ? m : (m && typeof m === 'object' && m.message) || fallback;
+  }
+  if (typeof data === 'string') {
+    const text = data.trim();
+    if (!text) return fallback;
+    if (/^<(!doctype|html|\?xml|head|body)/i.test(text) || /<\/(html|body|div|p)>/i.test(text)) {
+      const title = (text.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1];
+      const clean = title && title.replace(/\s+/g, ' ').trim();
+      return clean ? `${fallback} — ${clean.slice(0, 120)}` : fallback;
+    }
+    return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+  }
+  return fallback;
+}
+
 async function parse(res) {
   const ct = res.headers.get('content-type') || '';
   const data = ct.includes('application/json') ? await res.json().catch(() => null) : await res.text();
   if (!res.ok) {
-    const msg = (data && (data.error || data.message)) || (typeof data === 'string' && data) || `HTTP ${res.status}`;
+    const msg = errorMessage(data, res.status, res.statusText);
     const err = new Error(msg);
     err.status = res.status;
     err.data = data;

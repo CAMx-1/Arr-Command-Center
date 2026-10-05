@@ -152,7 +152,7 @@ export function dashboardSettingsCard(ctx) {
           if (from >= 0 && to >= 0 && from !== to) move(source, to - from);
         },
       },
-        h('span', { class: 'drag-handle', title: 'Drag to reorder' }, '⠿'),
+        h('span', { class: 'drag-handle', title: 'Drag to reorder', html: '<svg viewBox="0 0 12 18" width="10" height="16" aria-hidden="true" fill="currentColor"><circle cx="3" cy="3" r="1.6"/><circle cx="9" cy="3" r="1.6"/><circle cx="3" cy="9" r="1.6"/><circle cx="9" cy="9" r="1.6"/><circle cx="3" cy="15" r="1.6"/><circle cx="9" cy="15" r="1.6"/></svg>' }),
         h('label', { class: 'dashboard-visible' }, h('input', {
           type: 'checkbox', checked: widget.visible,
           onchange: (event) => { widget.visible = event.target.checked; },
@@ -175,7 +175,7 @@ export function dashboardSettingsCard(ctx) {
       ),
       h('div', { class: 'dashboard-settings-toolbar' },
         selector,
-        h('button', { class: 'btn sm primary', onclick: newDashboard }, '＋ New'),
+        h('button', { class: 'btn sm primary', onclick: newDashboard }, '+ New'),
         h('button', { class: 'btn sm', onclick: duplicateDashboard }, 'Duplicate'),
         draftId !== 'default' ? h('button', { class: 'btn sm danger', onclick: deleteCurrent }, 'Delete') : null,
         h('button', { class: 'btn sm', onclick: resetOverview }, 'Reset Overview'),

@@ -165,7 +165,7 @@ function slotRow(s, sab, ctx) {
       h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })),
     ),
     h('div', { class: 'row-actions' },
-      h('button', { class: 'btn sm danger', onclick: remove }, '✕'),
+      h('button', { class: 'btn sm danger', onclick: remove }, '×'),
     ),
   );
   row._applyPoster = (url) => { try { fallback.replaceWith(poster(url, '')); } catch { /* ignore */ } };
@@ -179,7 +179,7 @@ function slotHex(s, sab, ctx) {
       e.stopPropagation();
       try { await sab({ mode: 'queue', name: 'delete', value: s.nzo_id, del_files: '1' }); toast('Removed', 'success'); ctx.reload(); }
       catch (err) { toast(err.message, 'error'); }
-    } }, '✕'),
+    } }, '×'),
   );
   const card = posterHexCard({
     gradient: 'linear-gradient(160deg, #4f46e5, #0f172a)',
@@ -238,7 +238,7 @@ function historyRow(s, sab, ctx) {
       h('button', { class: 'btn sm danger', onclick: async () => {
         try { await sab({ mode: 'history', name: 'delete', value: s.nzo_id }); toast('Deleted from history', 'success'); ctx.reload(); }
         catch (e) { toast(e.message, 'error'); }
-      } }, '✕'),
+      } }, '×'),
     ),
   );
   row._applyPoster = (url) => { try { fallback.replaceWith(poster(url, '')); } catch { /* ignore */ } };
@@ -252,7 +252,7 @@ function historyHex(s, sab, ctx) {
       e.stopPropagation();
       try { await sab({ mode: 'history', name: 'delete', value: s.nzo_id }); toast('Deleted from history', 'success'); ctx.reload(); }
       catch (err) { toast(err.message, 'error'); }
-    } }, '✕'),
+    } }, '×'),
   );
   const card = posterHexCard({
     gradient: 'linear-gradient(160deg, #4f46e5, #0f172a)',

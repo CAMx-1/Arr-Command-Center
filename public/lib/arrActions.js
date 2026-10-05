@@ -29,7 +29,7 @@ export function tagEditor(allTags, currentIds, client) {
           title: 'Remove tag',
           style: { border: 'none', background: 'none', color: 'inherit', cursor: 'pointer', fontSize: '12px', lineHeight: '1', padding: '0' },
           onclick: () => { const i = currentIds.indexOf(id); if (i >= 0) currentIds.splice(i, 1); renderChips(); },
-        }, '✕'),
+        }, '×'),
       ));
     }
   };

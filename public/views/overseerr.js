@@ -155,7 +155,7 @@ function requestListRow(r, seerr, ctx) {
     ),
     r.status === 1 ? h('div', { class: 'row-actions' },
       h('button', { class: 'btn sm primary', onclick: (e) => { e.stopPropagation(); act(seerr, ctx, r.id, 'approve'); } }, '✓ Approve'),
-      h('button', { class: 'btn sm danger', onclick: (e) => { e.stopPropagation(); act(seerr, ctx, r.id, 'decline'); } }, '✕ Decline'),
+      h('button', { class: 'btn sm danger', onclick: (e) => { e.stopPropagation(); act(seerr, ctx, r.id, 'decline'); } }, '× Decline'),
     ) : null,
   );
   getDetail(seerr, mediaType, media.tmdbId).then((d) => {
@@ -191,7 +191,7 @@ async function tabRequests(root, seerr, ctx, filter) {
       if (r.status === 1) {
         actions = h('div', { class: 'row-actions' },
           h('button', { class: 'btn sm primary', title: 'Approve', onclick: (e) => { e.stopPropagation(); act(seerr, ctx, r.id, 'approve'); } }, '✓'),
-          h('button', { class: 'btn sm danger', title: 'Decline', onclick: (e) => { e.stopPropagation(); act(seerr, ctx, r.id, 'decline'); } }, '✕'),
+          h('button', { class: 'btn sm danger', title: 'Decline', onclick: (e) => { e.stopPropagation(); act(seerr, ctx, r.id, 'decline'); } }, '×'),
         );
       }
       return seerrHex(ctx, seerr, {
@@ -358,7 +358,7 @@ function discoverHex(r, seerr, ctx) {
       e.stopPropagation();
       if (isTv) return openSeasonModal(seerr, ctx, r, title);
       return openMovieRequestModal(seerr, ctx, r, title);
-    } }, isTv && st === 4 ? '＋ Seasons' : '＋ Request'),
+    } }, isTv && st === 4 ? '+ Seasons' : '+ Request'),
   ) : null;
   return posterHexCard({
     posterUrl: tmdbPoster(r.posterPath),
@@ -411,7 +411,7 @@ function discoverActions(r, seerr, ctx, isTv, title) {
       e.stopPropagation();
       if (isTv) return openSeasonModal(seerr, ctx, r, title);
       return openMovieRequestModal(seerr, ctx, r, title);
-    } }, isTv && st === 4 ? '＋ Seasons' : '＋ Request'));
+    } }, isTv && st === 4 ? '+ Seasons' : '+ Request'));
   }
   return nodes;
 }

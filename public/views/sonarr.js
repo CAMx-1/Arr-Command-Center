@@ -21,7 +21,7 @@ export async function renderSonarr(root, ctx) {
   const arr = ctx.api.arr(svc.key);
   ctx.setActions(
     viewToggle(svc.key, (mode) => ctx.setParams({ mode }, { reload: true }), ctx.params.mode, { table: true }),
-    h('button', { class: 'btn primary', onclick: () => openAddModal(arr, ctx) }, '＋ Add Series'),
+    h('button', { class: 'btn primary', onclick: () => openAddModal(arr, ctx) }, '+ Add Series'),
   );
 
   const body = h('div', {});
@@ -74,7 +74,7 @@ async function tabSeries(root, arr, ctx) {
   try {
     const series = [...await cachedList(`arr:${ctx.service.key}:series`, () => arr.get('series'), 300000, 'Sonarr series')];
     series.sort((a, b) => a.title.localeCompare(b.title));
-    if (!series.length) return mount(root, empty('', 'No series yet', 'Add a series to get started', { label: '＋ Add Series', onClick: () => openAddModal(arr, ctx) }));
+    if (!series.length) return mount(root, empty('', 'No series yet', 'Add a series to get started', { label: '+ Add Series', onClick: () => openAddModal(arr, ctx) }));
     const mode = ['hex', 'list', 'table'].includes(ctx.params.mode) ? ctx.params.mode : effectiveMode(ctx.service.key);
     let sortKey = ctx.params.sort || 'title';
     let direction = ctx.params.dir === 'desc' ? 'desc' : 'asc';
@@ -298,7 +298,7 @@ function queueRow(r, arr, ctx) {
     ),
     actionGroup([
       queueImportAction(arr, 'series', r, ctx),
-      { label: '\u2715 Remove', variant: 'danger', primary: !isImportStuck(r), onClick: remove },
+      { label: '\u00d7 Remove', variant: 'danger', primary: !isImportStuck(r), onClick: remove },
       { label: '\u26D4 Blocklist & search', title: 'Blocklist this release and search for a replacement', onClick: async () => {
         try {
           await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=true`);
@@ -395,10 +395,10 @@ function seasonEpisodeRow(e, file, arr, reload) {
         try { await arr.put('episode/monitor', { episodeIds: [e.id], monitored: !e.monitored }); e.monitored = !e.monitored; reload(); }
         catch (err) { toast(err.message, 'error'); }
       } }, e.monitored ? 'Monitored' : 'Unmonitored'),
-      h('button', { class: 'btn sm hex-btn', title: 'Search episode', onclick: async () => {
+      h('button', { class: 'btn sm hex-btn', title: 'Search episode', 'aria-label': 'Search episode', html: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>', onclick: async () => {
         try { await arr.post('command', { name: 'EpisodeSearch', episodeIds: [e.id] }); toast('Searching…', 'success'); }
         catch (err) { toast(err.message, 'error'); }
-      } }, '⌕'),
+      } }),
     ),
   );
 }
@@ -433,7 +433,7 @@ function lookupRow(r, arr, ctx) {
       h('div', { class: 'row-sub' }, r.overview || ''),
     ),
     h('div', { class: 'row-actions' },
-      h('button', { class: 'btn sm primary', onclick: () => confirmAdd(r, arr, ctx) }, '＋ Add'),
+      h('button', { class: 'btn sm primary', onclick: () => confirmAdd(r, arr, ctx) }, '+ Add'),
     ),
   );
 }

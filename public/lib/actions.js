@@ -88,7 +88,9 @@ export function actionGroup(actions, opts = {}) {
       type: 'button',
       title: 'More actions',
       'aria-label': 'More actions',
-    }, '\u22ef'); // ⋯
+      // Inline SVG instead of U+22EF: that glyph is missing from some iOS/WebView font sets.
+      html: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
+    });
     more.addEventListener('click', (event) => {
       event.stopPropagation();
       actionSheet({ title: opts.sheetTitle || 'Actions', actions: list });

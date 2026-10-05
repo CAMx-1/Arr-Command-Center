@@ -137,7 +137,7 @@ async function tabQueue(root, client, cfg) {
         h('div', { class: 'row-actions' },
           h('button', { class: 'btn sm danger', title: 'Remove', onclick: () => confirmModal({ title: 'Remove from queue', message: `Remove “${r.title}”?`, confirmLabel: 'Remove', danger: true, onConfirm: async () => {
             try { await client.removeQueue(r.id); toast('Removed', 'success'); tabQueue(root, client, cfg); } catch (e) { toast(e.message, 'error'); }
-          } }) }, '✕'),
+          } }) }, '×'),
         ),
       );
     });

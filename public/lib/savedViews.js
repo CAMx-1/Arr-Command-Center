@@ -30,32 +30,43 @@ export function deleteNamedView(scope, id, storage) {
   return next;
 }
 
+// The saved view whose params match the current route params (if any), so the
+// picker keeps showing the active view after applying it re-renders the page.
+function sameParams(a = {}, b = {}) {
+  const norm = (o) => JSON.stringify(Object.keys(o).filter((k) => o[k] !== '' && o[k] != null).sort().map((k) => [k, String(o[k])]));
+  return norm(a) === norm(b);
+}
+
 export function savedViewsControl(ctx) {
   const scope = ctx.service.key;
   const wrap = h('div', { class: 'saved-views' });
   const render = () => {
     const views = loadSavedViews(scope);
-    const select = h('select', { class: 'input saved-view-select', title: 'Saved views' },
+    const current = views.find((view) => sameParams(view.params, ctx.params || {}));
+    const select = h('select', { class: 'input saved-view-select', title: 'Saved views', 'aria-label': 'Saved views' },
       h('option', { value: '' }, 'Saved views…'),
-      ...views.map((view) => h('option', { value: view.id }, view.name)),
+      ...views.map((view) => h('option', { value: view.id, selected: current && current.id === view.id ? 'selected' : null }, view.name)),
     );
+    const remove = h('button', { class: 'btn sm', type: 'button', title: 'Delete selected saved view', disabled: select.value ? null : 'disabled', onclick: () => {
+      const view = views.find((entry) => entry.id === select.value);
+      if (!view) return;
+      deleteNamedView(scope, view.id); render(); toast(`Deleted saved view “${view.name}”`, 'success');
+    } }, 'Delete');
     select.addEventListener('change', () => {
+      remove.disabled = !select.value;
       const view = views.find((entry) => entry.id === select.value);
       if (view) ctx.go(scope, view.params);
     });
-    const save = h('button', { class: 'btn sm', onclick: () => {
-      const name = h('input', { class: 'input', placeholder: 'e.g. Missing by year', maxlength: '60' });
+    const save = h('button', { class: 'btn sm', type: 'button', onclick: () => {
+      const name = h('input', { class: 'input', placeholder: 'e.g. Missing by year', maxlength: '60', 'aria-label': 'View name', enterkeyhint: 'done' });
       const submit = () => {
         try { saveNamedView(scope, name.value, ctx.params); closeModal(); toast('Saved view created', 'success'); render(); }
         catch (error) { toast(error.message, 'error'); }
       };
-      name.addEventListener('keydown', (event) => { if (event.key === 'Enter') submit(); });
-      openModal({ title: 'Save current view', body: name, footer: h('button', { class: 'btn primary', onclick: submit }, 'Save view') });
+      name.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); submit(); } });
+      openModal({ title: 'Save current view', body: name, footer: h('button', { class: 'btn primary', type: 'button', onclick: submit }, 'Save view') });
+      requestAnimationFrame(() => name.focus());
     } }, '☆ Save');
-    const remove = h('button', { class: 'btn sm', title: 'Delete selected saved view', onclick: () => {
-      if (!select.value) return;
-      deleteNamedView(scope, select.value); render(); toast('Saved view deleted');
-    } }, 'Delete');
     wrap.replaceChildren(select, save, remove);
   };
   render();

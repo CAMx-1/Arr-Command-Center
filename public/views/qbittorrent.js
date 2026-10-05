@@ -160,7 +160,7 @@ function torrentRow(t, qb, ctx) {
         try { await qb.post(paused ? 'torrents/start' : 'torrents/stop', { hashes: t.hash }); toast(paused ? 'Resumed' : 'Paused', 'success'); ctx.reload(); }
         catch (e) { toast(e.message, 'error'); }
       } }, paused ? '▶' : '⏸'),
-      h('button', { class: 'btn sm danger', title: 'Delete', onclick: () => openDeleteModal(t, qb, ctx) }, '✕'),
+      h('button', { class: 'btn sm danger', title: 'Delete', onclick: () => openDeleteModal(t, qb, ctx) }, '×'),
     ),
   );
 }
@@ -175,7 +175,7 @@ function torrentHex(t, qb, ctx) {
       try { await qb.post(paused ? 'torrents/start' : 'torrents/stop', { hashes: t.hash }); toast(paused ? 'Resumed' : 'Paused', 'success'); ctx.reload(); }
       catch (err) { toast(err.message, 'error'); }
     } }, paused ? '▶' : '⏸'),
-    h('button', { class: 'btn sm danger', title: 'Delete', onclick: (e) => { e.stopPropagation(); openDeleteModal(t, qb, ctx); } }, '✕'),
+    h('button', { class: 'btn sm danger', title: 'Delete', onclick: (e) => { e.stopPropagation(); openDeleteModal(t, qb, ctx); } }, '×'),
   );
   return posterHexCard({
     gradient: GRAD,

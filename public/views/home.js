@@ -869,7 +869,10 @@ function layoutHoneycomb(hiveEl, tileEls) {
   apply();
   const parent = hiveEl.parentElement;
   if (parent && typeof ResizeObserver !== 'undefined') {
-    ro = new ResizeObserver(() => apply());
+    // Defer to the next frame: re-laying out rows synchronously inside the
+    // callback changes the observed size and trips WebKit's RO loop error.
+    let pending = 0;
+    ro = new ResizeObserver(() => { if (!pending) pending = requestAnimationFrame(() => { pending = 0; apply(); }); });
     ro.observe(parent);
   } else {
     window.addEventListener('resize', apply);
@@ -1146,7 +1149,7 @@ function approvalActions(ctx, key, id) {
   };
   return actionGroup([
     { label: '\u2713', title: 'Approve', variant: 'primary', primary: true, onClick: (e) => doAct('approve', e) },
-    { label: '\u2715', title: 'Decline', variant: 'danger', onClick: (e) => doAct('decline', e) },
+    { label: '\u00d7', title: 'Decline', variant: 'danger', onClick: (e) => doAct('decline', e) },
   ], { sheetTitle: 'Request' });
 }
 function failedRows(ctx) {

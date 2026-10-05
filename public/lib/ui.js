@@ -54,7 +54,16 @@ function _focusables(container) {
   )).filter((el) => el.offsetParent !== null);
 }
 function _focusFirst(container) {
-  requestAnimationFrame(() => { const items = _focusables(container); (items[0] || container)?.focus?.(); });
+  requestAnimationFrame(() => {
+    if (!container) return;
+    // A caller already placed focus inside (e.g. Search focuses its input):
+    // don't yank it back to the close button.
+    if (container.contains(document.activeElement) && document.activeElement !== container) return;
+    const items = _focusables(container);
+    const preferred = container.querySelector('[autofocus]:not([disabled])')
+      || items.find((el) => !el.classList.contains('close-x'));
+    (preferred || items[0] || container)?.focus?.();
+  });
 }
 function _makeTrap(id) {
   return (e) => {
@@ -303,7 +312,12 @@ export function tabs(body, tabsDef, storageKey, options = {}) {
     activeId = id;
     if (storageKey) localStorage.setItem(storageKey, id);
     if (notify && options.onChange) options.onChange(id);
-    for (const btn of bar.querySelectorAll('.tab')) btn.classList.toggle('active', btn.dataset.id === id);
+    for (const btn of bar.querySelectorAll('.tab')) {
+      const on = btn.dataset.id === id;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', String(on));
+      btn.tabIndex = on ? 0 : -1; // roving tabindex: Tab enters the bar once, arrows move within it
+    }
     const def = tabsDef.find((t) => t.id === id);
     clear(body);
     def.render(body);
@@ -322,9 +336,26 @@ export function tabs(body, tabsDef, storageKey, options = {}) {
     });
   }
 
+  bar.setAttribute('role', 'tablist');
   for (const t of tabsDef) {
-    bar.appendChild(h('button', { class: 'tab', dataset: { id: t.id }, onclick: () => select(t.id) }, t.label));
+    bar.appendChild(h('button', { class: 'tab', type: 'button', role: 'tab', dataset: { id: t.id }, onclick: () => select(t.id) }, t.label));
   }
+  // Keyboard: ←/→ (and Home/End) move between tabs and activate them, matching
+  // the touch swipe and click behavior.
+  bar.addEventListener('keydown', (e) => {
+    if (!e.target.classList || !e.target.classList.contains('tab') || e.altKey || e.metaKey || e.ctrlKey) return;
+    const btns = [...bar.querySelectorAll('.tab')];
+    const idx = btns.indexOf(e.target);
+    let next = -1;
+    if (e.key === 'ArrowRight') next = (idx + 1) % btns.length;
+    else if (e.key === 'ArrowLeft') next = (idx - 1 + btns.length) % btns.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = btns.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    select(btns[next].dataset.id);
+    btns[next].focus();
+  });
   bar.appendChild(indicator);
   select(activeId, false, false);
   // Reposition once mounted and on resize.
@@ -341,7 +372,7 @@ export function tabs(body, tabsDef, storageKey, options = {}) {
   if (typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => {
       if (!bar.isConnected) { ro.disconnect(); return; } // bar removed on nav — self-clean
-      moveIndicator();
+      requestAnimationFrame(moveIndicator); // defer: avoids "ResizeObserver loop" errors in WebKit
     });
     ro.observe(bar);
   } else if (typeof window !== 'undefined' && window.addEventListener) {

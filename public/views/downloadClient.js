@@ -122,7 +122,7 @@ function itemActions(item, adapter, ctx, stopPropagation = false) {
       catch (error) { toast(error.message, 'error'); }
     }) }, resume ? '▶' : '⏸'));
   }
-  buttons.push(h('button', { class: 'btn sm danger', title: 'Remove', onclick: wrap(() => openRemoveModal(item, adapter, ctx)) }, '✕'));
+  buttons.push(h('button', { class: 'btn sm danger', title: 'Remove', onclick: wrap(() => openRemoveModal(item, adapter, ctx)) }, '×'));
   return h('div', { class: 'row-actions' }, ...buttons);
 }
 

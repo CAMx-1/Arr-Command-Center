@@ -335,7 +335,7 @@ async function tabWanted(root, ctx, bz) {
         toast('Subtitle search queued for all wanted items', 'success');
         reload();
       } catch (err) { toast(err.message || 'Search failed', 'error'); }
-    } }, '⌕ Search all');
+    } }, 'Search all');
 
     const blocks = [header, h('div', { class: 'lib-head' }, searchAll)];
     if (eps.length) {
@@ -368,7 +368,7 @@ function wantedEpisodeRow(e, bz, reload) {
         toast('Searching subtitles…', 'info', 1200);
         try { await bz.patch(`episodes?episodeid=${e.sonarrEpisodeId}`); toast('Subtitle search complete', 'success'); reload(); }
         catch (err) { toast(err.message || 'Search failed', 'error'); }
-      } }, '⌕ Search'),
+      } }, 'Search'),
       h('button', { class: 'btn sm', title: 'Browse providers and pick a subtitle', onclick: () => openManualSearch(bz, 'episode', e, reload) }, 'Manual'),
     ),
   );
@@ -390,7 +390,7 @@ function wantedMovieRow(m, bz, reload) {
         toast('Searching subtitles…', 'info', 1200);
         try { await bz.patch(`movies?radarrid=${m.radarrId}`); toast('Subtitle search complete', 'success'); reload(); }
         catch (err) { toast(err.message || 'Search failed', 'error'); }
-      } }, '⌕ Search'),
+      } }, 'Search'),
       h('button', { class: 'btn sm', title: 'Browse providers and pick a subtitle', onclick: () => openManualSearch(bz, 'movie', m, reload) }, 'Manual'),
     ),
   );

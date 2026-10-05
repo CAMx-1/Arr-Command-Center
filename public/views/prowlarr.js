@@ -298,7 +298,7 @@ function histRow(r) {
   const label = EVENT_LABEL[r.eventType] || r.eventType || 'Event';
   const grab = r.eventType === 'releaseGrabbed';
   return h('div', { class: 'row' },
-    h('div', { class: 'poster', style: { width: '40px', height: '40px', fontSize: '18px' } }, grab ? '⬇' : '⌕'),
+    h('div', { class: 'poster', style: { width: '40px', height: '40px', fontSize: '18px' } }, grab ? '⬇' : '🔍'),
     h('div', { class: 'row-main' },
       h('div', { class: 'row-title' }, histTitle(r)),
       h('div', { class: 'meta-line', style: { marginTop: '4px' } },

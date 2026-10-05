@@ -235,8 +235,11 @@ function scheduleScrollRestore(kind, targetY) {
     let settled = 0;
     _restoreRO = new ResizeObserver(() => {
       if (gen !== _navGen) { cancelScrollRestore(); return; }
-      apply();
-      if (canReach() && ++settled >= 2) cancelScrollRestore();
+      requestAnimationFrame(() => {
+        if (gen !== _navGen) return;
+        apply();
+        if (canReach() && ++settled >= 2) cancelScrollRestore();
+      });
     });
     try { _restoreRO.observe(els.view); } catch { /* ignore */ }
   } else {
@@ -268,7 +271,7 @@ function buildHive() {
   const navServices = orderServices(base);
   for (const svc of navServices) {
     if (isHidden(svc.key)) {
-      if (!isMobile) cells.push({ kind: 'placeholder', title: `${svc.label} is hidden — show it in Settings`, glyph: '＋', onClick: () => toast(`${svc.label} is hidden. Enable it in Settings → Services.`, 'info', 2800) });
+      if (!isMobile) cells.push({ kind: 'placeholder', title: `${svc.label} is hidden — show it in Settings`, glyph: '+', onClick: () => toast(`${svc.label} is hidden. Enable it in Settings → Services.`, 'info', 2800) });
       continue;
     }
     const meta = SERVICE_META[svc.type] || {};
@@ -447,9 +450,15 @@ const QUICK_ACTIONS = {
 // Uses Pointer Events so mouse ("long click") and touch (long-press) share one
 // code path with no touch/mouse double-firing.
 export function attachLongPress(el, onLongPress, { ms = 550, moveTol = 10 } = {}) {
-  let timer = 0; let sx = 0; let sy = 0; let fired = false; let active = false;
+  let timer = 0; let sx = 0; let sy = 0; let fired = false; let active = false; let guardArmed = false;
   const clearTimer = () => { if (timer) { clearTimeout(timer); timer = 0; } };
   const cancel = () => { active = false; clearTimer(); };
+  const release = () => {
+    // Arm the document-wide click guard only on the lift that ends a fired
+    // long-press, so the synthesized click can't hit the overlay it opened.
+    if (fired && !guardArmed) { guardArmed = true; swallowNextClick(); setTimeout(() => { guardArmed = false; fired = false; }, 750); }
+    cancel();
+  };
   el.addEventListener('pointerdown', (e) => {
     // Primary pointer only; ignore right/middle mouse buttons.
     if (!e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) { cancel(); return; }
@@ -461,15 +470,29 @@ export function attachLongPress(el, onLongPress, { ms = 550, moveTol = 10 } = {}
     if (!active) return;
     if (Math.abs(e.clientX - sx) > moveTol || Math.abs(e.clientY - sy) > moveTol) cancel();
   });
-  el.addEventListener('pointerup', cancel);
-  el.addEventListener('pointercancel', cancel);
+  el.addEventListener('pointerup', release);
+  el.addEventListener('pointercancel', release);
   el.addEventListener('pointerleave', cancel);
   el.addEventListener('contextmenu', (e) => { e.preventDefault(); });
   // Capture-phase so we can swallow the post-long-press click before the
   // element's own onclick (bubble phase) navigates. `fired` persists from the
   // timer through pointerup until this consumes it.
   el.addEventListener('click', (e) => { if (fired) { e.preventDefault(); e.stopPropagation(); fired = false; } }, true);
+  // The long-press usually opens an overlay under the finger. On iOS the lift
+  // then synthesizes a click at that point, which would activate whatever
+  // control the new overlay put there. Cancelling touchend suppresses that
+  // compatibility click; the document-level guard catches any that still slip
+  // through (e.g. mouse long-click) for a short window.
+  el.addEventListener('touchend', (e) => { if (fired && e.cancelable) e.preventDefault(); }, { passive: false });
   return el;
+}
+
+// Swallow the next click anywhere in the document (capture phase) within `ms`.
+function swallowNextClick(ms = 700) {
+  const stop = (e) => { e.preventDefault(); e.stopPropagation(); done(); };
+  const done = () => { document.removeEventListener('click', stop, true); clearTimeout(t); };
+  const t = setTimeout(done, ms);
+  document.addEventListener('click', stop, true);
 }
 
 // Accessible action sheet (modal) of a service's quick destinations. Selecting
@@ -762,7 +785,7 @@ function renderNotifPanel() {
       h('div', { class: 'notif-title' }, e.message),
       h('div', { class: 'notif-meta dim' }, relTime(e.at)),
     ),
-    h('button', { class: 'btn sm', title: 'Dismiss', onclick: (ev) => { ev.stopPropagation(); dismissError(e.id); } }, '✕'),
+    h('button', { class: 'btn sm', title: 'Dismiss', onclick: (ev) => { ev.stopPropagation(); dismissError(e.id); } }, '×'),
   ));
   const rows = notifications.map((e) => {
     const k = notifKind(e.kind);
@@ -963,7 +986,7 @@ function discoverSearchRow(r, seerrSvc) {
     }
     // Movies: offer install location + quality profile (same as the Overseerr view).
     return openMovieRequestModal(api.seerr(seerrSvc.key), { service: { key: seerrSvc.key } }, r, title);
-  } }, isTv ? (st === 4 ? '＋ Seasons' : '＋ Select seasons') : '＋ Request');
+  } }, isTv ? (st === 4 ? '+ Seasons' : '+ Select seasons') : '+ Request');
   return h('div', { class: 'row' },
     h('div', { style: { cursor: 'pointer', flexShrink: '0' }, title: 'View details', onclick: openMeta }, poster(url, '')),
     h('div', { class: 'row-main' },
@@ -1345,20 +1368,40 @@ async function init() {
     if (notifOpen) renderNotifPanel();
   });
   document.addEventListener('keydown', (e) => {
-    const typing = /input|textarea|select/i.test(document.activeElement.tagName);
-    if (e.key === 'Escape' && notifOpen) toggleNotif(false);
-    if (typing) return;
-    if (e.key === 'r') { refreshStatus(); _pendingIntent = 'preserve'; navigate(); }
-    if (e.key === '/') { if (toolsAllowed()) { e.preventDefault(); openSearch(); } }
-    if (e.key === '?') { e.preventDefault(); openShortcutsHelp(); }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    if (e.defaultPrevented || e.isComposing) return;
+    const ae = document.activeElement;
+    const typing = !!ae && (/^(input|textarea|select)$/i.test(ae.tagName) || ae.isContentEditable);
+    const anyOverlay = document.getElementById('modal-root').hasChildNodes()
+      || !!document.querySelector('#allsvc-sheet.show, .action-sheet-backdrop, #comparison-root');
+    // ⌘/Ctrl K works everywhere (including from a text field), like other apps.
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
       e.preventDefault();
-      openCommandPalette({ services: state.services, go: (route, params = {}) => { location.hash = buildHash(route, params); }, openSearch });
+      if (notifOpen) toggleNotif(false);
+      openCommandPalette({ services: state.services, go: (route, params = {}) => { location.hash = buildHash(route, params); }, openSearch, openShortcuts: openShortcutsHelp });
+      return;
     }
-    if (/^[1-9]$/.test(e.key) && !document.getElementById('modal-root').hasChildNodes()) {
-      const cells = document.querySelectorAll('#hive .hive-cell');
+    if (e.key === 'Escape') {
+      if (notifOpen) { toggleNotif(false); return; }
+      if (hiveExpanded) { hiveExpanded = false; buildHive(); return; }
+      if (els.sidebar.classList.contains('open')) { closeSidebarMobile(); return; }
+      return;
+    }
+    // Single-key shortcuts: never while typing, never with modifiers (so
+    // browser shortcuts like ⌘R / Ctrl+1 keep their native meaning), and never
+    // underneath an open dialog/sheet (they'd replace or re-render it).
+    if (typing || e.metaKey || e.ctrlKey || e.altKey || anyOverlay) return;
+    if (e.key === 'r') { refreshStatus(); _pendingIntent = 'preserve'; navigate(); return; }
+    if (e.key === '/') { if (toolsAllowed()) { e.preventDefault(); if (notifOpen) toggleNotif(false); openSearch(); } return; }
+    if (e.key === '?') { e.preventDefault(); if (notifOpen) toggleNotif(false); openShortcutsHelp(); return; }
+    if (/^[1-9]$/.test(e.key)) {
+      // Nav order as the user sees it: rail services, then any overflow
+      // flyout services, then Settings. Hidden-service placeholders, the
+      // "+N more" toggle and Log out are not destinations.
+      const nav = (root) => [...(root ? root.querySelectorAll('.hive-cell') : [])]
+        .filter((c) => !/\bhive-(placeholder|more|logout|settings)\b/.test(c.className));
+      const cells = [...nav(els.hive), ...nav(document.getElementById('hive-flyout')), ...els.hive.querySelectorAll('.hive-settings')];
       const cell = cells[Number(e.key) - 1];
-      if (cell) cell.click();
+      if (cell) { e.preventDefault(); cell.click(); }
     }
   });
 }

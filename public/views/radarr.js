@@ -21,7 +21,7 @@ export async function renderRadarr(root, ctx) {
   const arr = ctx.api.arr(svc.key);
   ctx.setActions(
     viewToggle(svc.key, (mode) => ctx.setParams({ mode }, { reload: true }), ctx.params.mode, { table: true }),
-    h('button', { class: 'btn primary', onclick: () => openAddModal(arr, ctx) }, '＋ Add Movie'),
+    h('button', { class: 'btn primary', onclick: () => openAddModal(arr, ctx) }, '+ Add Movie'),
   );
 
   const body = h('div', {});
@@ -106,7 +106,7 @@ async function tabMovies(root, arr, ctx) {
   try {
     const movies = [...await cachedList(`arr:${ctx.service.key}:movie`, () => arr.get('movie'), 300000, 'Radarr movies')];
     movies.sort((a, b) => a.title.localeCompare(b.title));
-    if (!movies.length) return mount(root, empty('', 'No movies yet', 'Add a movie to get started', { label: '＋ Add Movie', onClick: () => openAddModal(arr, ctx) }));
+    if (!movies.length) return mount(root, empty('', 'No movies yet', 'Add a movie to get started', { label: '+ Add Movie', onClick: () => openAddModal(arr, ctx) }));
     const mode = ['hex', 'list', 'table'].includes(ctx.params.mode) ? ctx.params.mode : effectiveMode(ctx.service.key);
     let sortKey = ctx.params.sort || 'title';
     let direction = ctx.params.dir === 'desc' ? 'desc' : 'asc';
@@ -288,7 +288,7 @@ function queueRow(r, arr, ctx) {
     ),
     actionGroup([
       queueImportAction(arr, 'movie', r, ctx),
-      { label: '\u2715 Remove', variant: 'danger', primary: !isImportStuck(r), onClick: remove },
+      { label: '\u00d7 Remove', variant: 'danger', primary: !isImportStuck(r), onClick: remove },
       { label: '\u26D4 Blocklist & search', title: 'Blocklist this release and search for a replacement', onClick: async () => {
         try {
           await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=true`);
@@ -328,7 +328,7 @@ function lookupRow(r, arr, ctx) {
       h('div', { class: 'row-title' }, `${r.title} `, h('span', { class: 'dim' }, r.year ? `(${r.year})` : '')),
       h('div', { class: 'row-sub' }, r.overview || ''),
     ),
-    h('div', { class: 'row-actions' }, h('button', { class: 'btn sm primary', onclick: () => confirmAdd(r, arr, ctx) }, '＋ Add')),
+    h('div', { class: 'row-actions' }, h('button', { class: 'btn sm primary', onclick: () => confirmAdd(r, arr, ctx) }, '+ Add')),
   );
 }
 

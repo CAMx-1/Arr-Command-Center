@@ -139,7 +139,7 @@ function tagsSection(tags, arr, reload) {
         h('button', { class: 'tag-x', title: 'Delete tag', onclick: async () => {
           try { await arr.del(`tag/${t.id}`); toast('Tag deleted', 'success'); reload(); }
           catch (e) { toast(e.message, 'error'); }
-        } }, ' ✕'))),
+        } }, ' ×'))),
       list.length ? null : h('span', { class: 'dim' }, 'No tags'),
     ),
     h('div', { class: 'meta-line', style: { gap: '8px' } }, input, h('button', { class: 'btn sm', onclick: add }, 'Add tag')),
@@ -161,7 +161,7 @@ export async function tabWanted(root, arr, ctx, kind, mode = 'missing') {
     const searchAll = h('button', { class: 'btn sm primary', title: 'Search all ' + (mode === 'cutoff' ? 'cutoff-unmet' : 'missing') + ' items', onclick: async () => {
       try { await arr.post('command', { name: cmd }); toast(`Searching all ${mode === 'cutoff' ? 'cutoff-unmet' : 'missing'} items…`, 'success'); }
       catch (e) { toast(e.message, 'error'); }
-    } }, '⌕ Search all');
+    } }, 'Search all');
     const head = h('div', { class: 'lib-head', style: { justifyContent: 'space-between', marginBottom: '12px' } }, toggle, searchAll);
     if (!records.length) return mount(root, head, empty('', mode === 'cutoff' ? 'Nothing below cutoff' : 'Nothing missing', 'Everything monitored is satisfied.'));
     mount(root, head, h('div', { class: 'list' }, ...records.map((r) => wantedRow(r, arr, kind))));
@@ -190,6 +190,6 @@ function wantedRow(r, arr, kind) {
         (isSeries ? r.airDateUtc : (r.inCinemas || r.digitalRelease)) ? timeEl(isSeries ? r.airDateUtc : (r.digitalRelease || r.inCinemas)) : null,
       ),
     ),
-    h('div', { class: 'row-actions' }, h('button', { class: 'btn sm', onclick: search }, '⌕ Search')),
+    h('div', { class: 'row-actions' }, h('button', { class: 'btn sm', onclick: search }, 'Search')),
   );
 }

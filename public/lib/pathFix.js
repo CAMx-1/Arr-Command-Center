@@ -84,7 +84,7 @@ export async function openPathFix(arr, ctx, kind) {
     toI.addEventListener('input', computePreview);
     const row = h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' } },
       fromI, h('span', { class: 'dim' }, '→'), toI,
-      h('button', { class: 'btn sm', title: 'Remove mapping', onclick: () => { row.remove(); computePreview(); } }, '✕'),
+      h('button', { class: 'btn sm', title: 'Remove mapping', onclick: () => { row.remove(); computePreview(); } }, '×'),
     );
     row._from = fromI; row._to = toI;
     return row;
@@ -187,7 +187,7 @@ export async function openPathFix(arr, ctx, kind) {
     anyBad ? h('div', { class: 'dim', style: { fontSize: '12px', margin: '2px 0 14px' } }, 'A red “Not available” root no longer exists on this machine — give it a new path below.') : h('div', { style: { height: '10px' } }),
     h('div', { class: 'section-title' }, 'Path mappings (old → new)'),
     mapList,
-    h('button', { class: 'btn sm', style: { marginBottom: '12px' }, onclick: () => { mapList.appendChild(makeRow()); } }, '＋ Add mapping'),
+    h('button', { class: 'btn sm', style: { marginBottom: '12px' }, onclick: () => { mapList.appendChild(makeRow()); } }, '+ Add mapping'),
     h('div', { class: 'grid', style: { gap: '10px' } },
       h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, addRootChk, 'Also add each new path as a root folder'),
       h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, rescanChk, 'Rescan the library afterwards (marks files available)'),
