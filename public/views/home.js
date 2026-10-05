@@ -549,11 +549,22 @@ function renderUpcomingCalendar(panel, items, { year, month, today }) {
 
 // Expanded day view: lists every release on a given day (full titles, service,
 // sub-line and air time), each row deep-linking to that service's Calendar tab.
+// Upcoming rows (list and calendar day view) open the item's library filtered
+// to that title. Rows are divs, so give them button semantics + Enter/Space.
+function upcomingRowProps(it) {
+  const open = () => openInArr({ svc: it.svc, title: it.filterTitle || it.title });
+  return {
+    class: 'row up-row dashboard-feed-row clickable', role: 'button', tabindex: '0',
+    title: `Open in ${it.svc.label}`, onclick: open,
+    onkeydown: (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); open(); } },
+  };
+}
+
 function openUpcomingDayModal(date, evs) {
   const sorted = [...evs].sort((a, b) => new Date(a.when) - new Date(b.when));
   const rows = sorted.map((it) => {
     const meta = SERVICE_META[it.svc.type] || {};
-    return h('div', { class: 'row up-row dashboard-feed-row clickable', onclick: () => openInArr({ svc: it.svc, title: it.filterTitle || it.title }) },
+    return h('div', upcomingRowProps(it),
       h('div', { class: 'poster dashboard-feed-icon' }, svcIcon(meta.logo, meta.emoji || '', 22)),
       h('div', { class: 'row-main' },
         h('div', { class: 'row-title', style: { fontSize: '14px' } }, it.title),
@@ -617,7 +628,7 @@ async function hydrateUpcoming(ctx) {
     blocks.push(h('div', { class: 'up-day dashboard-feed-day' }, fmtDate(day)));
     for (const it of list) {
       const meta = SERVICE_META[it.svc.type] || {};
-      blocks.push(h('div', { class: 'row up-row dashboard-feed-row' },
+      blocks.push(h('div', upcomingRowProps(it),
         h('div', { class: 'poster dashboard-feed-icon' }, svcIcon(meta.logo, meta.emoji || '', 22)),
         h('div', { class: 'row-main' },
           h('div', { class: 'row-title', style: { fontSize: '14px' } }, it.title),

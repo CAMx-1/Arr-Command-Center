@@ -9,7 +9,6 @@ import { orderServices, isHidden, pinnedServices } from './lib/servicePrefs.js';
 import { splitHive, flyoutLayout } from './lib/hiveLayout.js';
 import { hiveSignature, statusDotClass } from './lib/hiveState.js';
 import { cachedGet } from './lib/cache.js';
-import { setPendingFilter } from './lib/libraryFilter.js';
 import { renderHome, refreshHome } from './views/home.js';
 import { renderSonarr } from './views/sonarr.js';
 import { renderRadarr } from './views/radarr.js';
@@ -502,9 +501,7 @@ function swallowNextClick(ms = 700) {
 export function openServiceQuickActions(svc) {
   const go = (tab) => {
     if (tab) { try { localStorage.setItem(`tabs-${svc.key}`, tab); } catch { /* ignore */ } }
-    const nav = () => { _pendingIntent = 'new'; if (currentRoute() === svc.key) navigate(); else location.hash = `#/${svc.key}`; };
-    if (overlayOpen('modal')) { closeOverlay('modal'); requestAnimationFrame(nav); }
-    else { closeModal(); nav(); }
+    navigateFromOverlay(`#/${svc.key}`);
   };
   const dests = QUICK_ACTIONS[svc.type] || [];
   const body = h('div', { class: 'qa-list' },
@@ -844,9 +841,12 @@ function positionNotifPanel() {
 
 // ---------- Global search ----------
 async function loadLibraries() {
-  const out = [];
+  // Collect per service, then flatten in configured service order, so result
+  // order doesn't depend on which request finished first (a reshuffle between
+  // renders would move rows under the user's finger).
   const arrs = state.services.filter((s) => (s.type === 'sonarr' || s.type === 'radarr') && s.configured);
-  await Promise.all(arrs.map(async (svc) => {
+  const perService = await Promise.all(arrs.map(async (svc) => {
+    const out = [];
     try {
       const path = svc.type === 'sonarr' ? 'series' : 'movie';
       const items = await cachedGet(`arr:${svc.key}:${path}`, () => api.arr(svc.key).get(path), 300000);
@@ -867,8 +867,9 @@ async function loadLibraries() {
         });
       }
     } catch { /* ignore */ }
+    return out;
   }));
-  return out;
+  return perService.flat();
 }
 
 function openShortcutsHelp() {
@@ -1000,25 +1001,36 @@ function discoverSearchRow(r, seerrSvc) {
   );
 }
 
-// Open a library title in its Sonarr/Radarr app and pre-filter to it. Stashing
-// the term + changing the hash is enough when we're coming from a different
-// route, but if we're ALREADY on that app's route the hash assignment fires no
-// `hashchange`, so navigate() wouldn't re-run and the filter would be dropped.
-// In that case we invoke navigate() directly so the deep-link filter applies.
+// Leave an open dialog by navigating somewhere else, without racing history.
+// Closing an overlay normally calls history.back() to drop its history entry;
+// that pop is async, and on a real phone it can land *after* we've changed the
+// hash, silently undoing the navigation (Search → Open landed back on Home).
+// Instead: tear the dialog down without touching history, then *replace* its
+// entry with the destination and render it. One entry, no pending pop, and
+// Back still returns to the page the dialog was opened from.
+function navigateFromOverlay(hash) {
+  _pendingIntent = 'new';
+  if (overlayOpen('modal')) {
+    unregisterOverlay('modal'); // DOM teardown + focus restore, no history.back()
+    try { history.replaceState(null, '', hash); } catch { location.hash = hash; return; }
+    navigate(); // replaceState fires no hashchange
+    return;
+  }
+  closeModal();
+  // Same hash (e.g. re-opening the current view) fires no hashchange.
+  if (location.hash === hash) navigate(); else location.hash = hash;
+}
+
+// Open a library title in its Sonarr/Radarr app, filtered to it. The filter
+// travels in the URL (#/<svc>?q=<title>) rather than in memory, so it's the
+// single source of truth for the Library tab: it replaces any stale q/status/
+// sort from a previous visit, survives view-mode switches and refreshes, and
+// can't leak into a later visit. The Library tab is pinned explicitly so a
+// remembered Queue/History tab (or a ?tab= already in the URL) can't win.
 export function openInArr(m) {
-  setPendingFilter(m.svc.key, m.title);
-  // The filter lives on the Library tab, but tabs() restores whatever tab the
-  // app was last left on. Pin the Library tab so the deep-link always lands
-  // there (matters most when we're already in the app on another tab).
   const libTab = m.svc.type === 'sonarr' ? 'series' : 'movies';
   try { localStorage.setItem(`tabs-${m.svc.key}`, libTab); } catch { /* ignore */ }
-  _pendingIntent = 'new'; // deep-linked filter: land at the top of the results
-  const nav = () => { if (currentRoute() === m.svc.key) navigate(); else location.hash = `#/${m.svc.key}`; };
-  // If a modal overlay is open (e.g. the Upcoming day view), closing it pops a
-  // history entry asynchronously; defer navigation a frame so the hash change
-  // isn't reverted by that pop.
-  if (overlayOpen('modal')) { closeOverlay('modal'); requestAnimationFrame(nav); }
-  else { closeModal(); nav(); }
+  navigateFromOverlay(buildHash(m.svc.key, { q: m.title }));
 }
 
 function searchRow(m) {
@@ -1377,7 +1389,7 @@ async function init() {
     if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
       e.preventDefault();
       if (notifOpen) toggleNotif(false);
-      openCommandPalette({ services: state.services, go: (route, params = {}) => { location.hash = buildHash(route, params); }, openSearch, openShortcuts: openShortcutsHelp });
+      openCommandPalette({ services: state.services, go: (route, params = {}) => navigateFromOverlay(buildHash(route, params)), openSearch, openShortcuts: openShortcutsHelp });
       return;
     }
     if (e.key === 'Escape') {

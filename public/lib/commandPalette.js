@@ -10,7 +10,7 @@ function commandSet({ services, go, openSearch, openShortcuts }) {
     { label: 'Open Action Inbox', hint: 'Dashboard', run: () => go('home', { focus: 'inbox' }) },
     { label: 'Search all libraries', hint: '/', run: () => setTimeout(openSearch, 0) },
     openShortcuts ? { label: 'Keyboard shortcuts', hint: '?', run: () => setTimeout(openShortcuts, 0) } : null,
-    { label: `Switch to ${getTheme() === 'dark' ? 'light' : 'dark'} theme`, hint: 'Appearance', run: () => applyTheme(getTheme() === 'dark' ? 'light' : 'dark') },
+    { label: `Switch to ${getTheme() === 'dark' ? 'light' : 'dark'} theme`, hint: 'Appearance', close: true, run: () => applyTheme(getTheme() === 'dark' ? 'light' : 'dark') },
   ].filter(Boolean);
   for (const service of services || []) {
     commands.push({ label: `Open ${service.label}`, hint: service.type, run: () => go(service.key) });
@@ -34,15 +34,14 @@ export function openCommandPalette(options) {
   let filtered = commands;
   let active = 0;
   let ran = false;
-  // Close first, then run once the overlay's history pop has settled so a
-  // navigation isn't reverted by the pending history.back().
+  // Navigation commands call go(), which leaves the palette by replacing its
+  // history entry (no async history.back() that could undo the navigation).
+  // Commands that open another dialog reuse the same modal slot, so they also
+  // run directly. Only commands marked `close` (e.g. theme) dismiss it first.
   const run = (command) => {
     if (ran) return; ran = true;
-    closeModal();
-    let done = false;
-    const go = () => { if (done) return; done = true; window.removeEventListener('popstate', go); setTimeout(command.run, 0); };
-    window.addEventListener('popstate', go);
-    setTimeout(go, 250);
+    if (command.close) closeModal();
+    command.run();
   };
   const paint = () => {
     [...results.querySelectorAll('.command-item')].forEach((el, index) => {

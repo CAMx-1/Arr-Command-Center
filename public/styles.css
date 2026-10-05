@@ -502,6 +502,13 @@ html[data-theme="dark"] .hex-disk-fill {
   content-visibility: auto;
   contain-intrinsic-size: auto 92px;
 }
+/* Dialog lists (global Search, Add Series/Movie lookups, pickers) are short and
+   are tapped while they scroll. With content-visibility:auto their off-screen
+   rows sit at the 92px placeholder and only grow to their real height as they
+   scroll into view, shifting buttons under the user's finger (Open landed on
+   the wrong row / nothing, most often with Search "All", the longest list).
+   Render them fully so layout is stable from the first paint. */
+.modal .row { content-visibility: visible; contain-intrinsic-size: none; }
 .row.clickable { cursor: pointer; }
 .row.swipe-armed { background: linear-gradient(160deg, #fb7185, #e11d48); color: #fff; }
 .row.swipe-armed .pill, .row.swipe-armed .dim, .row.swipe-armed .meta-line span { color: #fff; }
@@ -895,7 +902,7 @@ html[data-theme="dark"] .shx-face { background: linear-gradient(160deg, var(--su
   .notif-panel { width: min(340px, calc(100vw - 24px)); }
   /* Stack row content on phones so the action buttons wrap below the title
      instead of squeezing it to a single character per line. */
-  .row { flex-wrap: wrap; padding: 14px 22px; }
+  .row { flex-wrap: wrap; padding: 14px 22px; contain-intrinsic-size: auto 156px; }
   .row .row-main { flex: 1 1 auto; }
   .row .row-actions { flex-basis: 100%; margin-top: 8px; flex-wrap: wrap; justify-content: flex-start; }
   /* #7 Sticky in-view tab bar + #2 edge fade hinting horizontal scroll. */

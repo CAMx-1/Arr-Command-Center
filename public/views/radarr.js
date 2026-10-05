@@ -8,7 +8,7 @@ import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, cachedList, invalidate } from '../lib/cache.js';
 import { openLookupModal } from '../lib/lookupSearch.js';
-import { libraryFilter, consumePendingFilter } from '../lib/libraryFilter.js';
+import { libraryFilter } from '../lib/libraryFilter.js';
 import { tagEditor, arrCommandBar, loadTags, queueImportAction, queueStatePill, queueStuckReason } from '../lib/arrActions.js';
 import { isImportStuck } from '../lib/manualImport.js';
 import { compactTable } from '../lib/tableView.js';
@@ -151,7 +151,7 @@ async function tabMovies(root, arr, ctx) {
       }
       mount(listWrap, pagedLibrary(items, { isHex: mode === 'hex', makeCard: (m) => movieHex(m, arr, ctx), makeRow: (m) => movieRow(m, arr, ctx) }));
     };
-    const initialTerm = ctx.params.q || consumePendingFilter(ctx.service.key);
+    const initialTerm = ctx.params.q || '';
     const libHead = h('div', { class: 'lib-head' },
       libraryFilter('movie', movies, renderList, {
         initialTerm, initialStatus: ctx.params.status || 'all',
