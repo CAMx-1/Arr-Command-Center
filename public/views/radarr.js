@@ -1,4 +1,4 @@
-import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, debounce, autoRefresh, swipeToAction } from '../lib/ui.js';
+import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, autoRefresh, swipeToAction } from '../lib/ui.js';
 import { reconcileQueueIssues } from '../lib/queueIssues.js';
 import { openDetailModal, openArrFileInfo } from './detail.js';
 import { openReleaseSearch } from './releaseSearch.js';
@@ -7,6 +7,7 @@ import { tabSystem, tabWanted } from './arrSystem.js';
 import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, cachedList, invalidate } from '../lib/cache.js';
+import { openLookupModal } from '../lib/lookupSearch.js';
 import { libraryFilter, consumePendingFilter } from '../lib/libraryFilter.js';
 import { tagEditor, arrCommandBar, loadTags, queueImportAction, queueStatePill, queueStuckReason } from '../lib/arrActions.js';
 import { isImportStuck } from '../lib/manualImport.js';
@@ -303,21 +304,12 @@ function queueRow(r, arr, ctx) {
 
 // ---- Add movie flow ----
 function openAddModal(arr, ctx) {
-  const results = h('div', { class: 'list', style: { marginTop: '12px' } });
-  const input = h('input', { class: 'input', placeholder: 'Search for a movie…' });
-  const doSearch = debounce(async () => {
-    const term = input.value.trim();
-    if (!term) return clear(results);
-    mount(results, spinner());
-    try {
-      const found = await arr.get(`movie/lookup?term=${encodeURIComponent(term)}`);
-      if (!found.length) return mount(results, empty('', 'No matches'));
-      mount(results, ...found.slice(0, 10).map((r) => lookupRow(r, arr, ctx)));
-    } catch (e) { mount(results, empty('', 'Search failed', e.message)); }
-  }, 400);
-  input.addEventListener('input', doSearch);
-  openModal({ title: 'Add Movie', body: h('div', {}, input, results), wide: true });
-  setTimeout(() => input.focus(), 50);
+  openLookupModal({
+    title: 'Add Movie',
+    placeholder: 'Search for a movie…',
+    lookup: (term) => arr.get(`movie/lookup?term=${encodeURIComponent(term)}`),
+    renderRow: (r) => lookupRow(r, arr, ctx),
+  });
 }
 
 function lookupRow(r, arr, ctx) {
