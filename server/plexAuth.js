@@ -7,20 +7,31 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as store from './store.js';
+import { writeFileAtomic } from './store.js';
 
 const PLEX_API = 'https://plex.tv/api/v2';
 const COOKIE = 'acc_session';
+const STATE_FILE = 'auth-state.json';
 
-// Persist a stable client identifier + session secret across restarts.
-function loadState(root) {
-  const file = path.join(root, '.auth-state.json');
+// Persist a stable Plex client identifier + session secret across restarts.
+// Lives in the data directory (a mounted volume in Docker): the app root is not
+// writable by the container's non-root user, so state written there was lost on
+// every rebuild — signing everyone out and registering a new Plex "device".
+// A legacy <root>/.auth-state.json is migrated so existing sessions survive.
+function loadState(root, dataDir) {
+  const file = path.join(dataDir, STATE_FILE);
+  const read = (f) => { try { const s = JSON.parse(fs.readFileSync(f, 'utf8')); return s && s.clientId && s.sessionSecret ? s : null; } catch { return null; } };
+  let state = read(file);
+  if (state) return state;
+  const legacy = read(path.join(root, '.auth-state.json'));
+  state = legacy || { clientId: crypto.randomUUID(), sessionSecret: crypto.randomBytes(32).toString('hex') };
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    const state = { clientId: crypto.randomUUID(), sessionSecret: crypto.randomBytes(32).toString('hex') };
-    try { fs.writeFileSync(file, JSON.stringify(state, null, 2)); } catch { /* best effort */ }
-    return state;
+    writeFileAtomic(file, JSON.stringify(state, null, 2));
+    if (legacy) console.log(`[auth] migrated sign-in state to ${file}`);
+  } catch (e) {
+    console.warn(`[auth] could not persist sign-in state to ${file} (${e.message}); sessions will reset on restart. Mount a writable data volume or set SESSION_SECRET.`);
   }
+  return state;
 }
 
 function getCookie(req, name) {
@@ -44,7 +55,7 @@ function plexHeaders(clientId, product) {
   };
 }
 
-export function createPlexAuth(cfg, { root, publicDir, authStore = store }) {
+export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root, 'data'), authStore = store }) {
   const pcfg = (cfg.auth && cfg.auth.plex) || {};
   const enabled = !!pcfg.enabled;
   const product = pcfg.product || 'Arr Command Center';
@@ -61,7 +72,7 @@ export function createPlexAuth(cfg, { root, publicDir, authStore = store }) {
     console.warn('[auth] Plex auth is ENABLED with allowAnyPlexUser=true — ANY Plex account can sign in. Set auth.plex.allowedUsers to restrict access.');
   }
 
-  const state = loadState(root);
+  const state = loadState(root, dataDir);
   const clientId = pcfg.clientId || state.clientId;
   const secret = process.env.SESSION_SECRET || pcfg.sessionSecret || state.sessionSecret;
 

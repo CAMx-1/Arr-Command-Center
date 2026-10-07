@@ -1,5 +1,6 @@
 # Arr Command Center
-FROM node:23-alpine
+# Node 24 is the Active LTS line (security fixes through April 2028).
+FROM node:24-alpine
 
 ENV NODE_ENV=production
 WORKDIR /app

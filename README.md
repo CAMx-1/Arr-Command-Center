@@ -300,6 +300,7 @@ services:
   arr-command-center:
     volumes:
       - ./config.json:/app/config.json:ro
+      - ./data:/app/data
       - /Volumes/New-14:/Volumes/New-14:ro
       - /Volumes/12-1:/Volumes/12-1:ro
     environment:
@@ -319,6 +320,7 @@ For plain Docker, use the equivalent individual mounts:
 docker run -d --name arr-command-center \
   -p 7373:7373 \
   -v "$PWD/config.json:/app/config.json:ro" \
+  -v "$PWD/data:/app/data" \
   -v "/Volumes/New-14:/Volumes/New-14:ro" \
   -e SYSTEM_DISKS=/Volumes/New-14 \
   arr-command-center
@@ -328,11 +330,19 @@ docker run -d --name arr-command-center \
 
 ```bash
 docker build -t arr-command-center .
+mkdir -p data
 docker run -d --name arr-command-center \
   -p 7373:7373 \
   -v "$PWD/config.json:/app/config.json:ro" \
+  -v "$PWD/data:/app/data" \
+  --log-opt max-size=10m --log-opt max-file=3 \
   arr-command-center
 ```
+
+Always mount `data/`: it holds everything the app saves (custom links, push
+subscriptions, automation state, login log, Plex token) and the Plex sign-in
+secret. Without it, that data is lost and everyone is signed out on each rebuild.
+Behind HTTPS (e.g. Cloudflare Tunnel), also pass `-e SECURE_COOKIES=true`.
 
 If your arr services are also in Docker, put this container on the **same Docker network**
 and you can use internal hostnames as `baseUrl` (e.g. `http://sonarr:8989`). Note that

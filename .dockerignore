@@ -1,0 +1,32 @@
+# Keep the Docker build context small: the image only needs package*.json,
+# server/ and public/ (see Dockerfile). Without this, every build uploaded the
+# whole repo, including ~1.2 GB of iOS build output.
+
+# Native app + build output
+ios/
+android/
+DerivedData/
+capacitor.config.json
+
+# Dependencies are installed inside the image
+node_modules/
+
+# Local runtime state and secrets (mount these at runtime instead)
+data/
+config.json
+.env
+.env.*
+!.env.example
+.auth-state.json
+
+# Dev / docs / tests
+.git/
+.github/
+docs/
+test/
+server/test/
+*.md
+!README.md
+*.log
+.DS_Store
+home-icon.png

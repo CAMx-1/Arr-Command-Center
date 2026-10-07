@@ -11,6 +11,11 @@ services:
     volumes:
       # Provide your real config with secrets via a bind mount (recommended).
       - ./config.json:/app/config.json:ro
+      # REQUIRED for anything the app saves: custom links, push subscriptions
+      # and VAPID keys, automation state, the login log, the captured Plex
+      # token, and the Plex sign-in secret (without it everyone is signed out on
+      # every rebuild). Create it first so it's owned by you: `mkdir -p data`.
+      - ./data:/app/data
       # Docker cannot see host disks unless they are explicitly mounted. On
       # macOS, mount EACH volume individually (mounting /Volumes as one parent
       # reports the startup disk's capacity for every child):
@@ -21,9 +26,20 @@ services:
     environment:
       - PORT=7373
       - HOST=0.0.0.0
+      # Behind HTTPS (Cloudflare Tunnel/Access or a TLS reverse proxy), mark the
+      # sign-in cookie Secure. Leave off if you open the dashboard over plain
+      # http:// (e.g. a LAN IP), or sign-in will not stick.
+      # - SECURE_COOKIES=true
       # Match the individual disk targets mounted above (comma-separated):
       # - SYSTEM_DISKS=/Volumes/New-14,/Volumes/12-1
       # - MOCK=1   # uncomment to run the bundled demo with fake data
+    # Cap container logs (Docker's default json-file log grows without bound;
+    # the app logs one line per request).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7373/healthcheck').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s

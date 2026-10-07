@@ -28,15 +28,33 @@ function load() {
   }
   return cache;
 }
+let failing = false; // log a failure streak once, not on every write
 function persist() {
   try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    // Atomic write: write to a temp file then rename, so a crash mid-write can't
-    // truncate/corrupt the store.
-    const tmp = `${FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(cache, null, 2));
-    fs.renameSync(tmp, FILE);
-  } catch (e) { console.error('[store] write failed:', e.message); }
+    writeFileAtomic(FILE, JSON.stringify(cache, null, 2));
+    if (failing) { failing = false; console.log('[store] writes recovered'); }
+  } catch (e) {
+    if (!failing) { failing = true; console.error(`[store] write failed (further failures suppressed until recovery): ${e.message}`); }
+  }
+}
+
+// Write `data` to `file` without risking a truncated file on crash: write a
+// uniquely named temp file next to it, then rename over the target. The unique
+// name matters on Docker Desktop for macOS, whose file sharing can get stuck
+// on a single cached name (a fixed "store.json.tmp" failed with ENOENT on every
+// write for days while any other name worked). If the temp+rename path fails,
+// fall back to writing the file in place so data still persists.
+export function writeFileAtomic(file, data) {
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}.tmp`);
+  try {
+    fs.writeFileSync(tmp, data);
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
+    try { fs.writeFileSync(file, data); } catch { throw e; } // in-place fallback
+  }
 }
 
 export function get(ns, def) { const d = load(); return d[ns] === undefined ? def : d[ns]; }
