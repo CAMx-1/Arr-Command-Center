@@ -1,8 +1,10 @@
 services:
   arr-command-center:
+    # Build from this checkout. To use the prebuilt multi-arch image instead
+    # (amd64 + arm64), comment out `build:` and uncomment `image:`. Tags:
+    # latest (newest release), 1.2.1 / 1.2 / 1 (pinned), edge (main branch).
     build: .
-    # Or use a prebuilt image once you publish one:
-    # image: yourname/arr-command-center:latest
+    # image: ghcr.io/camx-1/arr-command-center:latest
     container_name: arr-command-center
     restart: unless-stopped
     init: true

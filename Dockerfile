@@ -24,6 +24,12 @@ USER node
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||7373)+'/healthcheck').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
+# Exact build identity for the update banner (CI passes the git commit). Empty
+# means "derive from package version + asset mtimes" (see server/index.js).
+# Declared late so changing it doesn't invalidate the dependency layers.
+ARG BUILD_ID=
+ENV BUILD_ID=${BUILD_ID}
+
 # The server handles SIGTERM for graceful shutdown.
 STOPSIGNAL SIGTERM
 CMD ["node", "server/index.js"]

@@ -1,0 +1,117 @@
+# Build and publish the server image to GitHub Container Registry (ghcr.io)
+# for linux/amd64 + linux/arm64 (Intel, Apple Silicon, Raspberry Pi 4/5, NAS).
+#
+# Tags produced:
+#   push to main      -> :edge, :sha-<short>
+#   tag v1.2.3        -> :1.2.3, :1.2, :1, :latest, :sha-<short>
+#   pull request      -> build + smoke test only (nothing pushed)
+#
+# Actions are pinned to full commit SHAs (version noted alongside) so a moved
+# tag upstream can't change what runs with this repo's write token.
+name: Docker image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+    paths-ignore: ['ios/**', 'docs/**']
+  pull_request:
+    paths-ignore: ['ios/**', 'docs/**']
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # push to ghcr.io
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Image name (lowercase, as GHCR requires)
+        id: name
+        run: echo "image=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU (arm64 emulation)
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.name.outputs.image }}
+          tags: |
+            type=edge,branch=main
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=Arr Command Center
+            org.opencontainers.image.description=Self-hosted dashboard for Sonarr, Radarr, Seerr, SABnzbd and more
+            org.opencontainers.image.licenses=MIT
+
+      # Build for the runner's own platform first and run it, so a broken
+      # image never reaches the registry.
+      - name: Build (amd64) for smoke test
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: acc-smoke:ci
+          build-args: BUILD_ID=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test (demo mode)
+        run: |
+          docker run -d --name acc -e MOCK=1 -p 7373:7373 acc-smoke:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:7373/healthcheck; then echo; break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:7373/healthcheck | grep -q '"status":"ok"'
+          curl -fsS http://127.0.0.1:7373/ | grep -qi '<title>Arr Command Center'
+          test "$(curl -fsS http://127.0.0.1:7373/api/version | sed -E 's/.*"version":"([^"]+)".*/\1/')" = "${GITHUB_SHA}"
+          docker exec acc node -v
+          docker logs acc | tail -n 20
+          docker rm -f acc
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (amd64 + arm64)
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          build-args: BUILD_ID=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

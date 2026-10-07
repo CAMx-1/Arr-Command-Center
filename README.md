@@ -326,6 +326,22 @@ docker run -d --name arr-command-center \
   arr-command-center
 ```
 
+**Prebuilt image (no build needed):** every release is published to GitHub Container
+Registry for `linux/amd64` and `linux/arm64`:
+
+```bash
+mkdir -p data
+docker run -d --name arr-command-center \
+  -p 7373:7373 \
+  -v "$PWD/config.json:/app/config.json:ro" \
+  -v "$PWD/data:/app/data" \
+  --log-opt max-size=10m --log-opt max-file=3 \
+  ghcr.io/camx-1/arr-command-center:latest
+```
+
+Tags: `latest` (newest release), `1.2.1` / `1.2` / `1` (pin a release line), `edge`
+(current `main`), and `sha-<commit>`. Update with `docker pull` + recreate the container.
+
 **Plain docker:**
 
 ```bash
