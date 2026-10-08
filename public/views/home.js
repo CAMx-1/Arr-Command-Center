@@ -1,10 +1,11 @@
-import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast, openModal } from '../lib/ui.js';
+import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast, openModal, confirmModal } from '../lib/ui.js';
 import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
 import { SERVICE_META, attachLongPress, openServiceQuickActions, openInArr } from '../app.js';
 import { listFailed, removeFailed } from '../lib/failedRequests.js';
 import { visibleServices } from '../lib/servicePrefs.js';
 import { loadDashboards, activeDashboard, workspaceServices, widgetServices } from '../lib/dashboardPrefs.js';
 import { actionGroup } from '../lib/actions.js';
+import { queueActionList } from '../lib/queueActions.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { getSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
 import { persistentSWR } from '../lib/cache.js';
@@ -231,6 +232,7 @@ function renderSeerrWidget(panel, ctx) {
     h('span', { class: 'pill muted' }, `${summary.requests || 0} requests`),
     h('span', { class: summary.pending ? 'pill warn' : 'pill muted' }, `${summary.pending || 0} pending`),
     h('span', { class: summary.issues ? 'pill down' : 'pill muted' }, `${summary.issues || 0} open issues`),
+    approveAllButton(ctx, entries),
   );
   if (!entries.length) {
     mount(panel, badges, dashboardFeedEmpty('No Seerr requests or open issues', 'New requests and reported issues will appear here'));
@@ -336,24 +338,77 @@ function operationRow(entry, ctx, actionable = false) {
   const meta = SERVICE_META[entry.serviceType] || {};
   const requestBadge = seerrRequestBadge(entry);
   let actions = null;
+  let row = null;
   if (actionable && entry.action?.type === 'overseerr-request') {
-    const act = async (verb, event) => {
-      event.stopPropagation();
-      try { await ctx.api.seerr(entry.serviceKey).post(`request/${entry.action.requestId}/${verb}`); toast(`Request ${verb}d`, 'success'); await hydrateOperations(ctx, false, true); }
-      catch (error) { toast(error.message, 'error'); }
-    };
-    actions = actionGroup([
-      { label: 'Approve', variant: 'primary', primary: true, onClick: (event) => act('approve', event) },
-      { label: 'Decline', variant: 'danger', onClick: (event) => act('decline', event) },
-    ], { sheetTitle: entry.title });
+    actions = seerrDecisionButtons(entry, ctx, () => row);
+  } else if (actionable && entry.action?.type === 'arr-queue' && entry.queue && (entry.serviceType === 'sonarr' || entry.serviceType === 'radarr')) {
+    // Fix import / Remove… / Blocklist & search, right in the inbox.
+    const kind = entry.serviceType === 'sonarr' ? 'series' : 'movie';
+    const list = queueActionList(ctx.api.arr(entry.serviceKey), kind, entry.queue, { onDone: () => hydrateOperations(ctx, false, true) })
+      .map((a) => ({ ...a, onClick: (e) => { e?.stopPropagation?.(); return a.onClick(e); } }));
+    actions = actionGroup(list, { sheetTitle: entry.title });
   }
-  return h('div', { class: `row dashboard-feed-row operation-row severity-${entry.severity || 'info'}${entry.serviceKey ? ' clickable' : ''}`, onclick: navigate },
+  row = h('div', { class: `row dashboard-feed-row operation-row severity-${entry.severity || 'info'}${entry.serviceKey ? ' clickable' : ''}`, onclick: navigate },
     h('div', { class: 'poster dashboard-feed-icon' }, svcIcon(meta.logo, meta.emoji || '•', 22)),
     h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, entry.title),
       h('div', { class: 'row-sub' }, `${entry.serviceLabel || ''}${entry.detail ? ` · ${entry.detail}` : ''}`),
       h('div', { class: 'meta-line' }, h('span', { class: `pill ${requestBadge?.cls || 'muted'}` }, requestBadge?.label || entry.kind || 'event'), entry.at ? h('span', {}, fmtRelative(entry.at)) : null)),
     actions,
   );
+  return row;
+}
+
+// Approve / Decline as two always-visible buttons (also on phones, where an
+// action group would hide Decline behind "⋯"). The row updates in place —
+// status pill flips, buttons give way to a result — instead of reloading the
+// whole feed, so the list doesn't jump while you work through it.
+function seerrDecisionButtons(entry, ctx, getRow) {
+  const wrap = h('div', { class: 'row-actions seerr-decide' });
+  const decide = async (verb, event) => {
+    event.stopPropagation();
+    const btns = [...wrap.querySelectorAll('button')];
+    btns.forEach((b) => { b.disabled = true; });
+    try {
+      await ctx.api.seerr(entry.serviceKey).post(`request/${entry.action.requestId}/${verb}`);
+      markSeerrDecided(getRow(), wrap, verb);
+      toast(`Request ${verb}d`, 'success');
+      setTimeout(() => hydrateOperations(ctx, true, true), 1600); // refresh counts after the row settles
+    } catch (error) {
+      btns.forEach((b) => { b.disabled = false; });
+      toast(error.message, 'error');
+    }
+  };
+  wrap.append(
+    h('button', { class: 'btn sm primary', type: 'button', 'aria-label': `Approve ${entry.title}`, onclick: (e) => decide('approve', e) }, '✓ Approve'),
+    h('button', { class: 'btn sm danger', type: 'button', 'aria-label': `Decline ${entry.title}`, onclick: (e) => decide('decline', e) }, '× Decline'),
+  );
+  return wrap;
+}
+
+function markSeerrDecided(row, wrap, verb) {
+  if (!row) return;
+  const approved = verb === 'approve';
+  const pill = row.querySelector('.meta-line .pill');
+  if (pill) { pill.className = `pill ${approved ? 'ok' : 'down'}`; pill.textContent = approved ? 'Approved' : 'Declined'; }
+  wrap.replaceChildren(h('span', { class: `seerr-decided ${approved ? 'ok' : 'down'}` }, approved ? '✓ Approved' : '× Declined'));
+  row.classList.add('decided');
+}
+
+// "Approve all" for the Seerr widget header (pending requests only).
+function approveAllButton(ctx, entries) {
+  const pending = entries.filter((e) => e.action?.type === 'overseerr-request');
+  if (pending.length < 2) return null;
+  return h('button', { class: 'btn sm primary seerr-approve-all', type: 'button', onclick: () => confirmModal({
+    title: `Approve ${pending.length} requests?`,
+    message: pending.slice(0, 8).map((e) => e.title).join(' · ') + (pending.length > 8 ? ` · and ${pending.length - 8} more` : ''),
+    confirmLabel: `Approve ${pending.length}`,
+    onConfirm: async () => {
+      const results = await Promise.allSettled(pending.map((e) => ctx.api.seerr(e.serviceKey).post(`request/${e.action.requestId}/approve`)));
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      toast(failed ? `Approved ${pending.length - failed}, ${failed} failed` : `Approved ${pending.length} requests`, failed ? 'error' : 'success');
+      hydrateOperations(ctx, false, true);
+    },
+  }) }, `✓ Approve all (${pending.length})`);
 }
 
 function wireTimeline(ctx) {

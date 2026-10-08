@@ -7,6 +7,7 @@ import { tabSystem, tabWanted } from './arrSystem.js';
 import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, cachedList, invalidate } from '../lib/cache.js';
+import { queueActions } from '../lib/queueActions.js';
 import { openLookupModal } from '../lib/lookupSearch.js';
 import { libraryFilter } from '../lib/libraryFilter.js';
 import { tagEditor, arrCommandBar, loadTags, queueImportAction, queueStatePill, queueStuckReason } from '../lib/arrActions.js';
@@ -287,17 +288,7 @@ function queueRow(r, arr, ctx) {
       queueStuckReason(r),
       h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })),
     ),
-    actionGroup([
-      queueImportAction(arr, 'movie', r, ctx),
-      { label: '\u00d7 Remove', variant: 'danger', primary: !isImportStuck(r), onClick: remove },
-      { label: '\u26D4 Blocklist & search', title: 'Blocklist this release and search for a replacement', onClick: async () => {
-        try {
-          await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=true`);
-          if (r.movieId) await arr.post('command', { name: 'MoviesSearch', movieIds: [r.movieId] });
-          toast('Blocklisted & searching for a replacement', 'success'); ctx.reload();
-        } catch (e) { toast(e.message, 'error'); }
-      } },
-    ], { sheetTitle: r.title }),
+    queueActions(arr, 'movie', r, { onDone: () => ctx.reload() }),
   );
   return swipeToAction(row, remove); // swipe left to remove (touch)
 }

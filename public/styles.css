@@ -1290,3 +1290,23 @@ button, [role="button"], input, select, textarea { touch-action: manipulation; }
 @media (prefers-reduced-transparency: reduce) {
   .allsvc-backdrop, .modal-overlay, .sidebar-backdrop { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 }
+
+/* ---- Feed actions prototype: Seerr decisions + queue remove dialog ---- */
+.seerr-decide { display: flex; gap: 8px; flex-wrap: nowrap; }
+.seerr-decide .btn { white-space: nowrap; }
+.seerr-decided { font-weight: 700; font-size: 13px; padding: 6px 4px; }
+.seerr-decided.ok { color: var(--green, #16a34a); }
+.seerr-decided.down { color: var(--red, #dc2626); }
+.row.decided { opacity: 0.6; transition: opacity 0.3s var(--ease); }
+.seerr-widget-summary .seerr-approve-all { margin-left: auto; }
+.queue-remove-title { margin: 0 0 12px; font-weight: 700; word-break: break-word; }
+.queue-remove-opt { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border); cursor: pointer; }
+.queue-remove-opt input { margin-top: 3px; width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--accent); }
+.queue-remove-opt span { display: flex; flex-direction: column; gap: 2px; }
+.queue-remove-opt .dim { font-size: 12.5px; }
+.queue-remove-opt.disabled { opacity: 0.45; cursor: default; }
+@media (max-width: 720px) {
+  /* Both decisions stay visible on phones (no "⋯" sheet for a two-choice action). */
+  .row .row-actions.seerr-decide { flex-wrap: nowrap; }
+  .row .row-actions.seerr-decide .btn { flex: 1 1 0; }
+}
