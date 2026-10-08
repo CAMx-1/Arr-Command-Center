@@ -475,6 +475,10 @@ html[data-theme="dark"] .hex-disk-fill {
 .search-submit { flex: 0 0 auto; }
 .search-filters { margin-top: 10px; }
 .search-results { margin-top: 12px; }
+/* Interactive search season picker: one tap per season, scrolls sideways on
+   phones instead of wrapping into a tall block. */
+.season-chips { display: flex; gap: 6px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; padding: 2px 2px 6px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+.season-chips .season-chip { flex: 0 0 auto; scroll-snap-align: start; min-width: 56px; }
 
 /* tabs */
 .tabs { position: relative; display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin-bottom: 20px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none; }

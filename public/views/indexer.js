@@ -1,4 +1,5 @@
 import { h, mount, clear, toast, empty, spinner, fmtBytes, fmtRelative, debounce, openModal, closeModal } from '../lib/ui.js';
+import { dismissNativeKeyboard } from '../lib/nativeApp.js';
 import { actionGroup } from '../lib/actions.js';
 
 // Usenet indexer search — LunaSea-style "Search" for public indexers such as
@@ -138,7 +139,7 @@ export function renderIndexer(root, ctx) {
   };
   const debounced = debounce(doSearch, 400);
   input.addEventListener('input', debounced);
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { doSearch(); void dismissNativeKeyboard(input); } });
 
   renderSegs();
   mount(root,

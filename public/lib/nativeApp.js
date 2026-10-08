@@ -125,6 +125,20 @@ export async function dismissNativeKeyboard(element = globalThis.document?.activ
   try { await plugin('Keyboard')?.hide?.(); } catch { /* optional native plugin */ }
 }
 
+// Live-filter search boxes have nothing to "submit", so the keyboard's Search /
+// Return key did nothing and the keyboard stayed up over the results. Treat
+// Enter as "done": dismiss the keyboard and keep the current filter. Fields
+// inside a <form> keep their normal submit behavior (the form's handler runs).
+export function dismissKeyboardOnEnter(input) {
+  if (!input || !input.addEventListener) return input;
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    if (!input.form) e.preventDefault();
+    void dismissNativeKeyboard(input);
+  });
+  return input;
+}
+
 export function installNativeKeyboardHandling(nav) {
   if (!isNativeApp()) return () => {};
   const keyboard = plugin('Keyboard');
@@ -132,6 +146,12 @@ export function installNativeKeyboardHandling(nav) {
   const handles = [];
   const listen = async (name, fn) => { try { handles.push(await keyboard.addListener(name, fn)); } catch { /* ignore */ } };
   listen('keyboardWillShow', (info = {}) => {
+    // iOS also reports its <select> picker as a keyboard. Lifting/shrinking the
+    // sheet for it moves the select out from under its own picker, which iOS
+    // then dismisses (the Season dropdown needed several taps, or never
+    // opened). Only real text entry should reflow the layout.
+    const ae = document.activeElement;
+    if (ae && ae.tagName === 'SELECT') return;
     document.documentElement.classList.add('native-keyboard-open');
     document.documentElement.style.setProperty('--keyboard-height', `${Math.max(0, Number(info.keyboardHeight) || 0)}px`);
     nav?.classList.add('kb-hidden');

@@ -1,4 +1,5 @@
 import { h, mount, tabs, spinner, skeletonList, empty, toast, fmtRelative, timeEl, openModal, closeModal } from '../lib/ui.js';
+import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet } from '../lib/cache.js';
@@ -112,7 +113,7 @@ function filterBar(defs, items, onChange) {
     const t = term.trim().toLowerCase();
     onChange(items.filter((it) => def.test(it) && (!t || String(it.title || it.seriesTitle || '').toLowerCase().includes(t))));
   };
-  const search = h('input', { class: 'input lib-filter-search', type: 'search', placeholder: 'Filter by title…' });
+  const search = dismissKeyboardOnEnter(h('input', { class: 'input lib-filter-search', type: 'search', enterkeyhint: 'search', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Filter by title…' }));
   search.addEventListener('input', () => { term = search.value; apply(); });
   const sel = h('select', { class: 'input lib-filter-select' }, ...defs.map((d) => h('option', { value: d.id }, d.label)));
   sel.addEventListener('change', () => { statusId = sel.value; apply(); });

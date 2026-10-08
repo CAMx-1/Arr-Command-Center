@@ -532,35 +532,65 @@ function openInteractive(ctx, arr, s) {
     return openReleaseSearch(ctx, ctx.service.key, `seriesId=${s.id}`, s.title);
   }
 
-  const seasonSel = h('select', { class: 'input' }, ...seasons.map((x) => h('option', { value: x.seasonNumber }, `Season ${x.seasonNumber}`)));
+  // Season picker as a row of buttons instead of a native <select>: on iPhone
+  // the select's picker fought the sheet's keyboard handling (it needed several
+  // taps or never opened), and buttons are one tap instead of two anyway.
+  let seasonNumber = seasons[0].seasonNumber;
+  const seasonBar = h('div', { class: 'season-chips', role: 'radiogroup', 'aria-label': 'Season' },
+    ...seasons.map((x) => h('button', {
+      type: 'button', class: 'btn sm season-chip', role: 'radio', dataset: { season: String(x.seasonNumber) },
+      'aria-label': `Season ${x.seasonNumber}`,
+      onclick: () => { if (seasonNumber !== x.seasonNumber) { seasonNumber = x.seasonNumber; paintSeasons(); loadEpisodes(); } },
+    }, `S${x.seasonNumber}`)));
+  const paintSeasons = () => {
+    for (const b of seasonBar.children) {
+      const on = Number(b.dataset.season) === seasonNumber;
+      b.classList.toggle('primary', on);
+      b.setAttribute('aria-checked', String(on));
+      b.tabIndex = on ? 0 : -1;
+      if (on) requestAnimationFrame(() => b.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+    }
+  };
+  // Arrow keys move between seasons (radiogroup keyboard pattern).
+  seasonBar.addEventListener('keydown', (e) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    const btns = [...seasonBar.children];
+    const i = btns.findIndex((b) => Number(b.dataset.season) === seasonNumber);
+    const n = e.key === 'Home' ? 0 : e.key === 'End' ? btns.length - 1 : Math.max(0, Math.min(btns.length - 1, i + (e.key === 'ArrowRight' ? 1 : -1)));
+    e.preventDefault();
+    btns[n].click(); btns[n].focus();
+  });
   const epList = h('div', { class: 'list', style: { marginTop: '4px' } });
 
+  let loadRun = 0;
   const loadEpisodes = async () => {
+    const run = ++loadRun;
+    const sn = seasonNumber;
     mount(epList, spinner());
-    const seasonNumber = Number(seasonSel.value);
     try {
-      const episodes = await arr.get(`episode?seriesId=${s.id}&seasonNumber=${seasonNumber}`);
+      const episodes = await arr.get(`episode?seriesId=${s.id}&seasonNumber=${sn}`);
+      if (run !== loadRun) return; // a newer season was picked meanwhile
       episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
       if (!episodes.length) return mount(epList, empty('', 'No episodes in this season'));
       mount(epList,
         h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' } },
-          h('button', { class: 'btn sm', onclick: () => openReleaseSearch(ctx, ctx.service.key, `seriesId=${s.id}&seasonNumber=${seasonNumber}`, `${s.title} — Season ${seasonNumber}`) }, 'Search whole season'),
+          h('button', { class: 'btn sm', onclick: () => openReleaseSearch(ctx, ctx.service.key, `seriesId=${s.id}&seasonNumber=${sn}`, `${s.title} — Season ${sn}`) }, 'Search whole season'),
         ),
         ...episodes.map((ep) => episodeRow(ep, s, ctx)),
       );
-    } catch (e) { mount(epList, empty('', 'Failed to load episodes', e.message)); }
+    } catch (e) { if (run === loadRun) mount(epList, empty('', 'Failed to load episodes', e.message)); }
   };
-  seasonSel.addEventListener('change', loadEpisodes);
 
   openModal({
     title: `Interactive Search — ${s.title}`,
     wide: true,
     body: h('div', {},
-      field('Season', seasonSel),
+      field('Season', seasonBar),
       h('div', { class: 'section-title', style: { margin: '16px 0 6px' } }, 'Episodes'),
       epList,
     ),
   });
+  paintSeasons();
   loadEpisodes();
 }
 

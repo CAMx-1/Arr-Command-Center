@@ -2,6 +2,7 @@
 // libraries. Renders a title search box + a status dropdown and calls
 // onChange(filteredItems) whenever either changes.
 import { h } from './ui.js';
+import { dismissKeyboardOnEnter } from './nativeApp.js';
 
 // Status filter definitions per media kind. `test(item)` returns true when the
 // item should be shown for that option.
@@ -46,6 +47,7 @@ export function libraryFilter(kind, items, onChange, { initialTerm = '', initial
 
   const search = h('input', { class: 'input lib-filter-search', type: 'search', enterkeyhint: 'search', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Filter by title…', value: term });
   search.addEventListener('input', () => { term = search.value; apply(); if (onStateChange) onStateChange({ term, status: statusId }); });
+  dismissKeyboardOnEnter(search); // results already filter live; Search/Return just closes the keyboard
 
   const sel = h('select', { class: 'input lib-filter-select' }, ...defs.map((d) => h('option', { value: d.id, selected: d.id === statusId }, d.label)));
   sel.value = statusId;

@@ -1,4 +1,5 @@
 import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast, openModal } from '../lib/ui.js';
+import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
 import { SERVICE_META, attachLongPress, openServiceQuickActions, openInArr } from '../app.js';
 import { listFailed, removeFailed } from '../lib/failedRequests.js';
 import { visibleServices } from '../lib/servicePrefs.js';
@@ -71,7 +72,7 @@ export async function renderHome(root, ctx) {
     services: honeycomb,
     activity: h('div', { class: 'dashboard-feed' },
       h('div', { class: 'timeline-tools dashboard-feed-tools' },
-        h('input', { class: 'input', id: 'timeline-search', type: 'search', placeholder: 'Filter activity…' }),
+        dismissKeyboardOnEnter(h('input', { class: 'input', id: 'timeline-search', type: 'search', enterkeyhint: 'search', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Filter activity…' })),
         h('select', { class: 'input', id: 'timeline-kind' }, h('option', { value: '' }, 'All events')),
       ),
       h('div', { class: 'card panel-bare dashboard-feed-panel', id: 'activity-panel' }, h('div', { class: 'dim' }, 'Loading activity…')),
