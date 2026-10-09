@@ -6,7 +6,7 @@ import { tabSystem, tabWanted } from './arrSystem.js';
 import { hive, virtualHive, posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, cachedList, invalidate } from '../lib/cache.js';
-import { queueActions } from '../lib/queueActions.js';
+import { queueActions, removeWithUndo } from '../lib/queueActions.js';
 import { openLookupModal } from '../lib/lookupSearch.js';
 import { libraryFilter } from '../lib/libraryFilter.js';
 import { tagEditor, arrCommandBar, loadTags, queueImportAction, queueStatePill, queueStuckReason } from '../lib/arrActions.js';
@@ -281,10 +281,8 @@ function queueAttentionBanner(records, ctx) {
 
 function queueRow(r, arr, ctx) {
   const prog = r.size ? ((r.size - (r.sizeleft || 0)) / r.size) * 100 : 0;
-  const remove = async () => {
-    try { await arr.del(`queue/${r.id}?removeFromClient=true&blocklist=false`); toast('Removed from queue', 'success'); ctx.reload(); }
-    catch (e) { toast(e.message, 'error'); }
-  };
+  // Swipe-to-remove: plain remove with the same 5-second undo as the buttons.
+  const remove = () => removeWithUndo(arr, r, { removeFromClient: true }, { onDone: () => ctx.reload(), rowEl: row });
   const row = h('div', { class: 'row' },
     h('div', { class: 'poster', style: { width: '40px', height: '40px', fontSize: '18px' } }, '⬇'),
     h('div', { class: 'row-main' },

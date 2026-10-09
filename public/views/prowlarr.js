@@ -87,9 +87,10 @@ const catNames = (ix) => {
 async function tabIndexers(root, ctx, px) {
   mount(root, skeletonList());
   try {
-    const [indexers, statsResp] = await Promise.all([
+    const [indexers, statsResp, apps] = await Promise.all([
       px.get('indexer'),
       px.get('indexerstats').catch(() => null),
+      px.get('applications').catch(() => []),
     ]);
     const statById = {};
     if (statsResp && Array.isArray(statsResp.indexers)) {
@@ -109,7 +110,10 @@ async function tabIndexers(root, ctx, px) {
     const list = effectiveMode(ctx.service.key) === 'hex'
       ? hive(indexers.map((ix) => indexerHex(ix, statById[ix.id], px, reload)), root.clientWidth)
       : h('div', { class: 'list' }, ...indexers.map((ix) => indexerRow(ix, statById[ix.id], px, reload)));
-    mount(root, header, h('div', { class: 'section-title' }, 'Indexers'), list);
+    mount(root, header,
+      indexerToolbar(indexers, px, reload, list),
+      h('div', { class: 'section-title' }, 'Indexers'), list,
+      appsSection(apps, px));
   } catch (err) {
     mount(root, empty('', 'Failed to load indexers', err.message, { label: 'Retry', onClick: () => tabIndexers(root, ctx, px) }));
   }
@@ -132,15 +136,116 @@ function indexerRow(ix, stat, px, reload) {
       ),
     ),
     h('div', { class: 'row-actions' },
+      enableToggle(ix, px, reload),
       h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); testIndexer(ix, px); } }, 'Test'),
       h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); openEdit(ix, px, reload); } }, 'Edit'),
     ),
   );
 }
 
+// Inline enable/disable switch (full-resource PUT, like Prowlarr's own UI).
+function enableToggle(ix, px, reload) {
+  const input = h('input', { type: 'checkbox', role: 'switch', checked: ix.enable ? 'checked' : null, 'aria-label': `${ix.enable ? 'Disable' : 'Enable'} ${ix.name}` });
+  const wrap = h('label', { class: 'pw-switch', title: ix.enable ? 'Enabled — click to disable' : 'Disabled — click to enable', onclick: (e) => e.stopPropagation() },
+    input, h('span', { class: 'pw-switch-track', 'aria-hidden': 'true' }));
+  input.addEventListener('change', async () => {
+    const enable = input.checked;
+    input.disabled = true;
+    try {
+      await px.put(`indexer/${ix.id}`, { ...ix, enable });
+      toast(`${ix.name} ${enable ? 'enabled' : 'disabled'}`, 'success', 1800);
+      reload();
+    } catch (err) { input.checked = !enable; input.disabled = false; toast(`${ix.name}: ${err.message}`, 'error'); }
+  });
+  return wrap;
+}
+
+// "Test all" + "Sync apps" bar. Test results are painted onto each row.
+function indexerToolbar(indexers, px, reload, list) {
+  const testAll = h('button', { class: 'btn sm', type: 'button' }, 'Test all');
+  const sync = h('button', { class: 'btn sm primary', type: 'button', title: 'Push indexer changes to Sonarr, Radarr and other connected apps' }, 'Sync apps');
+  const result = h('span', { class: 'dim pw-toolbar-result', 'aria-live': 'polite' });
+  testAll.addEventListener('click', async () => {
+    testAll.disabled = true; testAll.textContent = 'Testing…'; result.textContent = '';
+    try {
+      const res = await px.post('indexer/testall', {});
+      const failed = (res || []).filter((r) => !r.isValid);
+      paintTestResults(list, indexers, res || []);
+      result.textContent = failed.length ? `${failed.length} of ${res.length} failed` : `All ${res.length} passed`;
+      result.className = `pw-toolbar-result ${failed.length ? 'bad' : 'good'}`;
+    } catch (err) { toast(err.message, 'error'); }
+    testAll.disabled = false; testAll.textContent = 'Test all';
+  });
+  sync.addEventListener('click', async () => {
+    sync.disabled = true; sync.textContent = 'Syncing…';
+    try {
+      const cmd = await px.post('command', { name: 'ApplicationIndexerSync' });
+      const done = await waitForCommand(px, cmd && cmd.id);
+      toast(done === 'failed' ? 'App sync failed — check Prowlarr logs' : 'Indexers synced to apps', done === 'failed' ? 'error' : 'success');
+    } catch (err) { toast(err.message, 'error'); }
+    sync.disabled = false; sync.textContent = 'Sync apps';
+  });
+  const enabled = indexers.filter((i) => i.enable).length;
+  return h('div', { class: 'pw-toolbar' }, testAll, sync, result,
+    h('span', { class: 'dim pw-toolbar-note' }, `${enabled} of ${indexers.length} enabled`));
+}
+
+function paintTestResults(list, indexers, results) {
+  const byId = new Map(results.map((r) => [r.id, r]));
+  const rows = list.querySelectorAll(':scope > .row, :scope .seerr-hex');
+  indexers.forEach((ix, i) => {
+    const el = rows[i]; const r = byId.get(ix.id);
+    if (!el) return;
+    el.querySelector('.pw-test-pill')?.remove();
+    if (!r) return;
+    const msg = (r.validationFailures || []).map((f) => f.errorMessage).filter(Boolean).join('; ');
+    const pill = h('span', { class: `pill ${r.isValid ? 'ok' : 'down'} pw-test-pill`, title: msg || 'Test passed' }, r.isValid ? '✓ Test passed' : '× Test failed');
+    (el.querySelector('.meta-line') || el.querySelector('.hx-overlay') || el).appendChild(pill);
+    if (!r.isValid && msg && el.classList.contains('row')) {
+      el.querySelector('.pw-test-msg')?.remove();
+      el.querySelector('.row-main')?.appendChild(h('div', { class: 'pw-test-msg' }, msg));
+    }
+  });
+}
+
+async function waitForCommand(px, id, { tries = 15, ms = 1000 } = {}) {
+  if (!id) return 'unknown';
+  for (let i = 0; i < tries; i++) {
+    try {
+      const c = await px.get(`command/${id}`);
+      if (c && ['completed', 'failed', 'aborted', 'cancelled'].includes(c.status)) return c.status;
+    } catch { return 'unknown'; }
+    await new Promise((r) => setTimeout(r, ms));
+  }
+  return 'unknown';
+}
+
+// Connected apps (Sonarr/Radarr/…) that Prowlarr pushes indexers to.
+function appsSection(apps, px) {
+  if (!Array.isArray(apps) || !apps.length) return null;
+  const level = { fullSync: 'Full sync', addOnly: 'Add and remove only', disabled: 'Disabled' };
+  return h('div', {},
+    h('div', { class: 'section-title' }, 'Connected apps'),
+    h('div', { class: 'list' }, ...apps.map((a) => {
+      const url = (a.fields || []).find((f) => f.name === 'baseUrl')?.value;
+      return h('div', { class: 'row' },
+        h('div', { class: 'poster', style: { width: '40px', height: '40px', fontSize: '12px', fontWeight: '800' } }, (a.implementation || a.name || '?').slice(0, 3).toUpperCase()),
+        h('div', { class: 'row-main' },
+          h('div', { class: 'row-title' }, a.name),
+          h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+            h('span', { class: `pill ${a.syncLevel === 'disabled' ? 'muted' : 'ok'}` }, level[a.syncLevel] || a.syncLevel || 'Sync'),
+            h('span', { class: 'pill info' }, a.implementation || ''),
+            url ? h('span', { class: 'dim mono' }, url) : null,
+          ),
+        ),
+      );
+    })));
+}
+
 function indexerHex(ix, stat, px, reload) {
   const avg = stat && stat.averageResponseTime ? `${Math.round(stat.averageResponseTime)}ms` : null;
   const actions = h('div', { class: 'row-actions' },
+    enableToggle(ix, px, reload),
     h('button', { class: 'btn sm', title: 'Test connectivity', onclick: (e) => { e.stopPropagation(); testIndexer(ix, px); } }, 'Test'),
     h('button', { class: 'btn sm', title: 'Edit', onclick: (e) => { e.stopPropagation(); openEdit(ix, px, reload); } }, 'Edit'),
   );

@@ -5,7 +5,7 @@
 - Marketing version: `1.1.0`
 - Build number: `2` (increment for every TestFlight/App Store upload)
 - Bundle identifier: `app.arrcommandcenter.mobile`
-- Minimum deployment target: iOS 13.0
+- Minimum deployment target: iOS 15.0 (App Store Connect requires 15.0+ from April 2027)
 
 Update `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in the App target before each release. Keep `package.json` aligned with the marketing version.
 

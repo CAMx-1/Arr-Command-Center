@@ -30,6 +30,7 @@ export const MOCK_PORTS = {
   autobrr: 17474,
   maintainerr: 16246,
   tdarr: 18265,
+  prowlarr: 19696,
 };
 
 const cfSeen = {}; // service -> last seen CF headers
@@ -593,6 +594,50 @@ function makeTautulli() {
 }
 
 // ---------------- Bazarr (subtitle manager) ----------------
+// ---- Prowlarr (v1) ----
+// Indexer list/stats, enable/disable via PUT, single + bulk tests (one indexer
+// deliberately fails), connected apps, and the ApplicationIndexerSync command.
+function makeProwlarr() {
+  const app = express();
+  app.use(express.json());
+  const cats = (names) => ({ categories: names.map((name, i) => ({ id: 2000 + i * 1000, name })) });
+  let indexers = [
+    { id: 1, name: 'NZBgeek', protocol: 'usenet', enable: true, priority: 10, implementation: 'Newznab', capabilities: cats(['Movies', 'TV', 'Audio']) },
+    { id: 2, name: 'DrunkenSlug', protocol: 'usenet', enable: true, priority: 15, implementation: 'Newznab', capabilities: cats(['Movies', 'TV']) },
+    { id: 3, name: 'TorrentLeech', protocol: 'torrent', enable: true, priority: 25, implementation: 'TorrentLeech', capabilities: cats(['Movies', 'TV']) },
+    { id: 4, name: 'OldTracker', protocol: 'torrent', enable: false, priority: 40, implementation: 'Cardigann', capabilities: cats(['TV']) },
+  ];
+  const apps = [
+    { id: 1, name: 'Sonarr', implementation: 'Sonarr', syncLevel: 'fullSync', fields: [{ name: 'baseUrl', value: 'http://sonarr:8989' }] },
+    { id: 2, name: 'Radarr', implementation: 'Radarr', syncLevel: 'fullSync', fields: [{ name: 'baseUrl', value: 'http://radarr:7878' }] },
+    { id: 3, name: 'Radarr 4K', implementation: 'Radarr', syncLevel: 'addOnly', fields: [{ name: 'baseUrl', value: 'http://radarr-4k:7879' }] },
+  ];
+  const failing = new Set([3]);
+  let commandId = 100;
+  app.get('/api/v1/indexer', (req, res) => res.json(indexers));
+  app.put('/api/v1/indexer/:id', (req, res) => {
+    const id = Number(req.params.id); const i = indexers.findIndex((x) => x.id === id);
+    if (i < 0) return res.status(404).json({ message: 'Not found' });
+    indexers[i] = { ...indexers[i], ...req.body, id }; res.status(202).json(indexers[i]);
+  });
+  app.get('/api/v1/indexerstats', (req, res) => res.json({ indexers: indexers.map((ix) => ({ indexerId: ix.id, indexerName: ix.name, numberOfQueries: 400 + ix.id * 37, numberOfGrabs: 30 + ix.id * 4, averageResponseTime: 180 + ix.id * 55, numberOfFailedQueries: failing.has(ix.id) ? 12 : 0 })) }));
+  app.post('/api/v1/indexer/test', (req, res) => {
+    if (failing.has(Number(req.body?.id))) return res.status(400).json([{ propertyName: 'BaseUrl', errorMessage: 'Unable to connect to indexer: 401 Unauthorized. Check your API key.' }]);
+    res.json({});
+  });
+  app.post('/api/v1/indexer/testall', (req, res) => res.json(indexers.filter((x) => x.enable).map((x) => ({
+    id: x.id, isValid: !failing.has(x.id),
+    validationFailures: failing.has(x.id) ? [{ propertyName: 'BaseUrl', errorMessage: 'Unable to connect to indexer: 401 Unauthorized' }] : [],
+  }))));
+  app.get('/api/v1/applications', (req, res) => res.json(apps));
+  app.post('/api/v1/command', (req, res) => res.status(201).json({ id: ++commandId, name: req.body?.name, status: 'queued', queued: new Date().toISOString() }));
+  app.get('/api/v1/command/:id', (req, res) => res.json({ id: Number(req.params.id), name: 'ApplicationIndexerSync', status: 'completed', ended: new Date().toISOString() }));
+  app.get('/api/v1/health', (req, res) => res.json(failing.size ? [{ source: 'IndexerStatusCheck', type: 'warning', message: 'Indexers unavailable due to failures: TorrentLeech' }] : []));
+  app.get('/api/v1/history', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 0, records: [] }));
+  app.get('/api/v1/search', (req, res) => res.json([]));
+  return app;
+}
+
 function makeBazarr() {
   const app = express();
   app.use(express.json());
@@ -1228,6 +1273,7 @@ export function startMockServices() {
     ['sabnzbd', makeSab(), MOCK_PORTS.sabnzbd],
     ['tautulli', makeTautulli(), MOCK_PORTS.tautulli],
     ['bazarr', makeBazarr(), MOCK_PORTS.bazarr],
+    ['prowlarr', makeProwlarr(), MOCK_PORTS.prowlarr],
     ['qbittorrent', makeQbittorrent(), MOCK_PORTS.qbittorrent],
     ['transmission', makeTransmission(), MOCK_PORTS.transmission],
     ['deluge', makeDeluge(), MOCK_PORTS.deluge],

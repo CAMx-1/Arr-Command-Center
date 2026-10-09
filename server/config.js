@@ -268,6 +268,7 @@ function buildMockConfig() {
       sabnzbd: mk('sabnzbd', 'SABnzbd', 'sabnzbd', MOCK_PORTS.sabnzbd),
       tautulli: mk('tautulli', 'Tautulli', 'tautulli', MOCK_PORTS.tautulli),
       bazarr: mk('bazarr', 'Bazarr', 'bazarr', MOCK_PORTS.bazarr),
+      prowlarr: mk('prowlarr', 'Prowlarr', 'prowlarr', MOCK_PORTS.prowlarr),
       qbittorrent: mk('qbittorrent', 'qBittorrent', 'qbittorrent', MOCK_PORTS.qbittorrent),
       transmission: mkLogin('Transmission', 'transmission', MOCK_PORTS.transmission, 'admin', 'transmission'),
       deluge: mkLogin('Deluge', 'deluge', MOCK_PORTS.deluge, '', 'deluge'),

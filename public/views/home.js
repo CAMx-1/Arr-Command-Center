@@ -6,6 +6,7 @@ import { visibleServices } from '../lib/servicePrefs.js';
 import { loadDashboards, activeDashboard, workspaceServices, widgetServices } from '../lib/dashboardPrefs.js';
 import { actionGroup } from '../lib/actions.js';
 import { queueActionList } from '../lib/queueActions.js';
+import { hiddenUpcoming, setUpcomingHidden, visibleUpcomingServices } from '../lib/upcomingFilter.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { getSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
 import { persistentSWR } from '../lib/cache.js';
@@ -554,7 +555,46 @@ function upcomingHeader(ctx) {
     return b;
   };
   const toggle = h('div', { class: 'view-toggle upcoming-toggle' }, seg('list', 'List'), seg('calendar', 'Calendar'));
-  return h('div', { class: 'upcoming-tools dashboard-feed-tools' }, label, toggle);
+  return h('div', { class: 'upcoming-tools-wrap' },
+    h('div', { class: 'upcoming-tools dashboard-feed-tools' }, label, toggle),
+    upcomingInstanceChips(ctx));
+}
+
+// One toggle chip per Sonarr/Radarr instance (only shown with 2+ instances).
+// Hidden instances aren't fetched at all; the choice persists per browser.
+function upcomingArrs(ctx) {
+  return (ctx.state.services || []).filter((x) => (x.type === 'sonarr' || x.type === 'radarr') && x.configured);
+}
+function upcomingInstanceChips(ctx) {
+  const arrs = upcomingArrs(ctx);
+  if (arrs.length < 2) return null;
+  const bar = h('div', { class: 'upcoming-instances', role: 'group', 'aria-label': 'Show calendar instances' });
+  const paint = () => {
+    const hidden = hiddenUpcoming();
+    const allHidden = arrs.every((s) => hidden.has(s.key));
+    for (const b of bar.children) {
+      const on = allHidden || !hidden.has(b.dataset.key);
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', String(on));
+    }
+  };
+  for (const svc of arrs) {
+    const meta = SERVICE_META[svc.type] || {};
+    bar.appendChild(h('button', {
+      type: 'button', class: 'upcoming-chip', dataset: { key: svc.key }, title: `Show or hide ${svc.label}`,
+      onclick: () => {
+        const hidden = hiddenUpcoming();
+        const visible = arrs.filter((s) => !hidden.has(s.key));
+        const isOn = !hidden.has(svc.key);
+        if (isOn && visible.length === 1) { toast('At least one instance stays visible', 'info', 1800); return; }
+        setUpcomingHidden(svc.key, isOn);
+        paint();
+        hydrateUpcoming(ctx);
+      },
+    }, h('span', { class: 'upcoming-chip-ico' }, svcIcon(meta.logo, meta.emoji || '', 14)), svc.label));
+  }
+  paint();
+  return bar;
 }
 
 // Month grid for the current month with per-day release chips. Days outside the
@@ -655,7 +695,7 @@ async function hydrateUpcoming(ctx) {
     if (label) label.textContent = 'Next 14 days';
   }
   const s = start.toISOString(), e = end.toISOString();
-  const arrs = (ctx.state.services || []).filter((x) => (x.type === 'sonarr' || x.type === 'radarr') && x.configured);
+  const arrs = visibleUpcomingServices(upcomingArrs(ctx));
   const items = [];
   await Promise.all(arrs.map(async (svc) => {
     try {
