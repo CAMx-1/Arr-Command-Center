@@ -13,6 +13,7 @@ import { dashboardSettingsCard } from '../lib/dashboardSettings.js';
 import { getSysmonPrefs, setSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
 import { getAppMode, setAppMode, isLocalMode, getConnection, getConnections, setConnection, removeConnection, LOCAL_SERVICE_DEFS, localServiceDef } from '../lib/connections.js';
 import { normalizeCustomHeaders } from '../lib/customHeaders.js';
+import { quickAddSettingsCard } from '../lib/quickAddSettings.js';
 import { hasRequiredCredentials } from '../lib/serviceKinds.js';
 import { appLockAvailable, getLockStatus, enableLock, disableLock, changeLockPasscode, setLockTimeout, lockNow, newPasscodeError, isValidPasscode, lockErrorMessage, timeoutLabel, TIMEOUT_OPTIONS, PASSCODE_LENGTH } from '../lib/appLock.js';
 
@@ -150,6 +151,8 @@ export async function renderSettings(root, ctx) {
     connectionModeCard(root, ctx),
     h('div', { class: 'section-title', id: 'settings-appearance' }, 'Appearance'),
     appearanceCard(root, ctx),
+    h('div', { class: 'section-title', id: 'settings-quick-add' }, 'Quick Add'),
+    quickAddSettingsCard(state),
     h('div', { class: 'section-title' }, 'System monitor'),
     localMode ? serverOnlyCard('The system monitor') : systemMonitorCard(root, ctx),
     h('div', { class: 'section-title' }, 'Overview Layout'),
@@ -188,7 +191,7 @@ export async function renderSettings(root, ctx) {
 
 function settingsJumpNav() {
   const links = [
-    ['settings-mobile', 'App'], ['settings-favorites', 'Favorites'], ['settings-connection', 'Connection'],
+    ['settings-mobile', 'App'], ['settings-favorites', 'Favorites'], ['settings-connection', 'Connection'], ['settings-quick-add', 'Quick Add'],
     ['settings-notifications', 'Notifications'], ['settings-services', 'Services'], ['settings-diagnostics', 'Diagnostics'],
   ];
   return h('nav', { class: 'settings-jump', 'aria-label': 'Settings sections' },
@@ -455,8 +458,11 @@ function appearanceCard(root, ctx) {
   }, label);
   const swatches = ACCENT_NAMES.map((name) => h('button', {
     class: `accent-swatch ${accent === name ? 'active' : ''}`,
-    title: name,
-    style: { background: `linear-gradient(135deg, ${ACCENTS[name][0]}, ${ACCENTS[name][1]})` },
+    type: 'button',
+    title: name[0].toUpperCase() + name.slice(1),
+    'aria-label': `${name[0].toUpperCase() + name.slice(1)} accent`,
+    'aria-pressed': accent === name ? 'true' : 'false',
+    style: { '--swatch': `linear-gradient(135deg, ${ACCENTS[name][0]}, ${ACCENTS[name][1]})` },
     onclick: () => { applyAccent(name); renderSettings(root, ctx); },
   }));
   const gmode = globalMode();
@@ -470,8 +476,8 @@ function appearanceCard(root, ctx) {
     onclick: () => { setDensity(val); renderSettings(root, ctx); },
   }, label);
   return h('div', { class: 'card' },
-    settingRow('Theme', h('span', { style: { display: 'flex', gap: '8px' } }, themeBtn('light', 'Light'), themeBtn('dark', 'Dark'))),
-    settingRow('Accent', h('span', { class: 'accent-row' }, ...swatches)),
+    settingRow('Theme', h('span', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' } }, themeBtn('light', 'Light'), themeBtn('dark', 'Dark'), themeBtn('black', 'Black'))),
+    (() => { const r = settingRow('Accent', h('span', { class: 'accent-row' }, ...swatches)); r.classList.add('accent-setting'); return r; })(),
     settingRow('Default view', h('span', { style: { display: 'flex', gap: '8px' } }, viewBtn('hex', 'Hexagon'), viewBtn('list', 'List'))),
     settingRow('Density', h('span', { style: { display: 'flex', gap: '8px' } }, ...DENSITIES.map((d) => densityBtn(d.id, d.label)))),
     h('div', { class: 'dim', style: { fontSize: '12px', marginTop: '8px' } }, 'Each page can override this with its own Hex/List toggle. Compact density tightens rows, tables and feeds.'),
@@ -479,7 +485,10 @@ function appearanceCard(root, ctx) {
 }
 
 function settingRow(label, value) {
-  return h('div', { class: 'setting-row' },
+  // Rows whose value holds buttons/inputs wrap as a whole (controls drop below
+  // the label) instead of squeezing the controls until their text breaks.
+  const controls = value && typeof value === 'object' && (value.matches?.('button, input, select') || value.querySelector?.('button, input, select'));
+  return h('div', { class: `setting-row${controls ? ' has-controls' : ''}` },
     h('span', { class: 'dim' }, label),
     h('span', { class: 'right' }, breakable(value)),
   );

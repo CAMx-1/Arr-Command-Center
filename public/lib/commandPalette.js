@@ -10,7 +10,7 @@ function commandSet({ services, go, openSearch, openShortcuts }) {
     { label: 'Open Action Inbox', hint: 'Dashboard', run: () => go('home', { focus: 'inbox' }) },
     { label: 'Search all libraries', hint: '/', run: () => setTimeout(openSearch, 0) },
     openShortcuts ? { label: 'Keyboard shortcuts', hint: '?', run: () => setTimeout(openShortcuts, 0) } : null,
-    { label: `Switch to ${getTheme() === 'dark' ? 'light' : 'dark'} theme`, hint: 'Appearance', close: true, run: () => applyTheme(getTheme() === 'dark' ? 'light' : 'dark') },
+    { label: `Switch to ${getTheme() === 'light' ? 'dark' : 'light'} theme`, hint: 'Appearance', close: true, run: () => applyTheme(getTheme() === 'light' ? 'dark' : 'light') },
   ].filter(Boolean);
   for (const service of services || []) {
     commands.push({ label: `Open ${service.label}`, hint: service.type, run: () => go(service.key) });

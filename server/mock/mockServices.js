@@ -213,6 +213,8 @@ function makeSonarr(opts = {}) {
   });
   app.get('/api/v3/series/lookup', (req, res) => {
     const term = (req.query.term || '').toString();
+    const tvdb = /^tvdb:(\d+)$/.exec(term);
+    if (tvdb) return res.json([{ title: 'Arcane', year: 2021, tvdbId: Number(tvdb[1]), status: 'ended', overview: 'The origins of two iconic League champions.', network: 'Netflix', images: [], seasons: [{ seasonNumber: 1, monitored: true }, { seasonNumber: 2, monitored: true }] }]);
     res.json([
       { title: `${term || 'Andor'}`, year: 2022, tvdbId: 371980, status: 'continuing', overview: 'A drama set in the Star Wars universe.', network: 'Disney+', images: [], seasons: [] },
       { title: `${term || 'Andor'} (Documentary)`, year: 2023, tvdbId: 999001, status: 'ended', overview: 'Behind the scenes.', network: 'Disney+', images: [], seasons: [] },
@@ -328,6 +330,8 @@ function makeRadarr(opts = {}) {
   app.delete('/api/v3/queue/:id', (req, res) => { queue = queue.filter(q => q.id !== Number(req.params.id)); res.json({}); });
   app.get('/api/v3/movie/lookup', (req, res) => {
     const term = (req.query.term || '').toString();
+    const tmdb = /^tmdb:(\d+)$/.exec(term);
+    if (tmdb) return res.json([{ title: 'The Wild Robot', year: 2024, tmdbId: Number(tmdb[1]), status: 'released', overview: 'A robot learns to survive in the wilderness.', studio: 'DreamWorks', images: [] }]);
     res.json([
       { title: `${term || 'Gladiator II'}`, year: 2024, tmdbId: 558449, status: 'released', overview: 'Years after Maximus, Lucius must fight for Rome.', studio: 'Paramount', images: [] },
       { title: `${term || 'Gladiator'}`, year: 2000, tmdbId: 98, status: 'released', overview: 'A betrayed Roman general seeks revenge.', studio: 'DreamWorks', images: [] },
@@ -430,6 +434,7 @@ function makeOverseerr() {
     tagline: 'Binge responsibly.', status: 'Returning Series', posterPath: null, backdropPath: null,
     seasons: [{ seasonNumber: 1, name: 'Season 1', episodeCount: 8 }, { seasonNumber: 2, name: 'Season 2', episodeCount: 10 }],
     mediaInfo: { status: 4, seasons: [{ seasonNumber: 1, status: 5 }] },
+    externalIds: { tvdbId: 371028 },
     credits: { cast: mockCast },
     ...(tmdbDetails[Number(req.params.id)] || {}),
   }));

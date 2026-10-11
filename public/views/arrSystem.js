@@ -136,10 +136,10 @@ function tagsSection(tags, arr, reload) {
   return h('div', {},
     h('div', { class: 'meta-line', style: { gap: '6px', flexWrap: 'wrap', marginBottom: '10px' } },
       ...list.map((t) => h('span', { class: 'pill muted' }, t.label,
-        h('button', { class: 'tag-x', title: 'Delete tag', onclick: async () => {
+        h('button', { class: 'tag-x', type: 'button', title: `Delete tag ${t.label}`, 'aria-label': `Delete tag ${t.label}`, onclick: async () => {
           try { await arr.del(`tag/${t.id}`); toast('Tag deleted', 'success'); reload(); }
           catch (e) { toast(e.message, 'error'); }
-        } }, ' ×'))),
+        } }, '×'))),
       list.length ? null : h('span', { class: 'dim' }, 'No tags'),
     ),
     h('div', { class: 'meta-line', style: { gap: '8px' } }, input, h('button', { class: 'btn sm', onclick: add }, 'Add tag')),
@@ -154,7 +154,7 @@ export async function tabWanted(root, arr, ctx, kind, mode = 'missing') {
     const data = await arr.get(`${endpoint}?page=1&pageSize=50&sortDirection=descending&${inc}`);
     const records = (data && data.records) || [];
     const seg = (m, label) => h('button', { class: `view-seg ${mode === m ? 'active' : ''}`, onclick: () => { if (mode !== m) tabWanted(root, arr, ctx, kind, m); } }, label);
-    const toggle = h('div', { class: 'view-toggle' }, seg('missing', 'Missing'), seg('cutoff', 'Cutoff Unmet'));
+    const toggle = h('div', { class: 'view-toggle wanted-toggle', role: 'group', 'aria-label': 'Wanted list' }, seg('missing', 'Missing'), seg('cutoff', 'Cutoff Unmet'));
     const cmd = kind === 'series'
       ? (mode === 'cutoff' ? 'CutoffUnmetEpisodeSearch' : 'MissingEpisodeSearch')
       : (mode === 'cutoff' ? 'CutoffUnmetMoviesSearch' : 'MissingMoviesSearch');

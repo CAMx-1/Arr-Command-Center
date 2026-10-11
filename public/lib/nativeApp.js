@@ -110,9 +110,10 @@ export async function reloadInterface({ clearCaches = false } = {}) {
 
 export async function applyNativeChrome(theme) {
   if (!isNativeApp()) return;
-  const dark = theme === 'dark';
+  const dark = theme === 'dark' || theme === 'black';
+  const bg = theme === 'black' ? '#000000' : dark ? '#171a24' : '#eef1fa';
   try { await plugin('StatusBar')?.setStyle?.({ style: dark ? 'LIGHT' : 'DARK' }); } catch { /* optional */ }
-  try { await plugin('StatusBar')?.setBackgroundColor?.({ color: dark ? '#171a24' : '#eef1fa' }); } catch { /* iOS overlay/no-op */ }
+  try { await plugin('StatusBar')?.setBackgroundColor?.({ color: bg }); } catch { /* iOS overlay/no-op */ }
 }
 
 export async function finishNativeLaunch() {

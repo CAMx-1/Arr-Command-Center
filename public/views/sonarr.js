@@ -1,3 +1,4 @@
+import { getAddDefaults, setAddDefaults, initialAddChoices } from '../lib/addDefaults.js';
 import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, autoRefresh, swipeToAction } from '../lib/ui.js';
 import { openDetailModal, openArrFileInfo } from './detail.js';
 import { openReleaseSearch } from './releaseSearch.js';
@@ -422,8 +423,9 @@ async function confirmAdd(r, arr, ctx) {
     cachedGet(`arr:${ctx.service.key}:rootfolder`, () => arr.get('rootfolder'), 600000),
     cachedGet(`arr:${ctx.service.key}:qualityprofile`, () => arr.get('qualityprofile'), 600000),
   ]); } catch { /* defaults */ }
-  const folderSel = h('select', { class: 'input' }, ...folders.map((f) => h('option', { value: f.path }, `${f.path} (${fmtBytes(f.freeSpace)} free)`)));
-  const profileSel = h('select', { class: 'input' }, ...profiles.map((p) => h('option', { value: p.id }, p.name)));
+  const remembered = initialAddChoices(getAddDefaults(ctx.service.key), profiles, folders);
+  const folderSel = h('select', { class: 'input' }, ...folders.map((f) => h('option', { value: f.path, selected: f.path === remembered.rootFolderPath ? 'selected' : null }, `${f.path} (${fmtBytes(f.freeSpace)} free)`)));
+  const profileSel = h('select', { class: 'input' }, ...profiles.map((p) => h('option', { value: p.id, selected: p.id === remembered.qualityProfileId ? 'selected' : null }, p.name)));
   const monitorChk = h('input', { type: 'checkbox', checked: true });
   const searchChk = h('input', { type: 'checkbox', checked: true });
 
@@ -436,7 +438,7 @@ async function confirmAdd(r, arr, ctx) {
       monitored: monitorChk.checked,
       addOptions: { searchForMissingEpisodes: searchChk.checked },
     };
-    try { await arr.post('series', payload); invalidate(`arr:${ctx.service.key}:series`); toast(`Added ${r.title}`, 'success'); closeModal(); ctx.reload(); }
+    try { await arr.post('series', payload); setAddDefaults(ctx.service.key, { qualityProfileId: payload.qualityProfileId, rootFolderPath: payload.rootFolderPath, monitored: monitorChk.checked, searchOnAdd: searchChk.checked }); invalidate(`arr:${ctx.service.key}:series`); toast(`Added ${r.title}`, 'success'); closeModal(); ctx.reload(); }
     catch (e) { toast(e.message, 'error'); }
   };
 

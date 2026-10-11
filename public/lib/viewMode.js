@@ -38,5 +38,8 @@ export function viewToggle(page, onChange, requestedMode = null, { table = false
     class: `view-seg ${mode === m ? 'active' : ''}`,
     onclick: () => { if (mode !== m) { setPageOverride(page, m); onChange(m); } },
   }, label);
+  // Expose the page's mode for CSS (e.g. compact stat tiles only in List/Table).
+  const view = typeof document !== 'undefined' && document.getElementById('view');
+  if (view) view.dataset.viewMode = mode;
   return h('div', { class: 'view-toggle' }, ...modes.map((value) => mk(value, value[0].toUpperCase() + value.slice(1))));
 }

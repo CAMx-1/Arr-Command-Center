@@ -36,6 +36,8 @@ import { dismissNativeKeyboard, finishNativeLaunch, installNativeKeyboardHandlin
 import { installClientDiagnostics, recordClientEvent } from './lib/clientDiagnostics.js';
 import { hydrateCredentialVault } from './lib/credentialVault.js';
 import { openCommandPalette } from './lib/commandPalette.js';
+import { quickAddControls, seerrResolver } from './lib/quickAdd.js';
+import { preferredInstance, getPreferredInstanceKey, notInLibrary } from './lib/addDefaults.js';
 import { setDashboardScope } from './lib/dashboardPrefs.js';
 import { mergeState, classifyNavigation, targetScrollFor, createScrollStore } from './lib/scrollHistory.js';
 import { parseHash, buildHash, patchParams } from './lib/urlState.js';
@@ -161,6 +163,7 @@ async function navigate() {
   buildHive();
   updateTopbarTools(route);
   els.actions && clear(els.actions);
+  delete els.view.dataset.viewMode;
   closeSidebarMobile();
   closeAllServices();
 
@@ -873,7 +876,7 @@ async function loadLibraries() {
       const items = await cachedGet(`arr:${svc.key}:${path}`, () => api.arr(svc.key).get(path), 300000);
       for (const it of (items || [])) {
         out.push({
-          svc, title: it.title, year: it.year, tmdbId: it.tmdbId,
+          svc, title: it.title, year: it.year, tmdbId: it.tmdbId, tvdbId: it.tvdbId,
           mediaType: svc.type === 'sonarr' ? 'tv' : 'movie',
           poster: (it.images || []).find((i) => i.coverType === 'poster'),
           path: it.path,
@@ -938,6 +941,7 @@ function openSearch() {
     const libMatches = lib.filter((x) => x.title.toLowerCase().includes(ql) && tf(x.mediaType)).slice(0, 40);
     const ownedTmdb = new Set(lib.map((x) => x.tmdbId).filter(Boolean));
     let discover = [];
+    let arrDiscover = [];
     const seerrSvc = state.services.find((s) => s.type === 'overseerr' && s.configured);
     if (seerrSvc) {
       try {
@@ -945,12 +949,24 @@ function openSearch() {
         if (runId !== searchRun) return;
         discover = (data.results || []).filter((x) => x.mediaType !== 'person' && tf(x.mediaType) && !ownedTmdb.has(x.id)).slice(0, 20);
       } catch { /* ignore */ }
+    } else {
+      // No Seerr: discover through Sonarr/Radarr's own lookup instead.
+      const lookups = ['movie', 'tv'].filter(tf).map(async (mt) => {
+        const svc = preferredInstance(state.services, mt, getPreferredInstanceKey(mt));
+        if (!svc) return [];
+        try {
+          const list = await api.arr(svc.key).get(`${mt === 'tv' ? 'series' : 'movie'}/lookup?term=${encodeURIComponent(q)}`);
+          return notInLibrary(list, mt, lib).slice(0, 10).map((item) => ({ item, mediaType: mt }));
+        } catch { return []; }
+      });
+      arrDiscover = (await Promise.all(lookups)).flat();
     }
     if (runId !== searchRun) return;
-    if (!libMatches.length && !discover.length) return mount(results, empty('', 'No matches', 'Try a different title'));
+    if (!libMatches.length && !discover.length && !arrDiscover.length) return mount(results, empty('', 'No matches', 'Try a different title'));
     const nodes = [];
     if (libMatches.length) { nodes.push(h('div', { class: 'section-title' }, 'In your library')); nodes.push(...libMatches.map(searchRow)); }
     if (discover.length) { nodes.push(h('div', { class: 'section-title', style: { marginTop: '14px' } }, 'Discover')); nodes.push(...discover.map((r) => discoverSearchRow(r, seerrSvc))); }
+    if (arrDiscover.length) { nodes.push(h('div', { class: 'section-title', style: { marginTop: '14px' } }, 'Add new')); nodes.push(...arrDiscover.map(arrDiscoverRow)); }
     mount(results, ...nodes);
   };
   const scheduleSearch = () => {
@@ -1009,7 +1025,16 @@ function discoverSearchRow(r, seerrSvc) {
     // Movies: offer install location + quality profile (same as the Overseerr view).
     return openMovieRequestModal(api.seerr(seerrSvc.key), { service: { key: seerrSvc.key } }, r, title);
   } }, isTv ? (st === 4 ? '+ Seasons' : '+ Select seasons') : '+ Request');
-  return h('div', { class: 'row' },
+  // One-tap Add straight to Sonarr/Radarr for titles nobody has requested yet;
+  // the Seerr request flow stays available from the ⋯ options panel.
+  const qa = (!st || st === 1)
+    ? quickAddControls({
+      services: state.services, mediaType: r.mediaType, title, resolveItem: seerrResolver(seerrSvc, r),
+      extraActions: canRequest ? [h('button', { class: 'btn sm', type: 'button', onclick: () => requestBtn.click() }, 'Request via Seerr…')] : [],
+    })
+    : null;
+  const actions = qa && qa.available ? qa.actions : (canRequest ? [requestBtn] : []);
+  const row = h('div', { class: 'row' },
     h('div', { style: { cursor: 'pointer', flexShrink: '0' }, title: 'View details', onclick: openMeta }, poster(url, '')),
     h('div', { class: 'row-main' },
       h('div', { class: 'row-title', style: { cursor: 'pointer' }, onclick: openMeta }, title, h('span', { class: 'dim' }, year)),
@@ -1018,8 +1043,29 @@ function discoverSearchRow(r, seerrSvc) {
         stLabel ? h('span', { class: `pill ${st >= 5 ? 'ok' : st >= 3 ? 'info' : 'warn'}` }, stLabel) : h('span', { class: 'pill info' }, 'Not in library'),
       ),
     ),
-    h('div', { class: 'row-actions' }, canRequest ? requestBtn : null),
+    h('div', { class: 'row-actions' }, ...actions),
   );
+  return qa && qa.available ? h('div', { class: 'quick-add-item' }, row, qa.panel) : row;
+}
+
+// "Add new" result from Sonarr/Radarr lookup (used when Seerr isn't set up).
+function arrDiscoverRow({ item, mediaType }) {
+  const isTv = mediaType === 'tv';
+  const img = (item.images || []).find((i) => i.coverType === 'poster');
+  const qa = quickAddControls({ services: state.services, mediaType, title: item.title, resolveItem: async () => item });
+  const row = h('div', { class: 'row' },
+    poster(img && (img.remoteUrl || img.url), ''),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title' }, item.title, h('span', { class: 'dim' }, item.year ? ` (${item.year})` : '')),
+      h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+        h('span', { class: 'pill muted' }, isTv ? 'TV' : 'Movie'),
+        h('span', { class: 'pill info' }, 'Not in library'),
+        item.network || item.studio ? h('span', { class: 'dim' }, item.network || item.studio) : null,
+      ),
+    ),
+    h('div', { class: 'row-actions' }, ...qa.actions),
+  );
+  return h('div', { class: 'quick-add-item' }, row, qa.panel);
 }
 
 // Leave an open dialog by navigating somewhere else, without racing history.
@@ -1127,7 +1173,12 @@ function buildHiveBackground() {
   };
   const cl = (x) => Math.max(0, Math.min(255, Math.round(x)));
   const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-  const DEEP = [109, 40, 217], VIOLET = [168, 85, 247], SLATE = [226, 232, 240];
+  // Honeycomb follows the accent (deep shade → accent-2 → neutral). On the
+  // black theme the neutral end fades to near-black instead of slate.
+  const cs = getComputedStyle(document.documentElement);
+  const rgbVar = (name, fb) => { const v = cs.getPropertyValue(name).split(',').map(Number); return v.length === 3 && v.every((n) => Number.isFinite(n)) ? v : fb; };
+  const DEEP = rgbVar('--accent-deep-rgb', [109, 40, 217]), VIOLET = rgbVar('--accent-2-rgb', [168, 85, 247]);
+  const SLATE = document.documentElement.hasAttribute('data-black') ? [24, 24, 30] : [226, 232, 240];
   const colorAt = (t) => (t < 0.5 ? mix(DEEP, VIOLET, t / 0.5) : mix(VIOLET, SLATE, (t - 0.5) / 0.5));
   // Deterministic per-hex pseudo-random (stable across rebuilds) for shade variation.
   const hash = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
@@ -1321,6 +1372,7 @@ async function init() {
   document.getElementById('app').classList.add('collapsed');
 
   buildHiveBackground();
+  window.addEventListener('acc:appearance', () => buildHiveBackground());
   let resizeTimer;
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { buildHive(); }, 200); });
 
