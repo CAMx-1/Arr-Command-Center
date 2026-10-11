@@ -499,11 +499,20 @@ export function attachLongPress(el, onLongPress, { ms = 550, moveTol = 10 } = {}
 }
 
 // Swallow the next click anywhere in the document (capture phase) within `ms`.
+// A compatibility click from the lift always arrives before any new press, so
+// the guard disarms on the next pointerdown. Otherwise, on iOS (where the
+// cancelled touchend means no compatibility click ever comes), it would eat the
+// user's first deliberate tap in the sheet the long-press just opened.
 function swallowNextClick(ms = 700) {
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); done(); };
-  const done = () => { document.removeEventListener('click', stop, true); clearTimeout(t); };
+  const done = () => {
+    document.removeEventListener('click', stop, true);
+    document.removeEventListener('pointerdown', done, true);
+    clearTimeout(t);
+  };
   const t = setTimeout(done, ms);
   document.addEventListener('click', stop, true);
+  document.addEventListener('pointerdown', done, true);
 }
 
 // Accessible action sheet (modal) of a service's quick destinations. Selecting
