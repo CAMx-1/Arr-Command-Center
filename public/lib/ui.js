@@ -13,6 +13,12 @@ export function h(tag, props = {}, ...children) {
     else el.setAttribute(k, v);
   }
   appendChildren(el, children);
+  // Icon-only buttons (×, ▶, ⏸, ✓…) read as "multiplication sign" etc. to
+  // screen readers; use their title as the accessible name instead.
+  if (tag === 'button' && props && props.title && !props['aria-label'] && !props.html) {
+    const text = el.textContent.trim();
+    if (text && !/[A-Za-z0-9]/.test(text)) el.setAttribute('aria-label', props.title);
+  }
   return el;
 }
 

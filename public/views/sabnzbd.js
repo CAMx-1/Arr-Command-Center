@@ -165,7 +165,7 @@ function slotRow(s, sab, ctx) {
       h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })),
     ),
     h('div', { class: 'row-actions' },
-      h('button', { class: 'btn sm danger', onclick: remove }, '×'),
+      h('button', { class: 'btn sm danger', title: 'Remove', onclick: remove }, '×'),
     ),
   );
   row._applyPoster = (url) => { try { fallback.replaceWith(poster(url, '')); } catch { /* ignore */ } };
@@ -235,7 +235,7 @@ function historyRow(s, sab, ctx) {
       ),
     ),
     h('div', { class: 'row-actions' },
-      h('button', { class: 'btn sm danger', onclick: async () => {
+      h('button', { class: 'btn sm danger', title: 'Delete', onclick: async () => {
         try { await sab({ mode: 'history', name: 'delete', value: s.nzo_id }); toast('Deleted from history', 'success'); ctx.reload(); }
         catch (e) { toast(e.message, 'error'); }
       } }, '×'),

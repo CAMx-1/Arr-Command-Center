@@ -104,6 +104,16 @@ let _probeTimer = 0;
 let _probeDelay = 0;
 let _bootBlocked = false; // initial config load failed; reload shell after probe recovery
 
+// Mobile: the topbar action row scrolls sideways; fade its right edge while
+// more buttons are hidden so the overflow is discoverable.
+function updateActionsOverflow() {
+  const el = els.actions;
+  if (!el) return;
+  requestAnimationFrame(() => {
+    el.classList.toggle('more-right', el.scrollWidth - el.clientWidth - el.scrollLeft > 4);
+  });
+}
+
 const els = {
   hive: document.getElementById('hive'),
   hiveBg: document.getElementById('hive-bg'),
@@ -116,6 +126,8 @@ const els = {
   notifPanel: document.getElementById('notif-panel'),
   searchBtn: document.getElementById('search-btn'),
 };
+els.actions?.addEventListener('scroll', updateActionsOverflow, { passive: true });
+window.addEventListener('resize', updateActionsOverflow, { passive: true });
 
 // ---------- Routing ----------
 function currentRoute() { return parseHash(location.hash).route; }
@@ -165,7 +177,7 @@ async function navigate() {
     route,
     params: routeParams,
     setTitle: (t) => { els.title.textContent = t; },
-    setActions: (...nodes) => { mount(els.actions, ...nodes); },
+    setActions: (...nodes) => { mount(els.actions, ...nodes); updateActionsOverflow(); },
     setParams: (patch, { reload = false } = {}) => {
       ctx.params = replaceRouteParams(route, ctx.params, patch);
       if (reload) { _pendingIntent = 'preserve'; return navigate(); }

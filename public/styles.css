@@ -216,7 +216,7 @@ button { font-family: inherit; cursor: pointer; }
 /* Prowlarr notifications bell + edit form */
 .pw-bell { position: relative; display: inline-flex; align-items: center; padding: 8px 12px; }
 .pw-bell-ico { display: inline-flex; }
-.pw-badge { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #ef4444; color: #fff; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
+.pw-badge { position: absolute; top: 2px; right: 8px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; font-size: 10px !important; background: #ef4444; color: #fff; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
 .pw-form { display: flex; flex-direction: column; gap: 12px; }
 .pw-field { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 12px; }
 .pw-field-label { color: var(--text-dim); font-weight: 600; font-size: 13px; }
@@ -1363,3 +1363,71 @@ button, [role="button"], input, select, textarea { touch-action: manipulation; }
 @media (max-width: 720px) { .pw-toolbar-note { margin-left: 0; width: 100%; } }
 .rf-size { -moz-appearance: textfield; }
 .rf-size::-webkit-outer-spin-button, .rf-size::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ===== Mobile polish pass ===== */
+@media (max-width: 720px) {
+  /* Top bar: one row for title + Search + Bell, then page actions in a single
+     sideways-scrolling row. Previously the icons and actions wrapped onto 2–3
+     extra rows (up to ~206px before any content on download-client pages).
+     The 62px left inset was reserved for the hamburger, which is hidden here. */
+  #topbar { padding: calc(10px + env(safe-area-inset-top)) 14px 6px max(14px, env(safe-area-inset-left)); align-items: center; column-gap: 8px; row-gap: 8px; }
+  .topbar-right { display: contents; }
+  .topbar-right > * { pointer-events: auto; }
+  #page-title { align-self: center; margin-right: auto; display: block; min-width: 0; max-width: calc(100vw - 150px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #topbar-actions { order: 5; flex: 0 1 auto; min-width: 0; max-width: 100%; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding: 2px 2px 4px; margin: 0 -2px; }
+  #topbar-actions::-webkit-scrollbar { display: none; }
+  #topbar-actions > * { flex-shrink: 0; }
+  #topbar-actions:empty { display: none; }
+
+  /* Stat headers (qBittorrent, SABnzbd, Tautulli, Prowlarr, Bazarr, download
+     clients): compact two-column tiles instead of giant hexes that filled the
+     whole first screen. Overview's system hexes keep the honeycomb. */
+  .hc-row:has(> .hex-static:not(.hex-system)) { flex-wrap: wrap; justify-content: center; }
+  .hex-cell.hex-static:not(.hex-system) { --hex-w: calc((100vw - 28px - 16px) / 2); --hex-h: 62px; width: var(--hex-w); height: var(--hex-h); margin: 4px; filter: drop-shadow(0 3px 8px rgba(79, 70, 229, 0.12)); }
+  .hex-cell.hex-static:not(.hex-system) .hex-border,
+  .hex-cell.hex-static:not(.hex-system) .hex-face { clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%); }
+  .hex-cell.hex-static:not(.hex-system) .hex-face { inset: 2px; }
+  .hex-cell.hex-static:not(.hex-system) .hex-inner { padding: 0 18px; gap: 2px; max-width: 100%; }
+  .hex-cell.hex-static:not(.hex-system) .stat-value { font-size: 18px; line-height: 1.1; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .hex-cell.hex-static:not(.hex-system) .stat-label { font-size: 11px; letter-spacing: 0.04em; white-space: nowrap; }
+  .honeycomb:has(.hex-static:not(.hex-system)) { padding: 4px 0 2px; }
+
+  /* Tabs: full 44pt tap height (Apple HIG); were 39px. */
+  .tabs .tab { min-height: 44px; }
+
+  /* Nothing below ~10px on small phones (Overview hex labels were 8–9px). */
+  .hex-stats .stat-label { font-size: 10px; }
+}
+@media (max-width: 420px) {
+  .hex-cell .stat-label, .hex-stats .stat-label { font-size: 10px; }
+}
+@media (max-width: 720px) {
+  /* Library toolbar: filter row, then Saved views + Save/Delete + Select on
+     one row (Select used to wrap onto a third row of its own). */
+  .lib-head { gap: 8px; }
+  .lib-head > .lib-filter { flex: 1 0 100%; }
+  .lib-head > .lib-filter .lib-filter-search { flex: 1 1 auto; min-width: 0; }
+  .lib-head > .saved-views { width: auto; flex: 1 1 0; min-width: 0; flex-wrap: nowrap; }
+  .lib-head .saved-view-select { min-width: 0; flex: 1 1 auto; }
+  .lib-head > .btn { flex-shrink: 0; }
+  .lib-filter .input { min-height: 42px; }
+}
+@media (max-width: 720px) {
+  .lib-head > .saved-views .btn { flex: 0 0 auto; white-space: nowrap; padding-left: 14px; padding-right: 14px; }
+  .lib-head .saved-view-select { flex: 1 1 60px; width: 60px; }
+}
+@media (max-width: 380px) {
+  /* Smallest phones: same two rows, with tighter buttons so the select stays readable. */
+  .lib-head { gap: 6px; }
+  .lib-head > .saved-views { gap: 4px; }
+  .lib-head > .saved-views .btn, .lib-head > .btn { padding-left: 11px; padding-right: 11px; font-size: 12px; }
+}
+
+/* Topbar action row: fade the right edge while more buttons are scrolled off
+   (class toggled in app.js), and keep long setting values off their labels. */
+@media (max-width: 720px) {
+  #topbar-actions.more-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); }
+}
+.setting-row { gap: 12px; }
+.setting-row > .dim { flex-shrink: 0; white-space: nowrap; }
+.setting-row > .right { min-width: 0; text-align: right; white-space: normal; overflow-wrap: anywhere; }

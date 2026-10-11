@@ -481,8 +481,17 @@ function appearanceCard(root, ctx) {
 function settingRow(label, value) {
   return h('div', { class: 'setting-row' },
     h('span', { class: 'dim' }, label),
-    h('span', { class: 'right' }, value),
+    h('span', { class: 'right' }, breakable(value)),
   );
+}
+
+// Long unspaced strings (bundle IDs, URLs) wrap after '.' or '/' instead of
+// mid-word on narrow screens.
+function breakable(value) {
+  if (typeof value !== 'string' || value.length < 20 || /\s/.test(value)) return value;
+  const out = [];
+  for (const part of value.split(/(?<=[./])/)) { if (out.length) out.push(h('wbr')); out.push(part); }
+  return out;
 }
 
 // A placeholder card for sections that need the companion server (shown greyed
