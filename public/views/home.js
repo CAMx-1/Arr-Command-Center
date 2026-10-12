@@ -565,7 +565,7 @@ function upcomingHeader(ctx) {
 function upcomingArrs(ctx) {
   return (ctx.state.services || []).filter((x) => (x.type === 'sonarr' || x.type === 'radarr') && x.configured);
 }
-function upcomingInstanceChips(ctx) {
+export function upcomingInstanceChips(ctx, onChange = () => hydrateUpcoming(ctx)) {
   const arrs = upcomingArrs(ctx);
   if (arrs.length < 2) return null;
   const bar = h('div', { class: 'upcoming-instances', role: 'group', 'aria-label': 'Show calendar instances' });
@@ -589,7 +589,7 @@ function upcomingInstanceChips(ctx) {
         if (isOn && visible.length === 1) { toast('At least one instance stays visible', 'info', 1800); return; }
         setUpcomingHidden(svc.key, isOn);
         paint();
-        hydrateUpcoming(ctx);
+        onChange();
       },
     }, h('span', { class: 'upcoming-chip-ico' }, svcIcon(meta.logo, meta.emoji || '', 14)), svc.label));
   }
@@ -600,7 +600,7 @@ function upcomingInstanceChips(ctx) {
 // Month grid for the current month with per-day release chips. Days outside the
 // month are blank; today is highlighted; a chip deep-links to the service's
 // Calendar tab.
-function renderUpcomingCalendar(panel, items, { year, month, today }) {
+export function renderUpcomingCalendar(panel, items, { year, month, today }) {
   const byDay = new Map();
   for (const it of items) {
     const d = new Date(it.when);
@@ -647,7 +647,7 @@ function renderUpcomingCalendar(panel, items, { year, month, today }) {
 // sub-line and air time), each row deep-linking to that service's Calendar tab.
 // Upcoming rows (list and calendar day view) open the item's library filtered
 // to that title. Rows are divs, so give them button semantics + Enter/Space.
-function upcomingRowProps(it) {
+export function upcomingRowProps(it) {
   const open = () => openInArr({ svc: it.svc, title: it.filterTitle || it.title });
   return {
     class: 'row up-row dashboard-feed-row clickable', role: 'button', tabindex: '0',
@@ -656,7 +656,7 @@ function upcomingRowProps(it) {
   };
 }
 
-function openUpcomingDayModal(date, evs) {
+export function openUpcomingDayModal(date, evs) {
   const sorted = [...evs].sort((a, b) => new Date(a.when) - new Date(b.when));
   const rows = sorted.map((it) => {
     const meta = SERVICE_META[it.svc.type] || {};
@@ -674,6 +674,26 @@ function openUpcomingDayModal(date, evs) {
   });
   const title = date.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
   openModal({ title, body: h('div', { class: 'list dashboard-feed-list' }, ...rows) });
+}
+
+// Sonarr episodes + Radarr releases between start and end across the visible
+// (not hidden via the instance chips) Sonarr/Radarr instances.
+export async function fetchUpcomingItems(ctx, start, end) {
+  const s = start.toISOString(), e = end.toISOString();
+  const arrs = visibleUpcomingServices(upcomingArrs(ctx));
+  const items = [];
+  await Promise.all(arrs.map(async (svc) => {
+    try {
+      if (svc.type === 'sonarr') {
+        const eps = await ctx.api.arr(svc.key).get(`calendar?start=${s}&end=${e}&includeSeries=true`);
+        for (const ep of (eps || [])) if (ep.airDateUtc) items.push({ when: ep.airDateUtc, title: `${(ep.series && ep.series.title) || 'Unknown'} · S${pad2(ep.seasonNumber)}E${pad2(ep.episodeNumber)}`, filterTitle: (ep.series && ep.series.title) || '', sub: ep.title || '', svc });
+      } else {
+        const movies = await ctx.api.arr(svc.key).get(`calendar?start=${s}&end=${e}`);
+        for (const m of (movies || [])) { const when = m.digitalRelease || m.physicalRelease || m.inCinemas; if (when) items.push({ when, title: `${m.title}${m.year ? ` (${m.year})` : ''}`, filterTitle: m.title || '', sub: 'Release', svc }); }
+      }
+    } catch { /* ignore per-service */ }
+  }));
+  return items;
 }
 
 // Merged upcoming calendar across all configured Sonarr + Radarr instances.
@@ -694,25 +714,19 @@ async function hydrateUpcoming(ctx) {
     end = new Date(); end.setDate(end.getDate() + 14);
     if (label) label.textContent = 'Next 14 days';
   }
-  const s = start.toISOString(), e = end.toISOString();
-  const arrs = visibleUpcomingServices(upcomingArrs(ctx));
-  const items = [];
-  await Promise.all(arrs.map(async (svc) => {
-    try {
-      if (svc.type === 'sonarr') {
-        const eps = await ctx.api.arr(svc.key).get(`calendar?start=${s}&end=${e}&includeSeries=true`);
-        for (const ep of (eps || [])) if (ep.airDateUtc) items.push({ when: ep.airDateUtc, title: `${(ep.series && ep.series.title) || 'Unknown'} · S${pad2(ep.seasonNumber)}E${pad2(ep.episodeNumber)}`, filterTitle: (ep.series && ep.series.title) || '', sub: ep.title || '', svc });
-      } else {
-        const movies = await ctx.api.arr(svc.key).get(`calendar?start=${s}&end=${e}`);
-        for (const m of (movies || [])) { const when = m.digitalRelease || m.physicalRelease || m.inCinemas; if (when) items.push({ when, title: `${m.title}${m.year ? ` (${m.year})` : ''}`, filterTitle: m.title || '', sub: 'Release', svc }); }
-      }
-    } catch { /* ignore per-service */ }
-  }));
+  const items = await fetchUpcomingItems(ctx, start, end);
   if (mode === 'calendar') {
     return renderUpcomingCalendar(panel, items, { year: today.getFullYear(), month: today.getMonth(), today });
   }
   if (!items.length) { mount(panel, dashboardFeedEmpty('Nothing upcoming', 'No releases in the next 2 weeks')); return; }
   items.sort((a, b) => new Date(a.when) - new Date(b.when));
+  const blocks = upcomingListBlocks(items);
+  mount(panel, h('div', { class: 'list dashboard-feed-list' }, ...blocks));
+}
+
+// Day headers + rows for a chronological list of upcoming items.
+export function upcomingListBlocks(items) {
+  items = [...items].sort((a, b) => new Date(a.when) - new Date(b.when));
   const byDay = new Map();
   for (const it of items) {
     const key = new Date(it.when).toDateString();
@@ -737,7 +751,7 @@ async function hydrateUpcoming(ctx) {
       ));
     }
   }
-  mount(panel, h('div', { class: 'list dashboard-feed-list' }, ...blocks));
+  return blocks;
 }
 
 // Silent refresh used by the auto-refresh interval (no loading flash).

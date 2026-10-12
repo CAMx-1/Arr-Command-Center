@@ -5,7 +5,11 @@ import { reliableActivation } from './lib/tapActivation.js';
 // Local (direct) mode: installs a fetch shim that services /api/* on-device
 // when enabled. Imported first so it wraps fetch before any request is made.
 import './lib/localBackend.js';
-import { orderServices, isHidden, pinnedServices } from './lib/servicePrefs.js';
+import { orderServices, isHidden, pinnedServices, CALENDAR_PIN } from './lib/servicePrefs.js';
+
+// Calendar glyph shared by the bottom bar and the all-services sheet.
+export const calendarIcon = () => h('span', { class: 'cal-nav-ic', html: '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/><circle cx="8" cy="14" r="1" fill="currentColor"/><circle cx="12" cy="14" r="1" fill="currentColor"/><circle cx="16" cy="14" r="1" fill="currentColor"/></svg>' });
+const CALENDAR_ENTRY = { key: 'calendar', pin: CALENDAR_PIN, label: 'Calendar', isCalendar: true };
 import { splitHive, flyoutLayout } from './lib/hiveLayout.js';
 import { hiveSignature, statusDotClass } from './lib/hiveState.js';
 import { cachedGet } from './lib/cache.js';
@@ -26,6 +30,7 @@ import { renderMediaServer } from './views/mediaServer.js';
 import { renderAutobrr, renderMaintainerr, renderTdarr, renderAudiobookshelf } from './views/extraServices.js';
 import { renderEmbed } from './views/embed.js';
 import { renderSettings } from './views/settings.js';
+import { renderCalendar } from './views/calendar.js';
 import { openDetailModal } from './views/detail.js';
 import { fetchNotifications, getLastSeen, markSeen, notifKind } from './lib/notifications.js';
 import * as push from './lib/push.js';
@@ -200,6 +205,11 @@ async function navigate() {
   if (route === 'settings') {
     els.title.textContent = 'Settings';
     return renderSettings(els.view, ctx);
+  }
+
+  if (route === 'calendar') {
+    els.title.textContent = 'Calendar';
+    return renderCalendar(els.view, ctx);
   }
 
   const svc = state.services.find((s) => s.key === route);
@@ -544,7 +554,8 @@ function buildBottomNav() {
   const base = [...state.services].sort((a, b) => (a.type === 'overseerr' ? 0 : 1) - (b.type === 'overseerr' ? 0 : 1));
   const nav = orderServices(base).filter((s) => !isHidden(s.key));
   // Quick-picks: pinned first (in order), then fill from nav order up to 4.
-  const pinned = pinnedServices().map((k) => nav.find((s) => s.key === k)).filter(Boolean);
+  // The Calendar pseudo-entry can be pinned in place of a service.
+  const pinned = pinnedServices().map((k) => (k === CALENDAR_PIN ? CALENDAR_ENTRY : nav.find((s) => s.key === k))).filter(Boolean);
   const quick = [...pinned];
   for (const s of nav) { if (quick.length >= 4) break; if (!quick.includes(s)) quick.push(s); }
   quick.length = Math.min(quick.length, 4);
@@ -553,6 +564,10 @@ function buildBottomNav() {
   const curSvc = nav.find((s) => s.key === route);
   if (curSvc && !quick.includes(curSvc)) { if (quick.length < 4) quick.push(curSvc); else quick[3] = curSvc; }
   const svcHex = (svc) => {
+    if (svc.isCalendar) {
+      return h('button', { class: `bn-hex bn-calendar ${route === 'calendar' ? 'active' : ''}`, title: 'Calendar', 'aria-label': 'Calendar', onclick: () => { haptic(); location.hash = '#/calendar'; } },
+        h('span', { class: 'hive-icon' }, calendarIcon()));
+    }
     const meta = SERVICE_META[svc.type] || {};
     const st = state.status[svc.key];
     const btn = h('button', { class: `bn-hex ${route === svc.key ? 'active' : ''}`, title: `${svc.label} · press and hold for shortcuts`, 'aria-label': svc.label, 'aria-description': 'Press and hold for service shortcuts', dataset: { svcKey: svc.key }, onclick: () => { haptic(); location.hash = `#/${svc.key}`; } },
@@ -673,6 +688,7 @@ function renderAllServicesGrid() {
     // lock) before opening the shared Search modal.
     item('Search', false, h('span', { class: 'allsvc-search-ic', html: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' }), () => openSearch()),
     ...nav.map((svc) => { const meta = SERVICE_META[svc.type] || {}; const st = state.status[svc.key]; return item(svc.label, route === svc.key, svcIcon(meta.logo, meta.emoji || '', 24), () => { location.hash = `#/${svc.key}`; }, st ? (st.ok ? 'ok' : 'down') : '', svc); }),
+    item('Calendar', route === 'calendar', calendarIcon(), () => { location.hash = '#/calendar'; }),
     item('Settings', route === 'settings', hiveImg('/icons/command-center.svg'), () => { location.hash = '#/settings'; }),
   ];
   mount(sheet,

@@ -1,9 +1,9 @@
 import { h, mount, clear, spinner, svcIcon, confirmModal, openModal, closeModal, toast, tabs, fmtBytes } from '../lib/ui.js';
-import { SERVICE_META } from '../app.js';
+import { SERVICE_META, calendarIcon } from '../app.js';
 import { getTheme, getAccent, applyTheme, applyAccent, ACCENTS, ACCENT_NAMES } from '../lib/theme.js';
 import { globalMode, setGlobalMode } from '../lib/viewMode.js';
 import { getDensity, setDensity, DENSITIES } from '../lib/density.js';
-import { isHidden, setHidden, orderServices, setOrder, isServicePinned, toggleServicePinned, pinnedServices, movePinnedService, setServicePinned } from '../lib/servicePrefs.js';
+import { isHidden, setHidden, orderServices, setOrder, isServicePinned, toggleServicePinned, pinnedServices, movePinnedService, setServicePinned, CALENDAR_PIN, MAX_PINNED_SERVICES } from '../lib/servicePrefs.js';
 import { getNativeAppInfo, connectedServerOrigin, changeServer, reloadInterface, isNativeApp, saveLocalFallbackSnapshot, loadLocalFallbackSnapshot, persistAppMode } from '../lib/nativeApp.js';
 import { createLocalFallbackSnapshot, applyLocalFallbackSnapshot, fallbackMetadata } from '../lib/fallbackSync.js';
 import { diagnosticReport, copyDiagnosticReport, clearClientLog, readClientLog } from '../lib/clientDiagnostics.js';
@@ -204,12 +204,14 @@ function settingsJumpNav() {
 
 function favoriteNavigationCard(ctx) {
   const keys = pinnedServices();
-  const entries = keys.map((key) => ctx.state.services.find((s) => s.key === key)).filter(Boolean);
+  const entries = keys.map((key) => (key === CALENDAR_PIN
+    ? { key: CALENDAR_PIN, label: 'Calendar', isCalendar: true }
+    : ctx.state.services.find((s) => s.key === key))).filter(Boolean);
   const preview = entries.length
     ? h('div', { class: 'favorite-preview', 'aria-label': 'Mobile bottom bar favorite order' }, ...entries.map((svc, index) => {
         const meta = SERVICE_META[svc.type] || {};
         return h('div', { class: 'favorite-preview-item' },
-          h('span', { class: 'favorite-preview-icon' }, svcIcon(meta.logo, meta.emoji || '', 28)),
+          h('span', { class: 'favorite-preview-icon' }, svc.isCalendar ? calendarIcon() : svcIcon(meta.logo, meta.emoji || '', 28)),
           h('span', { class: 'favorite-preview-label' }, svc.label),
           h('span', { class: 'favorite-preview-actions' },
             h('button', { class: 'btn sm', disabled: index === 0 ? 'disabled' : null, 'aria-label': `Move ${svc.label} left`, onclick: () => { movePinnedService(svc.key, -1); ctx.reload(); } }, '←'),
@@ -221,9 +223,20 @@ function favoriteNavigationCard(ctx) {
     : h('div', { class: 'empty compact' }, h('div', { class: 'dim' }, 'No explicit favorites yet. The bottom bar currently follows service order.'));
   return h('div', { class: 'card' },
     h('h3', {}, 'Mobile bottom bar'),
-    h('p', { class: 'dim settings-copy' }, 'Choose favorites on the service cards below, then arrange them here. Up to four services appear around Home.'),
+    h('p', { class: 'dim settings-copy' }, 'Choose favorites on the service cards below, then arrange them here. Up to four appear around Home; the Calendar can take one of the spots.'),
     preview,
-    h('button', { class: 'btn sm primary', onclick: () => document.getElementById('settings-services')?.scrollIntoView({ behavior: 'smooth' }) }, 'Manage service favorites'),
+    h('div', { class: 'favorite-actions' },
+      h('button', { class: 'btn sm primary', onclick: () => document.getElementById('settings-services')?.scrollIntoView({ behavior: 'smooth' }) }, 'Manage service favorites'),
+      (() => {
+        const on = isServicePinned(CALENDAR_PIN);
+        return h('button', { class: 'btn sm', type: 'button', onclick: () => {
+          const r = setServicePinned(CALENDAR_PIN, !on);
+          const removed = r.removed && ctx.state.services.find((x) => x.key === r.removed);
+          if (r.pinned) toast(`Calendar added to the bottom bar${removed ? ` (replaced ${removed.label})` : ''}`, 'success');
+          ctx.reload();
+        } }, on ? 'Remove Calendar' : (keys.length >= MAX_PINNED_SERVICES ? 'Add Calendar (replaces first)' : '+ Add Calendar'));
+      })(),
+    ),
   );
 }
 

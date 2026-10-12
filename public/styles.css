@@ -1509,3 +1509,19 @@ html[data-black] .hex-cell.hex-system .hex-face { background: linear-gradient(16
 .quick-add-settings-instance { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
 .quick-add-settings-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .quick-add-settings-fields { display: grid; gap: 10px; }
+
+/* ---------- Calendar page (#/calendar) ---------- */
+.cal-card { display: grid; gap: 12px; }
+.cal-head { display: flex; align-items: center; gap: 8px; }
+.cal-month-label { flex: 1 1 auto; margin: 0; text-align: center; font-size: 17px; }
+.cal-nav { min-width: 44px; min-height: 44px; font-size: 20px; line-height: 1; padding: 0 14px; }
+.cal-head .btn { min-height: 44px; }
+.cal-nav-ic { display: inline-flex; color: #fff; }
+.allsvc-item .cal-nav-ic { color: #fff; }
+.favorite-preview-icon .cal-nav-ic { color: var(--accent); }
+.favorite-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.cal-week-panel .up-day:first-child { margin-top: 0; }
+@media (max-width: 720px) {
+  .cal-card .up-cal-day { min-height: 48px; }
+  .cal-card .up-cal-day.is-clickable { min-height: 48px; }
+}

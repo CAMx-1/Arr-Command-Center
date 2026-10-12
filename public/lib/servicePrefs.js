@@ -10,6 +10,8 @@ const ORDER_KEY = 'svc-order';
 // the oldest entry.
 const PINNED_KEY = 'bn:pinned';
 export const MAX_PINNED_SERVICES = 4;
+// Pseudo-entry for the Calendar page, pinnable to the bottom bar like a service.
+export const CALENDAR_PIN = '@calendar';
 
 function pinStorage(storage) { return storage || globalThis.localStorage; }
 
