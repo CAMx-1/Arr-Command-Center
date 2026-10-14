@@ -6,24 +6,115 @@ const store = new Map();     // key -> { data, at }
 const inflight = new Map();  // key -> Promise
 const jobs = new Map();      // key -> { fetcher, ttl }
 
+// ---- Persistent layer (survives relaunches) ----
+// Large, slow-changing lists (Sonarr/Radarr libraries, profiles, root folders,
+// Seerr server options) are also written to IndexedDB, scoped per server +
+// signed-in user. A cold launch serves them instantly and refreshes in the
+// background; `acc:cache-fresh` fires when the refreshed data differs, so the
+// current view can repaint.
+const PERSIST_RE = /^(arr:[^:]+:(series|movie|qualityprofile|rootfolder)|seerr:service:.+|bazarr:[^:]+:profiles)$/;
+const PERSIST_MAX_AGE = 7 * 86400000;
+let persist = null;          // { get(id), set(id, rec), del(id), clear() }
+let scope = '';
+
+export function shouldPersist(key) { return PERSIST_RE.test(key); }
+export function configurePersistence({ backend = null, scope: sc = '' } = {}) { persist = backend; scope = sc; }
+const pid = (key) => `${scope}|${key}`;
+const emit = (name, detail) => { try { globalThis.dispatchEvent?.(new CustomEvent(name, { detail })); } catch { /* non-DOM */ } };
+
+async function readPersisted(key) {
+  if (!persist || !shouldPersist(key)) return null;
+  try {
+    const rec = await persist.get(pid(key));
+    if (!rec || !Number.isFinite(rec.at) || Date.now() - rec.at > PERSIST_MAX_AGE) return null;
+    return rec;
+  } catch { return null; }
+}
+function writePersisted(key, data, at) {
+  if (!persist || !shouldPersist(key) || data == null) return;
+  Promise.resolve().then(() => persist.set(pid(key), { data, at })).catch(() => {});
+}
+
 function run(key) {
   const job = jobs.get(key);
   if (!job || inflight.has(key)) return inflight.get(key);
   const p = Promise.resolve().then(job.fetcher)
-    .then((data) => { store.set(key, { data, at: Date.now() }); inflight.delete(key); return data; })
-    .catch((err) => { inflight.delete(key); throw err; });
+    .then((data) => {
+      const at = Date.now();
+      const prev = store.get(key);
+      store.set(key, { data, at });
+      inflight.delete(key);
+      writePersisted(key, data, at);
+      if (prev && prev.fromDisk) {
+        let changed = true;
+        try { changed = JSON.stringify(prev.data) !== JSON.stringify(data); } catch { /* assume changed */ }
+        emit('acc:cache-fresh', { key, changed });
+      }
+      return data;
+    })
+    .catch((err) => { inflight.delete(key); emit('acc:cache-fresh', { key, changed: false, error: true }); throw err; });
   inflight.set(key, p);
   return p;
 }
 
 export async function cachedGet(key, fetcher, ttl = 300000) {
   jobs.set(key, { fetcher, ttl }); // (re)register for background refresh
-  const entry = store.get(key);
+  let entry = store.get(key);
+  if (!entry && !inflight.has(key)) {
+    const rec = await readPersisted(key);
+    if (rec && !store.has(key)) {
+      entry = { data: rec.data, at: rec.at, fromDisk: true };
+      store.set(key, entry);
+      emit('acc:cache-stale', { key, at: rec.at });
+      run(key).catch(() => {}); // always revalidate data restored from disk
+      return entry.data;
+    }
+    entry = store.get(key);
+  }
   if (entry) {
     if (Date.now() - entry.at > ttl && !inflight.has(key)) run(key).catch(() => {}); // refresh in background
     return entry.data; // serve cached immediately (stale-while-revalidate)
   }
   return run(key); // cold: fetch and cache
+}
+
+// True while any data restored from disk is still being revalidated.
+export function revalidating() {
+  for (const [key, e] of store) if (e.fromDisk && inflight.has(key)) return true;
+  return false;
+}
+
+export async function clearPersistedCache() {
+  store.clear();
+  try { await persist?.clear(); } catch { /* ignore */ }
+}
+
+// IndexedDB backend (one object store, keys are scope|cacheKey).
+export function indexedDbBackend(name = 'acc-cache') {
+  if (typeof indexedDB === 'undefined') return null;
+  let dbp = null;
+  const db = () => dbp || (dbp = new Promise((resolve, reject) => {
+    const req = indexedDB.open(name, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('kv');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => { dbp = null; reject(req.error); };
+  }));
+  const tx = async (mode, fn) => {
+    const d = await db();
+    return new Promise((resolve, reject) => {
+      const t = d.transaction('kv', mode);
+      const r = fn(t.objectStore('kv'));
+      t.oncomplete = () => resolve(r && 'result' in r ? r.result : undefined);
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error);
+    });
+  };
+  return {
+    get: (id) => tx('readonly', (os) => os.get(id)),
+    set: (id, rec) => tx('readwrite', (os) => os.put(rec, id)),
+    del: (id) => tx('readwrite', (os) => os.delete(id)),
+    clear: () => tx('readwrite', (os) => os.clear()),
+  };
 }
 
 // Fetch and cache an endpoint that must return a JSON array. A 2xx response
@@ -36,7 +127,10 @@ export async function cachedList(key, fetcher, ttl = 300000, label = 'Service') 
   throw new TypeError(`${label} returned an invalid list response`);
 }
 
-export function invalidate(key) { store.delete(key); }
+export function invalidate(key) {
+  store.delete(key);
+  if (persist && shouldPersist(key)) Promise.resolve().then(() => persist.del(pid(key))).catch(() => {});
+}
 
 // Persistent stale-while-revalidate cache for dashboard data that should survive
 // reloads. Values are scoped by the caller (for example, by authenticated user)

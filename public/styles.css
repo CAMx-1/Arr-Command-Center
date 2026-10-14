@@ -1534,3 +1534,14 @@ html[data-black] .hex-cell.hex-system .hex-face { background: linear-gradient(16
 .detail-actions > .pill + .btn { justify-self: start; }
 .detail-actions .btn { min-height: 44px; }
 @media (max-width: 720px) { .detail-actions { padding: 12px 4px 0; } }
+
+/* Saved-data revalidation pill (bottom center, above the mobile bottom bar). */
+.cache-pill { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translate(-50%, 12px); z-index: 70;
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  background: var(--surface); color: var(--text-dim); border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+  opacity: 0; pointer-events: none; transition: opacity 0.2s var(--ease), transform 0.2s var(--ease); }
+.cache-pill.show { opacity: 1; transform: translate(-50%, 0); }
+.cache-pill-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: cachePulse 1s ease-in-out infinite; }
+@keyframes cachePulse { 50% { opacity: 0.3; } }
+@media (min-width: 721px) { .cache-pill { bottom: 20px; } }
+@media (prefers-reduced-motion: reduce) { .cache-pill-dot { animation: none; } }

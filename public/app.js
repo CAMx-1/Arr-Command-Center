@@ -12,7 +12,7 @@ export const calendarIcon = () => h('span', { class: 'cal-nav-ic', html: '<svg v
 const CALENDAR_ENTRY = { key: 'calendar', pin: CALENDAR_PIN, label: 'Calendar', isCalendar: true };
 import { splitHive, flyoutLayout } from './lib/hiveLayout.js';
 import { hiveSignature, statusDotClass } from './lib/hiveState.js';
-import { cachedGet } from './lib/cache.js';
+import { cachedGet, configurePersistence, indexedDbBackend, revalidating, clearPersistedCache } from './lib/cache.js';
 import { renderHome, refreshHome } from './views/home.js';
 import { renderSonarr } from './views/sonarr.js';
 import { renderRadarr } from './views/radarr.js';
@@ -314,7 +314,7 @@ function buildHive() {
   if (state.config.auth && state.config.auth.plexEnabled) {
     cells.push({ kind: 'logout', title: 'Log out', glyph: '⏻', onClick: () => confirmModal({
       title: 'Sign out', message: 'Are you sure you want to sign out?', confirmLabel: 'Sign out', danger: true,
-      onConfirm: async () => { try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ } location.href = '/login.html'; },
+      onConfirm: async () => { try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ } await clearPersistedCache(); location.href = '/login.html'; },
     }) });
   }
 
@@ -434,7 +434,20 @@ function updateStatusDots() {
     const cls = statusDotClass(state.status[node.dataset.svcKey]);
     dot.className = `hive-dot ${cls}`.trim();
   });
+  // Overview service hexes (rendered before status may have arrived).
+  document.querySelectorAll('.hex-cell[data-status-key] .hex-dot').forEach((dot) => {
+    const key = dot.closest('.hex-cell').dataset.statusKey;
+    dot.className = `hex-dot ${statusDotClass(state.status[key])}`.trim();
+  });
 }
+
+// Last known service status, so the first render shows real dots instead of
+// waiting on /api/status (which waits on the slowest service).
+const LAST_STATUS_KEY = 'acc:last-status';
+function readLastStatus() {
+  try { const v = JSON.parse(localStorage.getItem(LAST_STATUS_KEY) || 'null'); return v && typeof v === 'object' ? v : null; } catch { return null; }
+}
+function saveLastStatus(st) { try { localStorage.setItem(LAST_STATUS_KEY, JSON.stringify(st)); } catch { /* full/blocked */ } }
 
 // ---------- Mobile hex bottom navigation ----------
 
@@ -1254,6 +1267,7 @@ function applyStatusResult() {
 async function refreshStatus() {
   try {
     state.status = await api.status();
+    saveLastStatus(state.status);
     applyStatusResult();
     // The aggregate request succeeded → the dashboard backend is reachable.
     // (Individual services may still be "down" in the map; that's not offline.)
@@ -1339,6 +1353,45 @@ async function probeCycle() {
   _probeTimer = setTimeout(probeCycle, _probeDelay);
 }
 
+// ---------- Saved-data revalidation ----------
+// Views render instantly from data saved on a previous launch; when the live
+// refresh differs, re-render the current route in place (scroll preserved)
+// unless the user is mid-interaction, and show a small "Updating" pill while
+// saved data is being checked.
+function installCacheRevalidation() {
+  let pill = null; let pillTimer = 0; let repaintTimer = 0; let changed = false;
+  const busy = () => {
+    const a = document.activeElement;
+    return overlayOpen('modal') || overlayOpen('allsvc')
+      || (a && a.closest && a.closest('#view') && a.matches('input, textarea, select'))
+      || document.querySelector('#view .bulk-bar');
+  };
+  const hidePill = () => { clearTimeout(pillTimer); pillTimer = 0; if (pill) pill.classList.remove('show'); };
+  window.addEventListener('acc:cache-stale', (e) => {
+    if (Date.now() - (e.detail?.at || 0) < 60000 || pillTimer) return;
+    // Only bother the user if revalidation takes a moment.
+    pillTimer = setTimeout(() => {
+      pillTimer = 0;
+      if (!revalidating()) return;
+      if (!pill) { pill = h('div', { class: 'cache-pill', role: 'status', 'aria-live': 'polite' }, h('span', { class: 'cache-pill-dot' }), 'Showing saved data · updating…'); document.body.appendChild(pill); }
+      pill.classList.add('show');
+    }, 400);
+  });
+  window.addEventListener('acc:cache-fresh', (e) => {
+    if (e.detail?.changed) changed = true;
+    clearTimeout(repaintTimer);
+    repaintTimer = setTimeout(() => {
+      if (revalidating()) return; // wait for the rest
+      hidePill();
+      if (!changed) return;
+      changed = false;
+      if (busy()) return; // next navigation shows the fresh data
+      _pendingIntent = 'preserve';
+      navigate();
+    }, 250);
+  });
+}
+
 // ---------- Init ----------
 async function init() {
   installClientDiagnostics();
@@ -1386,6 +1439,10 @@ async function init() {
   }
   state.services = Object.values(state.config.services || {});
   setDashboardScope(state.config.auth?.user);
+  // Persist big lists (libraries, profiles, root folders) between launches,
+  // scoped to this server + signed-in user.
+  configurePersistence({ backend: indexedDbBackend(), scope: `${location.origin}|${state.config.auth?.user || ''}` });
+  installCacheRevalidation();
 
   // The sidebar is a permanent icon-only rail.
   document.getElementById('app').classList.add('collapsed');
@@ -1395,7 +1452,10 @@ async function init() {
   let resizeTimer;
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { buildHive(); }, 200); });
 
-  await refreshStatus();
+  // Don't block the first render on /api/status: seed last-known status and
+  // let the live result repaint dots when it lands.
+  state.status = readLastStatus() || {};
+  const firstStatus = refreshStatus();
   // Restore the last route if no explicit hash was provided.
   if (!location.hash) {
     try { const last = localStorage.getItem('acc:last-route'); if (last && last !== 'home') location.hash = `#/${last}`; } catch { /* ignore */ }
@@ -1403,6 +1463,7 @@ async function init() {
   window.addEventListener('hashchange', navigate);
   await navigate();
   await finishNativeLaunch();
+  await firstStatus;
   recordClientEvent('info', 'Initial route rendered', currentRoute());
 
   // Poll connection status every 15s.

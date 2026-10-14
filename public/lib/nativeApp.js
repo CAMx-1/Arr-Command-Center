@@ -1,3 +1,4 @@
+import { clearPersistedCache } from './cache.js';
 import { FALLBACK_STORAGE_KEY, MODE_KEY } from './fallbackSync.js';
 import { isNativeCapacitorRuntime } from './tapActivation.js';
 
@@ -100,6 +101,7 @@ export async function persistAppMode(mode) {
 }
 
 export async function reloadInterface({ clearCaches = false } = {}) {
+  if (clearCaches) { try { await clearPersistedCache(); } catch { /* ignore */ } }
   if (clearCaches && 'caches' in globalThis) {
     try { await Promise.all((await caches.keys()).map((key) => caches.delete(key))); } catch { /* ignore */ }
   }

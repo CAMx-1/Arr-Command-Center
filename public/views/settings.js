@@ -1,3 +1,4 @@
+import { clearPersistedCache } from '../lib/cache.js';
 import { h, mount, clear, spinner, svcIcon, confirmModal, openModal, closeModal, toast, tabs, fmtBytes } from '../lib/ui.js';
 import { SERVICE_META, calendarIcon } from '../app.js';
 import { getTheme, getAccent, applyTheme, applyAccent, ACCENTS, ACCENT_NAMES } from '../lib/theme.js';
@@ -46,6 +47,7 @@ export async function renderSettings(root, ctx) {
             danger: true,
             onConfirm: async () => {
               try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+              await clearPersistedCache();
               location.href = '/login.html';
             },
           }) }, 'Log out')))

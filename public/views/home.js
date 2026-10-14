@@ -10,7 +10,7 @@ import { queueActionList } from '../lib/queueActions.js';
 import { hiddenUpcoming, setUpcomingHidden, visibleUpcomingServices } from '../lib/upcomingFilter.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { getSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
-import { persistentSWR } from '../lib/cache.js';
+import { persistentSWR, cachedGet } from '../lib/cache.js';
 import { seerrRequestBadge } from '../lib/seerrStatus.js';
 import { createBookServiceClient } from '../lib/bookServices.js';
 import { downloadClientFor } from '../lib/downloadClients.js';
@@ -1006,7 +1006,7 @@ function hexCell(svc, st, ctx) {
   const online = st && st.ok;
   const dotClass = online ? 'ok' : (st ? 'down' : '');
   const statsEl = h('div', { class: 'hex-stats', id: `stats-${svc.key}` });
-  const cell = h('div', { class: 'hex-cell', title: svc.label, onclick: () => { location.hash = `#/${svc.key}`; } },
+  const cell = h('div', { class: 'hex-cell', title: svc.label, dataset: { statusKey: svc.key }, onclick: () => { location.hash = `#/${svc.key}`; } },
     h('div', { class: 'hex-border' }),
     h('div', { class: 'hex-face' },
       h('div', { class: 'hex-inner' },
@@ -1033,8 +1033,11 @@ async function hydrateCardStats(svc, ctx) {
   try {
     if (svc.type === 'sonarr' || svc.type === 'radarr') {
       const arr = api.arr(svc.key);
+      const path = svc.type === 'sonarr' ? 'series' : 'movie';
+      // Shares (and persists) the library cache with the Sonarr/Radarr views
+      // and Search, so the count shows instantly on relaunch.
       const [items, queue] = await Promise.all([
-        arr.get(svc.type === 'sonarr' ? 'series' : 'movie'),
+        cachedGet(`arr:${svc.key}:${path}`, () => arr.get(path), 300000),
         arr.get('queue').catch(() => ({ records: [] })),
       ]);
       const count = Array.isArray(items) ? items.length : 0;

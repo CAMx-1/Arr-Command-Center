@@ -2,6 +2,7 @@
 // Serves the dashboard UI and proxies API calls to your services, injecting
 // per-service API keys and Cloudflare Access service-token headers.
 import express from 'express';
+import compression from 'compression';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
@@ -19,6 +20,8 @@ import { startPoller, pollOnce } from './poller.js';
 import * as automation from './automation.js';
 import { getOperations } from './operations.js';
 import { getSystemStats } from './system.js';
+import { createAssetServer } from './assets.js';
+import { createStatusCache } from './statusCache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -47,6 +50,9 @@ if (cfg.mock) {
 
 const app = express();
 app.disable('x-powered-by');
+// gzip/brotli for HTML/CSS/JS/JSON (library lists shrink ~5-10x). Responses
+// that already carry a Content-Encoding are left alone.
+app.use(compression());
 
 // Initialize web push (loads or generates a persistent VAPID keypair).
 try { push.initPush(); } catch (e) { console.error('[push] init failed:', e.message); }
@@ -180,16 +186,23 @@ app.get('/api/version', (req, res) => {
   res.json({ version: BUILD_ID, startedAt: START_TS });
 });
 
-// Aggregate connection status for all enabled services.
+// Aggregate connection status for all enabled services, served from a cache
+// that pings every service in the background (see statusCache.js). ?fresh=1
+// waits for a full re-check (manual refresh).
+async function serviceHealth(key, svc) {
+  if (svc.sample) return { label: svc.label || key, type: svc.type, ok: true, status: 200, ms: 0, version: 'sample' };
+  if (svc.type === 'plex') { const ok = plex.hasToken(cfg); return { label: svc.label || key, type: 'plex', ok, status: ok ? 200 : 0, ms: 0, error: ok ? undefined : 'Sign in with Plex to enable' }; }
+  const health = await pingService(svc, key).catch((e) => ({ ok: false, status: 0, ms: 0, error: (e && e.message) || 'ping failed' }));
+  return { label: svc.label || key, type: svc.type, ...health };
+}
+const statusCache = createStatusCache({
+  entries: () => Object.entries(cfg.services).filter(([, s]) => s.enabled !== false),
+  ping: serviceHealth,
+  intervalMs: Math.max(5000, Number(process.env.STATUS_POLL_MS) || 15000),
+});
 app.get('/api/status', async (req, res) => {
-  const entries = Object.entries(cfg.services).filter(([, s]) => s.enabled !== false);
-  const results = await Promise.all(entries.map(async ([key, svc]) => {
-    if (svc.sample) return [key, { label: svc.label || key, type: svc.type, ok: true, status: 200, ms: 0, version: 'sample' }];
-    if (svc.type === 'plex') { const ok = plex.hasToken(cfg); return [key, { label: svc.label || key, type: 'plex', ok, status: ok ? 200 : 0, ms: 0, error: ok ? undefined : 'Sign in with Plex to enable' }]; }
-    const health = await pingService(svc, key).catch((e) => ({ ok: false, status: 0, ms: 0, error: (e && e.message) || 'ping failed' }));
-    return [key, { label: svc.label || key, type: svc.type, ...health }];
-  }));
-  res.json(Object.fromEntries(results));
+  res.set('Cache-Control', 'no-store');
+  res.json(await statusCache.get({ fresh: req.query.fresh === '1' }));
 });
 
 // Single-service status.
@@ -422,6 +435,7 @@ app.post('/api/config/service', express.json({ limit: '32kb' }), async (req, res
     // Durable write first; only reflect into the live config once persisted.
     await saveServiceToDisk(key, clean);
     cfg.services[key] = { ...clean }; // apply live (proxy/status read cfg.services per request)
+    statusCache.invalidate(key);
     res.json({ ok: true, services: publicConfig(cfg).services });
   } catch (err) {
     res.status(500).json({ error: `Could not write config.json: ${err.message}` });
@@ -435,16 +449,25 @@ app.delete('/api/config/service/:key', async (req, res) => {
   try {
     await removeServiceFromDisk(key);
     delete cfg.services[key];
+    statusCache.invalidate(key);
     res.json({ ok: true, services: publicConfig(cfg).services });
   } catch (err) {
     res.status(500).json({ error: `Could not write config.json: ${err.message}` });
   }
 });
 
-// Static frontend. Do not retain HTML/CSS/JS in browser or WKWebView caches:
-// the native shell runs the UI from this server origin after authentication,
-// and WebKit can otherwise restore an old document/module graph after an app
-// rebuild even though the native bundle itself contains the latest assets.
+// Static frontend. The app shell (index.html) is generated per request and
+// never cached; it points at /b/<assetId>/... JS/CSS which are immutable (see
+// assets.js), so relaunches load from the HTTP cache while a deploy can never
+// mix old and new modules. Root-path JS/CSS (login page, the bundled native
+// shell, old documents) stay uncached as before.
+const assets = createAssetServer(PUBLIC_DIR);
+const sendShell = (req, res) => {
+  res.set('Cache-Control', 'no-store, must-revalidate');
+  res.type('html').send(assets.shell());
+};
+app.get(['/', '/index.html'], sendShell);
+app.use(assets.middleware);
 app.use(express.static(PUBLIC_DIR, {
   setHeaders(res, filePath) {
     if (/\.(html|css|js)$/i.test(filePath)) {
@@ -464,7 +487,7 @@ app.use(express.static(PUBLIC_DIR, {
 // SPA fallback for any non-API route.
 app.get('/{*path}', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
-  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+  sendShell(req, res);
 });
 
 const server = app.listen(cfg.port, cfg.host, () => {
@@ -477,6 +500,7 @@ const server = app.listen(cfg.port, cfg.host, () => {
 
 // Background poller for automatic push notifications. Disable with NOTIFY_DISABLE=1;
 // tune cadence with NOTIFY_POLL_SECONDS (default 60, min 15).
+statusCache.start();
 let poller = null;
 if (!process.env.NOTIFY_DISABLE) {
   poller = startPoller(cfg, { intervalSeconds: Number(process.env.NOTIFY_POLL_SECONDS) || 60 });
@@ -495,6 +519,7 @@ function shutdown() {
   console.log('\n[shutdown] closing servers...');
   if (poller) poller.stop();
   if (automationTimer) clearInterval(automationTimer);
+  statusCache.stop();
   server.close();
   for (const s of mockServers) s.close();
   process.exit(0);
