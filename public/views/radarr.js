@@ -1,5 +1,5 @@
 import { getAddDefaults, setAddDefaults, initialAddChoices } from '../lib/addDefaults.js';
-import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, autoRefresh, swipeToAction } from '../lib/ui.js';
+import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, autoRefresh, swipeToAction, rootFolderLabel } from '../lib/ui.js';
 import { reconcileQueueIssues } from '../lib/queueIssues.js';
 import { openDetailModal, openArrFileInfo } from './detail.js';
 import { openReleaseSearch } from './releaseSearch.js';
@@ -321,7 +321,7 @@ async function confirmAdd(r, arr, ctx) {
     cachedGet(`arr:${ctx.service.key}:qualityprofile`, () => arr.get('qualityprofile'), 600000),
   ]); } catch { /* defaults */ }
   const remembered = initialAddChoices(getAddDefaults(ctx.service.key), profiles, folders);
-  const folderSel = h('select', { class: 'input' }, ...folders.map((f) => h('option', { value: f.path, selected: f.path === remembered.rootFolderPath ? 'selected' : null }, `${f.path} (${fmtBytes(f.freeSpace)} free)`)));
+  const folderSel = h('select', { class: 'input' }, ...folders.map((f) => h('option', { value: f.path, selected: f.path === remembered.rootFolderPath ? 'selected' : null }, rootFolderLabel(f))));
   const profileSel = h('select', { class: 'input' }, ...profiles.map((p) => h('option', { value: p.id, selected: p.id === remembered.qualityProfileId ? 'selected' : null }, p.name)));
   const searchChk = h('input', { type: 'checkbox', checked: true });
 

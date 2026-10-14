@@ -1,5 +1,8 @@
 import { h, mount, spinner, empty, openModal, closeModal, fmtBytes, copyable } from '../lib/ui.js';
 import { cachedGet } from '../lib/cache.js';
+import { quickAddControls, seerrResolver, idResolver } from '../lib/quickAdd.js';
+import { openInArr } from '../app.js';
+import { openSeasonModal, openMovieRequestModal } from './overseerr.js';
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p/';
 const img = (path, size) => (path ? `${TMDB_IMG}${size}${path}` : null);
@@ -24,6 +27,59 @@ export async function openDetailModal(ctx, opts) {
     } catch { /* fall back below */ }
   }
   renderDetail(body, data, fallback, mediaType, !!provider);
+  // Library status + Add/Request actions load after the details so the popup
+  // never waits on Sonarr/Radarr.
+  const slot = body.querySelector('.detail-actions');
+  if (slot) hydrateDetailActions(slot, ctx, { mediaType, tmdbId, data, fallback, provider }).catch(() => mount(slot));
+}
+
+// Find the title in any configured Sonarr/Radarr library (same cache as Search).
+async function findInLibrary(ctx, mediaType, { tmdbId, tvdbId }) {
+  const type = mediaType === 'tv' ? 'sonarr' : 'radarr';
+  const path = mediaType === 'tv' ? 'series' : 'movie';
+  const arrs = (ctx.state.services || []).filter((s) => s.type === type && s.configured !== false);
+  for (const svc of arrs) {
+    try {
+      const items = await cachedGet(`arr:${svc.key}:${path}`, () => ctx.api.arr(svc.key).get(path), 300000);
+      const hit = (items || []).find((it) => (tmdbId && it.tmdbId === tmdbId) || (tvdbId && it.tvdbId === tvdbId));
+      if (hit) return { svc, item: hit };
+    } catch { /* unreachable instance: keep looking */ }
+  }
+  return null;
+}
+
+const SEERR_STATUS = { 2: 'Requested', 3: 'Processing', 4: 'Partially available', 5: 'Available' };
+
+async function hydrateDetailActions(slot, ctx, { mediaType, tmdbId, data, fallback, provider }) {
+  if (!tmdbId) { mount(slot); return; }
+  const title = (data && (data.title || data.name)) || fallback.title || 'this title';
+  const tvdbId = (data && data.externalIds && data.externalIds.tvdbId) || fallback.tvdbId || null;
+  const found = await findInLibrary(ctx, mediaType, { tmdbId, tvdbId });
+  if (found) {
+    mount(slot, h('div', { class: 'detail-actions-row' },
+      h('span', { class: 'pill ok' }, `In ${found.svc.label}`),
+      h('button', { class: 'btn sm primary', type: 'button', onclick: () => openInArr({ svc: found.svc, title: found.item.title }) }, `Open in ${found.svc.label}`)));
+    return;
+  }
+  const st = data && data.mediaInfo && data.mediaInfo.status;
+  const r = { id: tmdbId, mediaType, title: data && data.title, name: data && data.name, firstAirDate: data && data.firstAirDate };
+  const canRequest = provider && (!st || st === 1 || (mediaType === 'tv' && st === 4));
+  const request = () => {
+    const seerr = ctx.api.seerr(provider.key);
+    const c = { service: { key: provider.key } };
+    return mediaType === 'tv' ? openSeasonModal(seerr, c, r, title) : openMovieRequestModal(seerr, c, r, title);
+  };
+  const requestLabel = mediaType === 'tv' ? (st === 4 ? 'Request more seasons' : 'Request') : 'Request';
+  const year = (data && (data.releaseDate || data.firstAirDate) || '').slice(0, 4) || fallback.year;
+  const qa = quickAddControls({
+    services: ctx.state.services, mediaType, title,
+    resolveItem: provider ? seerrResolver(provider, r) : idResolver({ mediaType, tmdbId, tvdbId, title, year }),
+    extraActions: canRequest ? [h('button', { class: 'btn sm', type: 'button', onclick: request }, 'Request via Seerr…')] : [],
+  });
+  const statusPill = SEERR_STATUS[st] ? h('span', { class: `pill ${st >= 5 ? 'ok' : 'info'}` }, SEERR_STATUS[st]) : h('span', { class: 'pill info' }, 'Not in library');
+  if (qa.available) { mount(slot, h('div', { class: 'detail-actions-row' }, statusPill, ...qa.actions), qa.panel); return; }
+  mount(slot, h('div', { class: 'detail-actions-row' }, statusPill,
+    canRequest ? h('button', { class: 'btn sm primary', type: 'button', onclick: request }, requestLabel) : null));
 }
 
 function renderDetail(root, data, fallback, mediaType, hasProvider) {
@@ -76,7 +132,8 @@ function renderDetail(root, data, fallback, mediaType, hasProvider) {
     castEl = null;
   }
 
-  mount(root, hero, overviewEl, castEl);
+  const actions = h('div', { class: 'detail-actions', 'aria-live': 'polite' });
+  mount(root, hero, actions, overviewEl, castEl);
 }
 
 function castCard(person) {

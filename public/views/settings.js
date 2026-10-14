@@ -1120,10 +1120,11 @@ async function hydrateNotifications(ctx) {
   render();
 }
 
-const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex'];
+const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex'];
 // Where to find the API key / what auth each newer integration expects.
 const SERVICE_KEY_HINTS = {
   autobrr: 'Autobrr → Settings → API keys (sent as X-API-Token).',
+  listenarr: 'Listenarr → Settings → General → API key (default port 4545). Listenarr is pre-1.0 beta, so some screens may change.',
   audiobookshelf: 'Audiobookshelf → Settings → API Keys (v2.26+), or your user API token.',
   tdarr: 'Only needed if Tdarr server auth is enabled (Tools → API Keys).',
   maintainerr: 'Maintainerr has no API authentication; leave blank. Keep it off the public internet and rely on ACC’s own login.',

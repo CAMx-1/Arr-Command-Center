@@ -11,7 +11,7 @@ export const CONNECTIONS_KEY = 'acc:connections';
 export const MODE_KEY = 'acc:app-mode';
 
 const SUPPORTED_TYPES = new Set([
-  'sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'prowlarr',
+  'sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'prowlarr',
   'bazarr', 'sabnzbd', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'tautulli', 'indexer',
   'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr',
 ]);

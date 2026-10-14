@@ -37,7 +37,8 @@ export function initialAddChoices(saved, profiles = [], folders = []) {
   if (r) return r;
   return {
     qualityProfileId: profiles[0]?.id ?? null,
-    rootFolderPath: folders[0]?.path ?? null,
+    // Skip folders Sonarr/Radarr report as unavailable (e.g. an unmounted drive).
+    rootFolderPath: (folders.find((f) => f.accessible !== false) || folders[0])?.path ?? null,
     monitored: saved ? saved.monitored !== false : true,
     searchOnAdd: saved ? saved.searchOnAdd !== false : true,
   };

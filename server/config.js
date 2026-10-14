@@ -32,7 +32,7 @@ export function loadDotEnv() {
   }
 }
 
-const SERVICE_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex'];
+const SERVICE_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex'];
 export const ALLOWED_SERVICE_TYPES = SERVICE_TYPES;
 export const CONFIG_PATH = path.join(ROOT, 'config.json');
 
@@ -264,6 +264,7 @@ function buildMockConfig() {
       lidarr: mk('lidarr', 'Lidarr', 'lidarr', MOCK_PORTS.lidarr),
       readarr: mk('readarr', 'Readarr (Legacy)', 'readarr', MOCK_PORTS.readarr),
       bindery: mk('bindery', 'Bindery', 'bindery', MOCK_PORTS.bindery),
+      listenarr: mk('listenarr', 'Listenarr', 'listenarr', MOCK_PORTS.listenarr),
       overseerr: mk('overseerr', 'Overseerr', 'overseerr', MOCK_PORTS.overseerr),
       sabnzbd: mk('sabnzbd', 'SABnzbd', 'sabnzbd', MOCK_PORTS.sabnzbd),
       tautulli: mk('tautulli', 'Tautulli', 'tautulli', MOCK_PORTS.tautulli),
@@ -380,7 +381,7 @@ export function publicConfig(cfg) {
 // sync endpoint. This is deliberately separate from publicConfig(), which must
 // remain secret-free for every normal page/config request.
 const LOCAL_FALLBACK_TYPES = new Set([
-  'sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'overseerr', 'prowlarr',
+  'sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'prowlarr',
   'bazarr', 'sabnzbd', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'tautulli', 'indexer',
   'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr',
 ]);

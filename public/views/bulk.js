@@ -16,7 +16,7 @@
 // Selection is service-scoped and persisted (lib/workflowState.js) so it is
 // restored on entry and preserved for the library view on return, and the
 // table/list presentation (mode, columns, sort) is carried back out on exit.
-import { h, mount, toast, poster, confirmModal, openModal, closeModal, pct } from '../lib/ui.js';
+import { h, mount, toast, poster, confirmModal, openModal, closeModal, pct, rootFolderLabel } from '../lib/ui.js';
 import { invalidate } from '../lib/cache.js';
 import { compactTable } from '../lib/tableView.js';
 import { actionGroup } from '../lib/actions.js';
@@ -211,7 +211,7 @@ export function bulkLibrary(root, opts) {
     if (!ids.length) { toast('Nothing selected', 'info'); return; }
     let roots = [];
     try { roots = await arr.get('rootfolder'); } catch { /* ignore */ }
-    const sel = h('select', { class: 'input' }, ...roots.map((r) => h('option', { value: r.path }, `${r.path}${r.accessible === false ? ' (not available)' : ''}`)));
+    const sel = h('select', { class: 'input' }, ...roots.map((r) => h('option', { value: r.path }, rootFolderLabel(r))));
     const moveChk = h('input', { type: 'checkbox' });
     const apply = async () => {
       const rootFolderPath = sel.value;

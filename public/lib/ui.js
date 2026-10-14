@@ -219,6 +219,15 @@ export function fmtBytes(bytes) {
   return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+// Root-folder option text: "path (123 GB free)" when free space is known.
+export function rootFolderLabel(f) {
+  const path = (f && (f.path || f.name)) || '';
+  const free = f && (f.freeSpace ?? f.freeBytes);
+  if (f && f.accessible === false) return `${path} (not available)`;
+  const known = free !== null && free !== undefined && free !== '' && Number.isFinite(Number(free));
+  return known ? `${path} (${fmtBytes(Number(free))} free)` : path;
+}
+
 export function fmtRelative(dateish) {
   const d = new Date(dateish);
   if (isNaN(d)) return '';

@@ -196,6 +196,7 @@ export function classifyLocalPath(pathname) {
 export function statusPath(type) {
   switch (type) {
     case 'lidarr': case 'readarr': case 'bindery': return 'api/v1/system/status';
+    case 'listenarr': return 'api/v1/system/info';
     case 'overseerr': return 'api/v1/status';
     case 'prowlarr': return 'api/v1/system/status';
     case 'sabnzbd': return 'api?mode=version&output=json';

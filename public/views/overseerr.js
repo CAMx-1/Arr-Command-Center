@@ -1,4 +1,4 @@
-import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtRelative, timeEl, fmtBytes, poster, debounce, openModal, closeModal } from '../lib/ui.js';
+import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtRelative, timeEl, poster, debounce, openModal, closeModal, rootFolderLabel } from '../lib/ui.js';
 import { openDetailModal } from './detail.js';
 import { addFailed } from '../lib/failedRequests.js';
 import { hive, posterHexCard } from '../lib/hive.js';
@@ -439,7 +439,7 @@ function seerrField(label, control) {
 
 function folderSelect(opts) {
   return h('select', { class: 'input' }, ...opts.rootFolders.map((f) =>
-    h('option', { value: f.path, selected: f.path === opts.defaultRoot ? 'selected' : null }, `${f.path} (${fmtBytes(f.freeSpace || 0)} free)`)));
+    h('option', { value: f.path, selected: f.path === opts.defaultRoot ? 'selected' : null }, rootFolderLabel(f))));
 }
 
 function profileSelect(opts) {

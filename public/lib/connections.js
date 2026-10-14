@@ -21,6 +21,7 @@ export const LOCAL_SERVICE_DEFS = [
   { type: 'lidarr', name: 'Lidarr', urlPlaceholder: 'https://lidarr.example.com' },
   { type: 'readarr', name: 'Readarr (Legacy)', urlPlaceholder: 'https://readarr.example.com' },
   { type: 'bindery', name: 'Bindery', urlPlaceholder: 'https://bindery.example.com' },
+  { type: 'listenarr', name: 'Listenarr', urlPlaceholder: 'http://listenarr.local:4545', keyHint: 'Settings → General → API key' },
   { type: 'overseerr', name: 'Overseerr / Seerr', urlPlaceholder: 'https://requests.example.com' },
   { type: 'prowlarr', name: 'Prowlarr', urlPlaceholder: 'https://prowlarr.example.com' },
   { type: 'bazarr', name: 'Bazarr', urlPlaceholder: 'https://bazarr.example.com' },

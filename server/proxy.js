@@ -562,6 +562,7 @@ const HEALTH_PATH = {
   lidarr: 'api/v1/system/status',
   readarr: 'api/v1/system/status',
   bindery: 'api/v1/system/status',
+  listenarr: 'api/v1/system/info',
   overseerr: 'api/v1/status',
   sabnzbd: 'api?mode=version&output=json',
   tautulli: 'api/v2?cmd=status',

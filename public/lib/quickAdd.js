@@ -4,7 +4,7 @@
 // profile, folder, monitor, search) that also sets those defaults. The first
 // Add on an instance opens the panel, since there's nothing remembered yet.
 import { api } from './api.js';
-import { h, mount, clear, toast } from './ui.js';
+import { h, mount, clear, toast, rootFolderLabel } from './ui.js';
 import { cachedGet, invalidate } from './cache.js';
 import { toastWithUndo } from './queueActions.js';
 import {
@@ -41,6 +41,22 @@ export function seerrResolver(seerrSvc, r) {
     }
     const list = await arr.get(`movie/lookup?term=${encodeURIComponent(`tmdb:${r.id}`)}`);
     return (list || []).find((x) => x.tmdbId === r.id) || (list || [])[0] || null;
+  };
+}
+
+// Resolve by known ids (no Seerr needed): movies by tmdb:<id>; series by
+// tvdb:<id> when known, else by title (+ year) — Sonarr looks series up by TVDB.
+export function idResolver({ mediaType, tmdbId, tvdbId, title, year }) {
+  return async (svc) => {
+    const arr = api.arr(svc.key);
+    if (mediaType === 'tv') {
+      const list = await arr.get(`series/lookup?term=${encodeURIComponent(tvdbId ? `tvdb:${tvdbId}` : title)}`);
+      return (list || []).find((x) => (tvdbId ? x.tvdbId === tvdbId : tmdbId && x.tmdbId === tmdbId))
+        || (list || []).find((x) => !year || String(x.year) === String(year))
+        || (list || [])[0] || null;
+    }
+    const list = await arr.get(`movie/lookup?term=${encodeURIComponent(`tmdb:${tmdbId}`)}`);
+    return (list || []).find((x) => x.tmdbId === tmdbId) || (list || [])[0] || null;
   };
 }
 
@@ -130,7 +146,7 @@ export function quickAddControls({ services, mediaType, title, resolveItem, extr
       try { opts = await instanceOptions(svc); } catch (e) { toast(e.message || `Couldn't reach ${svc.label}`, 'error'); return; }
       const c = initialAddChoices(getAddDefaults(svc.key), opts.profiles, opts.folders);
       mount(profileSel, ...opts.profiles.map((p) => h('option', { value: p.id, selected: p.id === c.qualityProfileId ? 'selected' : null }, p.name)));
-      mount(folderSel, ...opts.folders.map((f) => h('option', { value: f.path, selected: f.path === c.rootFolderPath ? 'selected' : null }, f.path)));
+      mount(folderSel, ...opts.folders.map((f) => h('option', { value: f.path, selected: f.path === c.rootFolderPath ? 'selected' : null }, rootFolderLabel(f))));
       monitorChk.checked = c.monitored; searchChk.checked = c.searchOnAdd;
       go.disabled = !opts.profiles.length || !opts.folders.length;
     }

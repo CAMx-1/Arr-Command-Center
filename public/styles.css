@@ -1525,3 +1525,12 @@ html[data-black] .hex-cell.hex-system .hex-face { background: linear-gradient(16
   .cal-card .up-cal-day { min-height: 48px; }
   .cal-card .up-cal-day.is-clickable { min-height: 48px; }
 }
+
+/* Detail popup: library status + Add / Request */
+.detail-actions { display: grid; gap: 10px; padding: 14px 22px 0; }
+.detail-actions:empty { display: none; }
+.detail-actions > .pill, .detail-actions-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.detail-actions { grid-template-columns: 1fr; }
+.detail-actions > .pill + .btn { justify-self: start; }
+.detail-actions .btn { min-height: 44px; }
+@media (max-width: 720px) { .detail-actions { padding: 12px 4px 0; } }

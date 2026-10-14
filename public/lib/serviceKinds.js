@@ -11,6 +11,7 @@
 const REQUIREMENTS = {
   maintainerr: 'none',
   tdarr: 'optional-key',
+  listenarr: 'optional-key', // API key always exists, but requests pass when Listenarr auth is off
   deluge: 'password',
   nzbget: 'basic',
   flood: 'basic',

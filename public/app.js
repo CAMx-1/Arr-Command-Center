@@ -31,6 +31,7 @@ import { renderAutobrr, renderMaintainerr, renderTdarr, renderAudiobookshelf } f
 import { renderEmbed } from './views/embed.js';
 import { renderSettings } from './views/settings.js';
 import { renderCalendar } from './views/calendar.js';
+import { renderListenarr } from './views/listenarr.js';
 import { openDetailModal } from './views/detail.js';
 import { fetchNotifications, getLastSeen, markSeen, notifKind } from './lib/notifications.js';
 import * as push from './lib/push.js';
@@ -53,6 +54,7 @@ export const SERVICE_META = {
   lidarr: { logo: '/icons/lidarr.svg', emoji: '🎵', renderer: renderLidarr },
   readarr: { logo: '/icons/readarr.svg', emoji: '📚', renderer: renderReadarr },
   bindery: { logo: '/icons/bindery.svg', emoji: '📚', renderer: renderBindery },
+  listenarr: { logo: '/icons/listenarr.svg', emoji: '🎧', renderer: renderListenarr },
   overseerr: { logo: '/icons/overseerr.svg', emoji: '', renderer: renderOverseerr },
   sabnzbd: { logo: '/icons/sabnzbd.svg', emoji: '⬇', renderer: renderSabnzbd },
   tautulli: { logo: '/icons/tautulli.svg', emoji: '', renderer: renderTautulli },
@@ -449,6 +451,7 @@ const QUICK_ACTIONS = {
   lidarr: [['library', 'Library'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['calendar', 'Calendar'], ['history', 'History']],
   readarr: [['library', 'Library'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['calendar', 'Calendar'], ['history', 'History']],
   bindery: [['library', 'Library'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['calendar', 'Calendar'], ['history', 'History']],
+  listenarr: [['library', 'Library'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['history', 'History'], ['add', 'Add audiobook']],
   sabnzbd: [['queue', 'Queue'], ['history', 'History']],
   tautulli: [['streams', 'Active Streams'], ['history', 'History'], ['stats', 'Statistics'], ['graphs', 'Graphs']],
   qbittorrent: [['downloading', 'Downloading'], ['completed', 'Completed']],

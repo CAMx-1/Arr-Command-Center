@@ -14,6 +14,7 @@ export const MOCK_PORTS = {
   lidarr: 18686,
   readarr: 18787,
   bindery: 18788,
+  listenarr: 14545,
   overseerr: 15055,
   sabnzbd: 18080,
   tautulli: 18181,
@@ -197,7 +198,7 @@ function makeSonarr(opts = {}) {
   });
   app.get('/__debug', (req, res) => res.json({ cf: cfSeen.sonarr || null }));
   app.get('/api/v3/system/status', (req, res) => res.json({ version: '4.0.10.2544', appName: 'Sonarr', instanceName: opts.instanceName || 'Sonarr (mock)' }));
-  let rootFolders = [{ id: 1, path: 'C:\\Media\\TV', freeSpace: 0, accessible: false, unmappedFolders: [] }];
+  let rootFolders = [{ id: 1, path: 'C:\\Media\\TV', freeSpace: 0, accessible: false, unmappedFolders: [] }, { id: 2, path: '/data/tv', freeSpace: 1649267441664, accessible: true, unmappedFolders: [] }];
   app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
   app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 500000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
   app.get('/api/v3/qualityprofile', (req, res) => res.json([{ id: 1, name: 'HD-1080p' }, { id: 2, name: 'Ultra-HD' }, { id: 3, name: 'Any' }]));
@@ -312,6 +313,7 @@ function makeRadarr(opts = {}) {
     { id: 1, path: 'C:\\Media\\Movies', freeSpace: 0, accessible: false, unmappedFolders: [] },
     { id: 2, path: 'C:\\Media\\Movies2', freeSpace: 0, accessible: false, unmappedFolders: [{ name: '1917.2019.PROPER.1080p.BluRay.x265', path: 'C:\\Media\\Movies2\\1917.2019.PROPER.1080p.BluRay.x265', relativePath: '1917.2019.PROPER.1080p.BluRay.x265' }] },
     { id: 3, path: 'C:\\Media\\Movies3', freeSpace: 0, accessible: false, unmappedFolders: [] },
+    { id: 4, path: '/data/movies', freeSpace: 2748779069440, accessible: true, unmappedFolders: [] },
   ];
   app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
   app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 900000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
@@ -1217,6 +1219,63 @@ function makeReadarr(opts = {}) {
 }
 
 // ---------------- Bindery (Readarr successor, API v1) ----------------
+// Listenarr (audiobooks, pre-1.0): /api/v1, X-Api-Key. Shapes follow
+// Listenarrs/Listenarr fe/src/types (Audiobook slim list, QueueSnapshot,
+// History envelope, metadata SearchResult).
+function makeListenarr() {
+  const app = express();
+  app.use(express.json());
+  let books = [
+    { id: 1, title: 'Project Hail Mary', authors: ['Andy Weir'], narrators: ['Ray Porter'], publishYear: '2021', asin: 'B08G9PRS1K', monitored: true, fileCount: 1, fileSize: 1073741824, runtime: 970, status: 'quality-match', wanted: false, imageUrl: null },
+    { id: 2, title: 'The Way of Kings', authors: ['Brandon Sanderson'], narrators: ['Michael Kramer', 'Kate Reading'], series: 'The Stormlight Archive', seriesNumber: '1', publishYear: '2010', asin: 'B003P2WO5E', monitored: true, fileCount: 0, fileSize: 0, runtime: 2741, status: 'no-file', wanted: true, imageUrl: null },
+    { id: 3, title: 'Dungeon Crawler Carl', authors: ['Matt Dinniman'], narrators: ['Jeff Hays'], series: 'Dungeon Crawler Carl', seriesNumber: '1', publishYear: '2020', asin: 'B08BX5K3V4', monitored: true, fileCount: 0, fileSize: 0, runtime: 816, status: 'downloading', wanted: true, imageUrl: null },
+    { id: 4, title: 'Dune', authors: ['Frank Herbert'], narrators: ['Scott Brick'], publishYear: '2007', asin: 'B002V1OF70', monitored: false, fileCount: 2, fileSize: 1395864371, runtime: 1263, status: 'quality-mismatch', wanted: false, imageUrl: null },
+  ];
+  let queue = [
+    { id: 'q-1', title: 'Dungeon Crawler Carl [M4B]', audiobookId: 3, author: 'Matt Dinniman', quality: 'M4B 64kbps', status: 'downloading', progress: 42.5, size: 524288000, downloaded: 222822400, downloadSpeed: 3145728, eta: 96, downloadClient: 'qBittorrent', downloadClientId: 'qb', downloadClientType: 'qbittorrent', addedAt: new Date(Date.now() - 600000).toISOString(), canPause: true, canRemove: true },
+  ];
+  app.use((req, res, next) => { recordCf('listenarr', req); if (req.headers['x-api-key'] !== 'MOCK_API_KEY') return res.status(401).json({ error: 'Unauthorized' }); next(); });
+  app.get('/__debug', (req, res) => res.json({ cf: cfSeen.listenarr || null }));
+  app.get('/api/v1/system/info', (req, res) => res.json({ version: '0.2.60-canary', operatingSystem: 'Linux', runtime: '.NET 10', uptime: '3.02:11:09', startTime: new Date(Date.now() - 266000000).toISOString() }));
+  app.get('/api/v1/system/health', (req, res) => res.json([]));
+  app.get('/api/v1/library', (req, res) => res.json(books));
+  app.get('/api/v1/qualityprofile', (req, res) => res.json([{ id: 1, name: 'Any', isDefault: false, qualities: [] }, { id: 2, name: 'M4B preferred', isDefault: true, qualities: [] }]));
+  app.get('/api/v1/rootfolders', (req, res) => res.json([{ id: 1, name: 'Audiobooks', path: '/audiobooks', isDefault: true }, { id: 2, name: 'Archive', path: '/mnt/archive/audiobooks', isDefault: false }]));
+  app.get('/api/v1/system/storage', (req, res) => res.json({ usedBytes: 0, totalBytes: 0, freeBytes: 0, disks: [
+    { label: 'root', path: '/', freeBytes: 812 * 1024 ** 3, totalBytes: 2000 * 1024 ** 3 },
+    { label: 'archive', path: '/mnt/archive', freeBytes: 3.6 * 1024 ** 4, totalBytes: 8 * 1024 ** 4 },
+  ] }));
+  app.post('/api/v1/library/preview-path', (req, res) => {
+    const m = (req.body && req.body.metadata) || {}; const root = String((req.body && req.body.destinationRoot) || '/audiobooks').replace(/\/+$/, '');
+    const rel = `${(m.authors && m.authors[0]) || 'Unknown'}/${m.title || 'Untitled'}`;
+    res.json({ fullPath: `${root}/${rel}`, relativePath: rel, root });
+  });
+  app.get('/api/v1/download/queue', (req, res) => res.json({ items: queue, clients: [], generatedAt: new Date().toISOString(), hasStaleData: false, hasUnavailableClients: false }));
+  app.delete('/api/v1/download/queue/:id', (req, res) => { queue = queue.filter((q) => q.id !== req.params.id); res.json({ message: 'Removed' }); });
+  app.post('/api/v1/download/search-and-download', (req, res) => res.json({ success: true, downloadId: 'q-2', indexerUsed: 'MyAnonamouse', downloadClientUsed: 'qBittorrent' }));
+  app.get('/api/v1/history', (req, res) => res.json({ history: [
+    { id: 1, audiobookId: 1, audiobookTitle: 'Project Hail Mary', eventType: 'Imported', message: 'Imported 1 file', source: 'Download', timestamp: new Date(Date.now() - 7200000).toISOString() },
+    { id: 2, audiobookId: 3, audiobookTitle: 'Dungeon Crawler Carl', eventType: 'Grabbed', message: 'Sent to qBittorrent', source: 'Search', timestamp: new Date(Date.now() - 900000).toISOString() },
+    { id: 3, audiobookId: 2, audiobookTitle: 'The Way of Kings', eventType: 'DownloadFailed', message: 'No seeders', source: 'Download', timestamp: new Date(Date.now() - 86400000).toISOString() },
+  ], total: 3, limit: Number(req.query.limit) || 50, offset: 0 }));
+  app.post('/api/v1/search', (req, res) => {
+    const q = String((req.body && req.body.query) || 'Mistborn');
+    res.json([
+      { id: 's1', title: q, artist: 'Brandon Sanderson', authors: [{ name: 'Brandon Sanderson' }], narrators: [{ name: 'Michael Kramer' }], asin: 'B002UZMLXM', series: 'Mistborn', seriesNumber: '1', lengthMinutes: 1462, releaseDate: '2009-11-24', imageUrl: null, metadataSource: 'Audible' },
+      { id: 's2', title: 'Project Hail Mary', artist: 'Andy Weir', authors: [{ name: 'Andy Weir' }], narrators: [{ name: 'Ray Porter' }], asin: 'B08G9PRS1K', lengthMinutes: 970, releaseDate: '2021-05-04', imageUrl: null, metadataSource: 'Audible' },
+    ]);
+  });
+  app.post('/api/v1/library/add', (req, res) => {
+    const m = (req.body && req.body.metadata) || {};
+    if (!m.title) return res.status(400).json({ message: 'metadata.title is required' });
+    if (books.some((b) => m.asin && b.asin === m.asin)) return res.status(409).json({ message: 'Audiobook already exists in library' });
+    const b = { id: books.length + 1, title: m.title, authors: m.authors || [], narrators: m.narrators || [], asin: m.asin, monitored: req.body.monitored !== false, qualityProfileId: req.body.qualityProfileId, basePath: req.body.destinationPath, fileCount: 0, fileSize: 0, status: 'no-file', wanted: true };
+    books.push(b);
+    res.status(201).json({ message: 'Added', audiobook: b });
+  });
+  return app;
+}
+
 function makeBindery() {
   const app = express();
   app.use(express.json());
@@ -1274,6 +1333,7 @@ export function startMockServices() {
     ['lidarr', makeLidarr(), MOCK_PORTS.lidarr],
     ['readarr', makeReadarr(), MOCK_PORTS.readarr],
     ['bindery', makeBindery(), MOCK_PORTS.bindery],
+    ['listenarr', makeListenarr(), MOCK_PORTS.listenarr],
     ['overseerr', makeOverseerr(), MOCK_PORTS.overseerr],
     ['sabnzbd', makeSab(), MOCK_PORTS.sabnzbd],
     ['tautulli', makeTautulli(), MOCK_PORTS.tautulli],

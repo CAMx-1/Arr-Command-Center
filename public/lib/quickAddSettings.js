@@ -2,7 +2,7 @@
 // monitor, search on add) used by one-tap "+ Add" in global Search, plus which
 // instance Movies / TV go to when there's more than one. Changes save
 // immediately to the same storage Search reads.
-import { h, mount, toast } from './ui.js';
+import { h, mount, toast, rootFolderLabel } from './ui.js';
 import { instanceOptions, arrInstances } from './quickAdd.js';
 import {
   getAddDefaults, setAddDefaults, clearAddDefaults, initialAddChoices, resolveAddDefaults,
@@ -42,7 +42,7 @@ export function quickAddSettingsCard(state) {
         const profileSel = h('select', { class: 'input', 'aria-label': `${svc.label} quality profile` },
           ...opts.profiles.map((p) => h('option', { value: p.id, selected: p.id === c.qualityProfileId ? 'selected' : null }, p.name)));
         const folderSel = h('select', { class: 'input', 'aria-label': `${svc.label} root folder` },
-          ...opts.folders.map((f) => h('option', { value: f.path, selected: f.path === c.rootFolderPath ? 'selected' : null }, f.path)));
+          ...opts.folders.map((f) => h('option', { value: f.path, selected: f.path === c.rootFolderPath ? 'selected' : null }, rootFolderLabel(f))));
         const monitorChk = h('input', { type: 'checkbox', checked: c.monitored ? 'checked' : null });
         const searchChk = h('input', { type: 'checkbox', checked: c.searchOnAdd ? 'checked' : null });
         const save = () => {

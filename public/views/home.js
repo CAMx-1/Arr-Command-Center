@@ -1,3 +1,4 @@
+import { listenarrStats } from './listenarr.js';
 import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast, openModal, confirmModal } from '../lib/ui.js';
 import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
 import { SERVICE_META, attachLongPress, openServiceQuickActions, openInArr } from '../app.js';
@@ -1095,6 +1096,9 @@ async function hydrateCardStats(svc, ctx) {
       const client = tdarrClient(api, svc.key);
       const [stats, nodes] = await Promise.all([client.stats().catch(() => null), client.nodes()]);
       mount(el, stat(normalizeTdarrWorkers(nodes).length, 'Workers'), stat(stats ? fmtBytes(stats.spaceSaved) : '—', 'Saved'));
+    } else if (svc.type === 'listenarr') {
+      const s = await listenarrStats(api, svc);
+      mount(el, stat(s.books, 'Books'), stat(s.queue, 'Queue'));
     } else if (svc.type === 'audiobookshelf') {
       const client = absClient(api, svc.key);
       const [libraries, sessions] = await Promise.all([client.libraries(), client.sessions().catch(() => null)]);
