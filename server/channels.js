@@ -90,14 +90,18 @@ export function removeChannel(id) {
 }
 
 // Build the HTTP request for a channel (pure; exported for tests).
-export function buildRequest(c, { title, body, url, category }) {
+export function buildRequest(c, msg) {
+  const { title, body, url, category } = msg;
   const text = body ? `${title}\n${body}` : title;
   const link = url && /^https?:\/\//.test(url) ? url : '';
   if (c.type === 'ntfy') {
     const headers = { 'content-type': 'application/json' };
     if (c.token) headers.authorization = `Bearer ${c.token}`;
     else if (c.username || c.password) headers.authorization = `Basic ${Buffer.from(`${c.username}:${c.password}`).toString('base64')}`;
-    return { url: c.server.replace(/\/+$/, ''), init: { method: 'POST', headers, body: JSON.stringify({ topic: c.topic, title, message: body || title, priority: c.priority, tags: category ? [category] : [], ...(link ? { click: link } : {}) }) } };
+    // Optional action buttons (e.g. Approve/Decline): each POSTs to a
+    // signed single-use URL on this server. ntfy allows up to 3.
+    const ntfyActions = (msg.actions || []).slice(0, 3).map((a) => ({ action: 'http', label: a.label, url: a.url, method: 'POST', clear: true }));
+    return { url: c.server.replace(/\/+$/, ''), init: { method: 'POST', headers, body: JSON.stringify({ topic: c.topic, title, message: body || title, priority: c.priority, tags: category ? [category] : [], ...(link ? { click: link } : {}), ...(ntfyActions.length ? { actions: ntfyActions } : {}) }) } };
   }
   if (c.type === 'gotify') {
     return { url: `${c.server.replace(/\/+$/, '')}/message`, init: { method: 'POST', headers: { 'content-type': 'application/json', 'x-gotify-key': c.token }, body: JSON.stringify({ title, message: body || title, priority: c.priority, ...(link ? { extras: { 'client::notification': { click: { url: link } } } } : {}) }) } };

@@ -1,3 +1,4 @@
+import { showcaseName } from '../lib/showcase.js';
 import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtRelative, timeEl, poster, debounce, openModal, closeModal, rootFolderLabel } from '../lib/ui.js';
 import { openDetailModal } from './detail.js';
 import { addFailed } from '../lib/failedRequests.js';
@@ -175,7 +176,7 @@ function requestListRow(r, seerr, ctx, pipe) {
       titleEl,
       h('div', { class: 'meta-line', style: { marginTop: '4px' } },
         h('span', { class: 'pill muted' }, isTv ? 'TV' : 'Movie'),
-        h('span', {}, `by ${r.requestedBy?.displayName || r.requestedBy?.username || 'unknown'}`),
+        h('span', {}, `by ${showcaseName(r.requestedBy?.displayName || r.requestedBy?.username || 'unknown')}`),
         timeEl(r.createdAt),
       ),
       h('div', { class: 'req-progress-slot', dataset: { reqId: String(r.id) } }, progressEl(prog)),
@@ -235,7 +236,7 @@ async function tabRequests(root, seerr, ctx, filter) {
       }
       return seerrHex(ctx, seerr, {
         mediaType: mt, tmdbId: media.tmdbId, pill: stt, progress: h('div', { class: 'req-progress-slot', dataset: { reqId: String(r.id) } }, progressEl(progressFor(r, pipe))),
-        sub: `by ${r.requestedBy?.displayName || r.requestedBy?.username || 'unknown'}`,
+        sub: `by ${showcaseName(r.requestedBy?.displayName || r.requestedBy?.username || 'unknown')}`,
         actions,
       });
     });

@@ -75,7 +75,12 @@ function authFor(svc) {
   } else if (type === 'deluge') {
     // Deluge Web authenticates with auth.login(password); its _session_id
     // cookie is managed by the dedicated forwarder below.
-  } else if (type === 'jellyfin' || type === 'emby') {
+  } else if (type === 'jellyfin') {
+    // Jellyfin 12 disables the legacy X-Emby-Token / api_key auth by default
+    // (EnableLegacyAuthorization=false); the standard Authorization header
+    // works on 10.x and 12.x.
+    if (svc.apiKey) headers.Authorization = `MediaBrowser Client="Arr Command Center", Device="Server", DeviceId="arr-command-center", Version="1", Token="${svc.apiKey}"`;
+  } else if (type === 'emby') {
     if (svc.apiKey) headers['X-Emby-Token'] = svc.apiKey;
   } else if (type === 'flood') {
     // Flood authenticates with a login that sets a `jwt` cookie; managed by

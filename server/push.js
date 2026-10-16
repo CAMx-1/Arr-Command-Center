@@ -22,8 +22,9 @@ export const CATEGORIES = [
   { id: 'downloaded', label: 'Downloads completed' },
   { id: 'failed', label: 'Download failures' },
   { id: 'approval', label: 'Requests needing approval' },
+  { id: 'service', label: 'Service down / recovered' },
 ];
-const DEFAULT_PREFS = { downloaded: true, failed: true, approval: true };
+const DEFAULT_PREFS = { downloaded: true, failed: true, approval: true, service: true };
 
 // Which categories are enabled for push (defaults on). Persisted in the store.
 export function getPrefs() {

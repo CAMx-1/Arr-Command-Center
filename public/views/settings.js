@@ -1,3 +1,4 @@
+import { showcaseEnabled, setShowcase } from '../lib/showcase.js';
 import { clearPersistedCache } from '../lib/cache.js';
 import { h, mount, clear, spinner, svcIcon, confirmModal, openModal, closeModal, toast, tabs, fmtBytes } from '../lib/ui.js';
 import { SERVICE_META, calendarIcon } from '../app.js';
@@ -16,6 +17,7 @@ import { getAppMode, setAppMode, isLocalMode, getConnection, getConnections, set
 import { normalizeCustomHeaders } from '../lib/customHeaders.js';
 import { quickAddSettingsCard } from '../lib/quickAddSettings.js';
 import { channelsCard } from '../lib/notifyChannels.js';
+import { hydrateUptime } from '../lib/uptimeBars.js';
 import { hasRequiredCredentials } from '../lib/serviceKinds.js';
 import { appLockAvailable, getLockStatus, enableLock, disableLock, changeLockPasscode, setLockTimeout, lockNow, newPasscodeError, isValidPasscode, lockErrorMessage, timeoutLabel, TIMEOUT_OPTIONS, PASSCODE_LENGTH } from '../lib/appLock.js';
 
@@ -128,6 +130,7 @@ export async function renderSettings(root, ctx) {
         h('button', { class: `btn sm ${hidden ? 'primary' : ''}`, onclick: () => { setHidden(svc.key, !hidden); ctx.reload(); } }, hidden ? 'Show' : 'Hide'),
       ),
       (st && !st.ok && st.error) ? h('div', { class: 'release-reject', style: { marginTop: '8px' } }, st.error) : null,
+      (localMode || svc.type === 'plex') ? null : h('div', { class: 'svc-uptime', dataset: { uptimeKey: svc.key } }),
     );
   });
 
@@ -184,6 +187,7 @@ export async function renderSettings(root, ctx) {
   );
 
   hydrateMobileAppPanel(ctx);
+  hydrateUptime(root);
   hydrateAppLockPanel();
   if (!localMode) hydrateLocalFallbackPanel(ctx);
 
@@ -513,7 +517,8 @@ function appearanceCard(root, ctx) {
     (() => { const r = settingRow('Accent', h('span', { class: 'accent-row' }, ...swatches)); r.classList.add('accent-setting'); return r; })(),
     settingRow('Default view', h('span', { style: { display: 'flex', gap: '8px' } }, viewBtn('hex', 'Hexagon'), viewBtn('list', 'List'))),
     settingRow('Density', h('span', { style: { display: 'flex', gap: '8px' } }, ...DENSITIES.map((d) => densityBtn(d.id, d.label)))),
-    h('div', { class: 'dim', style: { fontSize: '12px', marginTop: '8px' } }, 'Each page can override this with its own Hex/List toggle. Compact density tightens rows, tables and feeds.'),
+    settingRow('Showcase mode', h('span', { style: { display: 'flex', gap: '8px' } }, h('button', { class: `btn sm hex-btn ${showcaseEnabled() ? 'primary' : ''}`, type: 'button', 'aria-pressed': showcaseEnabled() ? 'true' : 'false', onclick: () => setShowcase(!showcaseEnabled()) }, showcaseEnabled() ? 'On' : 'Off'))),
+    h('div', { class: 'dim', style: { fontSize: '12px', marginTop: '8px' } }, 'Each page can override this with its own Hex/List toggle. Compact density tightens rows, tables and feeds. Showcase mode replaces server addresses, IPs, emails and people’s names on screen with made-up ones, for screenshots; nothing is changed on the server.'),
   );
 }
 

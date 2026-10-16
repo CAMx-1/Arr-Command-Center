@@ -3,6 +3,7 @@ import { cachedGet } from '../lib/cache.js';
 import { quickAddControls, seerrResolver, idResolver } from '../lib/quickAdd.js';
 import { openInArr } from '../app.js';
 import { openSeasonModal, openMovieRequestModal } from './overseerr.js';
+import { normalizeRatings, providersFor, guessRegion } from '../lib/ratings.js';
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p/';
 const img = (path, size) => (path ? `${TMDB_IMG}${size}${path}` : null);
@@ -31,6 +32,8 @@ export async function openDetailModal(ctx, opts) {
   // never waits on Sonarr/Radarr.
   const slot = body.querySelector('.detail-actions');
   if (slot) hydrateDetailActions(slot, ctx, { mediaType, tmdbId, data, fallback, provider }).catch(() => mount(slot));
+  const extra = body.querySelector('.detail-extra');
+  if (extra && provider && tmdbId) hydrateRatingsAndProviders(extra, ctx, provider, mediaType, tmdbId, data).catch(() => mount(extra));
 }
 
 // Find the title in any configured Sonarr/Radarr library (same cache as Search).
@@ -133,7 +136,8 @@ function renderDetail(root, data, fallback, mediaType, hasProvider) {
   }
 
   const actions = h('div', { class: 'detail-actions', 'aria-live': 'polite' });
-  mount(root, hero, actions, overviewEl, castEl);
+  const extra = h('div', { class: 'detail-extra', 'aria-live': 'polite' });
+  mount(root, hero, actions, extra, overviewEl, castEl);
 }
 
 function castCard(person) {
@@ -217,4 +221,33 @@ function episodeFileRow(f) {
       ),
     ),
   );
+}
+
+// Rotten Tomatoes / IMDb scores and where the title streams in the viewer's
+// region (TMDB/JustWatch data via Seerr). Both are optional extras.
+async function hydrateRatingsAndProviders(slot, ctx, provider, mediaType, tmdbId, data) {
+  const seerr = ctx.api.seerr(provider.key);
+  const ratingsPath = mediaType === 'tv' ? `tv/${tmdbId}/ratings` : `movie/${tmdbId}/ratingscombined`;
+  const ratings = normalizeRatings(await seerr.get(ratingsPath).catch(() => null));
+  const where = providersFor(data && data.watchProviders, guessRegion());
+  const parts = [];
+  if (ratings.length) {
+    parts.push(h('div', { class: 'detail-ratings' }, ...ratings.map((r) => {
+      const icon = r.source === 'imdb' ? 'IMDb' : r.source === 'rt-critics' ? (r.tone === 'rotten' ? '🍅✕' : '🍅') : (r.tone === 'rotten' ? '🍿✕' : '🍿');
+      const inner = [h('span', { class: 'rating-src', 'aria-hidden': 'true' }, icon), h('strong', {}, r.value), h('span', { class: 'dim' }, r.label)];
+      return r.url
+        ? h('a', { class: `rating-chip ${r.tone}`, href: r.url, target: '_blank', rel: 'noopener noreferrer', title: `${r.label} on ${r.source === 'imdb' ? 'IMDb' : 'Rotten Tomatoes'}` }, ...inner)
+        : h('span', { class: `rating-chip ${r.tone}` }, ...inner);
+    })));
+  }
+  if (where) {
+    const group = (label, items) => (items.length ? h('div', { class: 'wp-group' }, h('span', { class: 'quick-add-label' }, label),
+      h('div', { class: 'wp-list' }, ...items.slice(0, 8).map((p) => h('span', { class: 'wp-item', title: p.name },
+        p.logo ? h('img', { src: p.logo, alt: '', loading: 'lazy', width: '28', height: '28' }) : null, h('span', {}, p.name))))) : null);
+    parts.push(h('div', { class: 'detail-watch' },
+      h('div', { class: 'section-title', style: { margin: '0 0 6px' } }, `Where to watch · ${where.region}`),
+      group('Stream', where.stream), group('Free', where.free), group('Rent', where.rent), group('Buy', where.buy),
+      where.link ? h('a', { class: 'dim wp-more', href: where.link, target: '_blank', rel: 'noopener noreferrer' }, 'All options (JustWatch via TMDB) ↗') : null));
+  }
+  mount(slot, ...parts);
 }

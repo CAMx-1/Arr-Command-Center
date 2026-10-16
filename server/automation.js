@@ -61,7 +61,13 @@ function arrInstances(cfg) {
 }
 
 // Heuristics for a "problem" download worth cleaning.
-function stallReason(item) {
+// Finished items are never problems: Sonarr/Radarr keep imported torrents in
+// the queue while they seed (state "imported", often status "warning"), and
+// "ignored" ones were dismissed by the user.
+const DONE_STATES = new Set(['imported', 'ignored']);
+export function stallReason(item) {
+  const state = String(item.trackedDownloadState || '').toLowerCase();
+  if (DONE_STATES.has(state)) return null;
   const msgs = [(item.errorMessage || '')]
     .concat((item.statusMessages || []).flatMap((m) => [m.title || '', ...((m.messages) || [])]))
     .join(' ');
@@ -69,7 +75,10 @@ function stallReason(item) {
   const tds = String(item.trackedDownloadStatus || '').toLowerCase();
   if (/stalled|no connections|no files found|not found|failed|error/i.test(msgs)) return msgs.trim().slice(0, 140);
   if (status === 'warning' || status === 'stalled' || status === 'failed') return `status: ${item.status}`;
-  if (tds === 'warning' || tds === 'error') return `tracked status: ${item.trackedDownloadStatus}`;
+  // A warning on a completed item that's only waiting to import (or seeding
+  // after import) isn't a stall; importBlocked is handled by the arr itself.
+  if (tds === 'error') return `tracked status: ${item.trackedDownloadStatus}`;
+  if (tds === 'warning' && state === 'downloading') return `tracked status: ${item.trackedDownloadStatus}`;
   return null;
 }
 

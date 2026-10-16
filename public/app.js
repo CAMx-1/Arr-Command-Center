@@ -44,6 +44,7 @@ import { installClientDiagnostics, recordClientEvent } from './lib/clientDiagnos
 import { hydrateCredentialVault } from './lib/credentialVault.js';
 import { openCommandPalette } from './lib/commandPalette.js';
 import { quickAddControls, seerrResolver } from './lib/quickAdd.js';
+import { installShowcase } from './lib/showcase.js';
 import { preferredInstance, getPreferredInstanceKey, notInLibrary } from './lib/addDefaults.js';
 import { setDashboardScope } from './lib/dashboardPrefs.js';
 import { mergeState, classifyNavigation, targetScrollFor, createScrollStore } from './lib/scrollHistory.js';
@@ -1446,6 +1447,8 @@ async function init() {
   }
   state.services = Object.values(state.config.services || {});
   setDashboardScope(state.config.auth?.user);
+  // Showcase mode: mask hosts/IPs/emails/names on screen for screenshots.
+  installShowcase({ names: [state.config.auth?.user].filter(Boolean) });
   // Persist big lists (libraries, profiles, root folders) between launches,
   // scoped to this server + signed-in user.
   configurePersistence({ backend: indexedDbBackend(), scope: `${location.origin}|${state.config.auth?.user || ''}` });

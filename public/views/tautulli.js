@@ -1,3 +1,4 @@
+import { showcaseName } from '../lib/showcase.js';
 import { h, mount, tabs, spinner, skeletonList, empty, pct, poster, toast, timeEl, openModal, closeModal, autoRefresh } from '../lib/ui.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { hive, posterHexCard } from '../lib/hive.js';
@@ -128,7 +129,7 @@ function streamListRow(s, tau, svcKey, reload) {
       h('div', { class: 'row-title' }, s.full_title || s.title),
       h('div', { class: 'meta-line', style: { marginTop: '4px' } },
         h('span', { class: `pill ${st.cls}` }, s.state || 'unknown'),
-        h('span', {}, `${s.friendly_name || s.user || 'unknown'}`),
+        h('span', {}, `${showcaseName(s.friendly_name || s.user || 'unknown')}`),
         h('span', {}, s.player || ''),
         h('span', { class: `pill ${isTranscode ? 'warn' : 'ok'}` }, isTranscode ? 'Transcode' : 'Direct Play'),
         res ? h('span', {}, res) : null,
@@ -146,7 +147,7 @@ function streamHex(s, tau, svcKey, reload) {
   const progress = Number(s.progress_percent) || 0;
   const overlay = h('div', { class: 'hx-overlay' },
     h('div', { class: 'hx-title' }, s.full_title || s.title),
-    h('div', { class: 'hx-sub' }, `${s.friendly_name || s.user || 'unknown'} · ${s.state || ''}`),
+    h('div', { class: 'hx-sub' }, `${showcaseName(s.friendly_name || s.user || 'unknown')} · ${s.state || ''}`),
     h('span', { class: `pill ${isTranscode ? 'warn' : 'ok'}` }, isTranscode ? 'Transcode' : 'Direct Play'),
     h('div', { class: 'progress' }, h('span', { style: { width: pct(progress) } })),
     h('div', { class: 'row-actions' },
@@ -240,7 +241,7 @@ function openStreamModal(s, svcKey) {
     h('div', { class: 'stream-hero' },
       poster(imgUrl(svcKey, posterThumb), s.media_type === 'movie' ? '' : ''),
       h('div', { class: 'stream-hero-main' },
-        h('div', { class: 'stream-hero-user' }, `${s.friendly_name || s.user || 'unknown'} · ${s.state || ''}`),
+        h('div', { class: 'stream-hero-user' }, `${showcaseName(s.friendly_name || s.user || 'unknown')} · ${s.state || ''}`),
         h('div', { class: 'progress', style: { marginTop: '8px' } }, h('span', { style: { width: pct(Number(s.progress_percent) || 0) } })),
         h('div', { class: 'meta-line', style: { marginTop: '6px' } },
           h('span', {}, `${fmtHms(s.view_offset)} / ${fmtHms(s.duration)}`),
@@ -271,7 +272,7 @@ function confirmStop(s, tau, reload) {
   openModal({
     title: `Stop stream — ${s.full_title || s.title}`,
     body: h('div', {},
-      h('p', { class: 'dim', style: { marginTop: 0 } }, `User: ${s.friendly_name || s.user || 'unknown'} · Player: ${s.player || 'unknown'}`),
+      h('p', { class: 'dim', style: { marginTop: 0 } }, `User: ${showcaseName(s.friendly_name || s.user || 'unknown')} · Player: ${s.player || 'unknown'}`),
       h('div', { class: 'section-title', style: { margin: '0 0 6px' } }, 'Message shown to the user'),
       msg,
       h('p', { class: 'dim', style: { fontSize: '12px', marginBottom: 0 } }, 'Note: terminating streams requires Plex Pass on the server.'),
@@ -488,7 +489,7 @@ function statCategoryList(cat) {
 function statRowLabel(statId, row) {
   switch (statId) {
     case 'top_libraries': return row.section_name || 'Unknown';
-    case 'top_users': return row.friendly_name || row.user || 'Unknown';
+    case 'top_users': return showcaseName(row.friendly_name || row.user || 'Unknown');
     case 'top_platforms': return row.platform_name || row.platform || 'Unknown';
     default: return row.title || row.grandchild_title || row.grandparent_title || 'Unknown';
   }

@@ -10,7 +10,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, publicConfig, localFallbackConfig, ALLOWED_SERVICE_TYPES, saveServiceToDisk, removeServiceFromDisk, isInsecureExposure, buildServiceUpdate } from './config.js';
-import { createProxyRouter, pingService } from './proxy.js';
+import { createProxyRouter, pingService, serviceRequest } from './proxy.js';
 import { startMockServices } from './mock/mockServices.js';
 import { createPlexAuth } from './plexAuth.js';
 import * as store from './store.js';
@@ -23,6 +23,8 @@ import { getOperations } from './operations.js';
 import { getSystemStats } from './system.js';
 import { createAssetServer } from './assets.js';
 import { createStatusCache } from './statusCache.js';
+import { createUptimeTracker } from './uptime.js';
+import { createActionTokens } from './actionTokens.js';
 import { safeEqual, createAuthLimiter } from './authGuard.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -128,6 +130,46 @@ app.use((req, res, next) => {
 });
 
 // Unauthenticated health endpoint (for Docker/orchestrator healthchecks).
+// ---- Notification action buttons (ntfy Approve/Decline) ----
+// Runs BEFORE the auth gate: the caller is the ntfy app/server, not a signed-in
+// browser. Authorization is the signed, single-use, expiring token, scoped to
+// one Seerr request + action (see actionTokens.js). Disabled unless the server
+// knows its public URL (PUBLIC_URL, or the https origin captured for push).
+const actionSecret = process.env.ACTION_SECRET || (() => {
+  let k = store.get('actionSecret', null);
+  if (!k) { k = randomUUID() + randomUUID(); store.set('actionSecret', k); }
+  return k;
+})();
+const actionTokens = createActionTokens({ secret: actionSecret, persist: !cfg.mock });
+function publicBaseUrl() {
+  const clean = (u) => String(u).replace(/\/+$/, "");
+  const env = process.env.PUBLIC_URL;
+  if (env && (env.startsWith("https://") || env.startsWith("http://"))) return clean(env);
+  const subj = push.getSubject && push.getSubject();
+  return subj && subj.startsWith("https://") && !subj.includes("localhost") ? clean(subj) : null;
+}
+function actionsFor(e) {
+  const base = publicBaseUrl();
+  if (!base || !e.action) return null;
+  const mk = (action, label) => ({ label, url: `${base}/api/notify/action/${actionTokens.issue({ ...e.action, action })}` });
+  return [mk('approve', 'Approve'), mk('decline', 'Decline')];
+}
+const actionLimiter = createAuthLimiter({ maxFailures: 20, windowMs: 10 * 60000, baseLockMs: 5 * 60000 });
+app.post('/api/notify/action/:token', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const client = req.socket.remoteAddress || 'unknown';
+  if (actionLimiter.blockedFor(client)) return res.status(429).json({ error: 'Too many attempts' });
+  const r = actionTokens.redeem(req.params.token, cfg.services);
+  if (!r.ok) { actionLimiter.fail(client); return res.status(r.error === 'invalid' ? 403 : 410).json({ error: `Link ${r.error}` }); }
+  const { s: key, r: id, a: action } = r.payload;
+  try {
+    await serviceRequest(cfg.services[key], `api/v1/request/${id}/${action}`, { method: 'POST' });
+    res.json({ ok: true, message: action === 'approve' ? 'Request approved' : 'Request declined' });
+  } catch (e) {
+    res.status(502).json({ error: `Seerr: ${(e && e.message) || 'request failed'}`.slice(0, 200) });
+  }
+});
+
 app.get('/healthcheck', (req, res) => {
   res.json({ status: 'ok', uptime: Math.round(process.uptime()), services: Object.keys(cfg.services).length, mock: !!cfg.mock });
 });
@@ -210,10 +252,31 @@ async function serviceHealth(key, svc) {
   const health = await pingService(svc, key).catch((e) => ({ ok: false, status: 0, ms: 0, error: (e && e.message) || 'ping failed' }));
   return { label: svc.label || key, type: svc.type, ...health };
 }
+// Service down/recovered alerts (after 2 min down) + 7-day uptime history.
+const fmtDur = (ms) => { const m = Math.round(ms / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+const uptime = createUptimeTracker({
+  downAfterMs: Math.max(30000, Number(process.env.SERVICE_DOWN_AFTER_MS) || 120000),
+  persist: !cfg.mock,
+  onAlert: (a) => {
+    if (process.env.NOTIFY_DISABLE) return;
+    const msg = a.type === 'down'
+      ? { title: `${a.label} is down`, body: a.error ? `Not responding: ${a.error}` : 'Not responding', url: '/', category: 'service' }
+      : { title: `${a.label} is back up`, body: `Recovered after ${fmtDur(a.downFor)}`, url: '/', category: 'service' };
+    channels.sendToChannels(msg, { globalEnabled: (c) => push.categoryEnabled(c) }).catch(() => {});
+    if (push.categoryEnabled('service')) push.sendToAll(push.notification({ ...msg, tag: `service:${a.key}` })).catch(() => {});
+  },
+});
 const statusCache = createStatusCache({
   entries: () => Object.entries(cfg.services).filter(([, s]) => s.enabled !== false),
   ping: serviceHealth,
+  // Plex/sample entries aren't real pings; don't track them.
+  onResult: (key, v) => { const svc = cfg.services[key]; if (svc && !svc.sample && svc.type !== 'plex') uptime.record(key, v); },
   intervalMs: Math.max(5000, Number(process.env.STATUS_POLL_MS) || 15000),
+});
+app.get('/api/uptime', (req, res) => {
+  const days = Math.min(7, Math.max(1, Number(req.query.days) || 1));
+  res.set('Cache-Control', 'no-store');
+  res.json(uptime.all(days * 86400000, days === 1 ? 24 : 28));
 });
 app.get('/api/status', async (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -395,7 +458,7 @@ app.post('/api/push/prefs', express.json({ limit: '4kb' }), (req, res) => {
 app.post('/api/push/poll', express.json({ limit: '2kb' }), async (req, res) => {
   try {
     const force = !!(req.body && req.body.force) || req.query.force === 'true';
-    const result = await pollOnce(cfg, { force });
+    const result = await pollOnce(cfg, { force, actionsFor });
     res.json({ ok: true, ...result });
   } catch (e) {
     res.status(502).json({ error: e.message });
@@ -469,6 +532,7 @@ app.post('/api/config/service', express.json({ limit: '32kb' }), async (req, res
     await saveServiceToDisk(key, clean);
     cfg.services[key] = { ...clean }; // apply live (proxy/status read cfg.services per request)
     statusCache.invalidate(key);
+    uptime.forget(key);
     res.json({ ok: true, services: publicConfig(cfg).services });
   } catch (err) {
     res.status(500).json({ error: `Could not write config.json: ${err.message}` });
@@ -483,6 +547,7 @@ app.delete('/api/config/service/:key', async (req, res) => {
     await removeServiceFromDisk(key);
     delete cfg.services[key];
     statusCache.invalidate(key);
+    uptime.forget(key);
     res.json({ ok: true, services: publicConfig(cfg).services });
   } catch (err) {
     res.status(500).json({ error: `Could not write config.json: ${err.message}` });
@@ -536,7 +601,7 @@ const server = app.listen(cfg.port, cfg.host, () => {
 statusCache.start();
 let poller = null;
 if (!process.env.NOTIFY_DISABLE) {
-  poller = startPoller(cfg, { intervalSeconds: Number(process.env.NOTIFY_POLL_SECONDS) || 60 });
+  poller = startPoller(cfg, { intervalSeconds: Number(process.env.NOTIFY_POLL_SECONDS) || 60, actionsFor });
 }
 
 // Automation scheduler (Queue Cleaner + Hunting). Ticks every minute; each job
@@ -553,6 +618,7 @@ function shutdown() {
   if (poller) poller.stop();
   if (automationTimer) clearInterval(automationTimer);
   statusCache.stop();
+  uptime.flush();
   server.close();
   for (const s of mockServers) s.close();
   process.exit(0);

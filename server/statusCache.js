@@ -6,7 +6,7 @@
 // longer delays the dashboard's first paint. A cold cache waits briefly for
 // the fast services and leaves still-pending ones out (the UI shows them as
 // "unknown" until the next poll).
-export function createStatusCache({ entries, ping, intervalMs = 15000, staleMs = 10000, coldWaitMs = 1500, now = Date.now } = {}) {
+export function createStatusCache({ entries, ping, intervalMs = 15000, staleMs = 10000, coldWaitMs = 1500, now = Date.now, onResult = null } = {}) {
   const results = new Map(); // key -> { value, at }
   let lastRun = 0;
   let running = null;
@@ -21,6 +21,7 @@ export function createStatusCache({ entries, ping, intervalMs = 15000, staleMs =
     running = Promise.all(list.map(async ([key, svc]) => {
       const value = await ping(key, svc);
       results.set(key, { value, at: now() });
+      if (onResult) { try { onResult(key, value); } catch { /* observer errors never break status */ } }
     })).finally(() => { running = null; });
     return running;
   }

@@ -1579,3 +1579,30 @@ html[data-black] .hex-cell.hex-system .hex-face { background: linear-gradient(16
 .tool-link-title { font-weight: 800; font-size: 15px; color: var(--accent); }
 .tool-link-desc { font-size: 13px; color: var(--text-dim); line-height: 1.4; }
 .tool-link .pill { justify-self: start; margin-top: 4px; }
+
+/* Service uptime (last 24h) */
+.svc-uptime { margin-top: 10px; }
+.uptime { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.uptime-bars { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; flex: 1 1 auto; height: 16px; }
+.uptime-cell { border-radius: 2px; background: var(--green); opacity: 0.85; }
+.uptime-cell.down { background: var(--red); opacity: 1; }
+.uptime-cell.none { background: var(--border); opacity: 0.6; }
+.uptime-pct { font-weight: 800; min-width: 48px; text-align: right; }
+.uptime-pct.ok { color: var(--green); } .uptime-pct.warn { color: var(--amber); } .uptime-pct.down { color: var(--red); }
+
+/* Detail popup: ratings + where to watch */
+.detail-extra { display: grid; gap: 14px; padding: 12px 22px 0; }
+.detail-extra:empty { display: none; }
+.detail-ratings { display: flex; gap: 8px; flex-wrap: wrap; }
+.rating-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; min-height: 36px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); text-decoration: none; font-size: 13px; }
+.rating-chip.fresh strong { color: #e0442b; }
+.rating-chip.rotten strong { color: var(--green); }
+.rating-chip.imdb .rating-src { background: #f5c518; color: #000; font-weight: 900; border-radius: 4px; padding: 0 4px; font-size: 11px; }
+.detail-watch { display: grid; gap: 8px; }
+.wp-group { display: grid; gap: 4px; }
+.wp-list { display: flex; gap: 6px; flex-wrap: wrap; }
+.wp-item { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); font-size: 13px; }
+.wp-item img { width: 28px; height: 28px; border-radius: 7px; object-fit: cover; }
+.wp-item:not(:has(img)) { padding-left: 10px; }
+.wp-more { font-size: 12px; justify-self: start; }
+@media (max-width: 720px) { .detail-extra { padding: 12px 4px 0; } }

@@ -430,10 +430,17 @@ function makeOverseerr() {
     94997: { name: 'House of the Dragon', firstAirDate: '2022-08-21', posterPath: '/z2yahl2uefxDCl0nogcRBstwruJ.jpg' },
     95396: { name: 'Severance', firstAirDate: '2022-02-18', posterPath: '/lFf6LLrQjYldcZItzOkGmMMigP7.jpg' },
   };
+  app.get('/api/v1/movie/:id/ratingscombined', (req, res) => res.json({
+    rt: { title: 'Mock Movie', year: 2024, url: 'https://www.rottentomatoes.com/m/mock_movie', criticsScore: 92, criticsRating: 'Certified Fresh', audienceScore: 88, audienceRating: 'Upright' },
+    imdb: { title: 'Mock Movie', url: 'https://www.imdb.com/title/tt0000001', criticsScore: 8.1 },
+  }));
+  app.get('/api/v1/tv/:id/ratings', (req, res) => res.json({ title: 'Mock Show', year: 2023, url: 'https://www.rottentomatoes.com/tv/mock_show', criticsScore: 54, criticsRating: 'Rotten', audienceScore: 71, audienceRating: 'Upright' }));
   app.get('/api/v1/movie/:id', (req, res) => res.json({
     id: Number(req.params.id), title: 'Mock Movie', overview: 'A thrilling mock movie used to demonstrate the details popout with description, ratings, genres and cast.',
     voteAverage: 7.8, voteCount: 4213, genres: [{ name: 'Action' }, { name: 'Sci-Fi' }], runtime: 132, releaseDate: '2024-05-01',
     tagline: 'Every demo has its hero.', status: 'Released', posterPath: null, backdropPath: null, credits: { cast: mockCast },
+    watchProviders: [{ iso_3166_1: 'US', link: 'https://www.themoviedb.org/movie/1/watch?locale=US', flatrate: [{ id: 8, name: 'Netflix', logoPath: null, displayPriority: 1 }, { id: 15, name: 'Hulu', logoPath: null, displayPriority: 2 }], rent: [{ id: 2, name: 'Apple TV', logoPath: null, displayPriority: 3 }], buy: [{ id: 2, name: 'Apple TV', logoPath: null, displayPriority: 3 }, { id: 10, name: 'Amazon Video', logoPath: null, displayPriority: 4 }] }],
+
     ...(tmdbDetails[Number(req.params.id)] || {}),
   }));
   app.get('/api/v1/tv/:id', (req, res) => res.json({
@@ -1039,7 +1046,13 @@ function makeMediaServer(kind) {
   ];
   app.use((req, res, next) => {
     recordCf(kind, req);
-    if (req.headers['x-emby-token'] !== 'MOCK_API_KEY') return res.status(401).json({ error: 'Unauthorized' });
+    // Jellyfin 12: legacy X-Emby-Token / api_key are disabled by default; only
+    // the standard Authorization: MediaBrowser Token="…" header is accepted.
+    // Emby still uses X-Emby-Token.
+    const tok = kind === 'jellyfin'
+      ? (/Token="([^"]*)"/.exec(req.headers.authorization || '') || [])[1]
+      : req.headers['x-emby-token'];
+    if (tok !== 'MOCK_API_KEY') return res.status(401).json({ error: 'Unauthorized' });
     next();
   });
   app.get('/System/Info', (req, res) => res.json({ ServerName: `${isEmby ? 'Emby' : 'Jellyfin'} Mock`, Version: isEmby ? '4.9.0.30' : '10.10.7', Id: `${kind}-server` }));

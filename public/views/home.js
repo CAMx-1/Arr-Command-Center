@@ -1,3 +1,4 @@
+import { showcaseName } from '../lib/showcase.js';
 import { listenarrStats } from './listenarr.js';
 import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast, openModal, confirmModal } from '../lib/ui.js';
 import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
@@ -511,7 +512,7 @@ async function hydrateStreams(ctx) {
         return posterHexCard({
           posterUrl: proxyPoster(svc, s, 300, 450),
           title: s.full_title || s.title,
-          sub: `${s.friendly_name || s.user || 'unknown'} · ${s.state || 'playing'}`,
+          sub: `${showcaseName(s.friendly_name || s.user || 'unknown')} · ${s.state || 'playing'}`,
           pills: [{ label: isTranscode ? 'Transcode' : 'Direct Play', cls: isTranscode ? 'warn' : 'ok' }],
           progress: Number(s.progress_percent) || 0,
           onClick: () => goTo(svc.key, 'streams'),
@@ -525,7 +526,7 @@ async function hydrateStreams(ctx) {
       const isTranscode = (s.transcode_decision || '').toLowerCase().includes('transcode');
       return activityRow({
         posterUrl: proxyPoster(svc, s, 80, 80), title: s.full_title || s.title,
-        sub: `${s.friendly_name || s.user || 'unknown'} · ${s.state || 'playing'} · ${isTranscode ? 'Transcode' : 'Direct Play'}`,
+        sub: `${showcaseName(s.friendly_name || s.user || 'unknown')} · ${s.state || 'playing'} · ${isTranscode ? 'Transcode' : 'Direct Play'}`,
         progress: Number(s.progress_percent) || 0,
         nav: { key: svc.key, tab: 'streams' },
       });
@@ -1209,7 +1210,7 @@ async function fetchSource(def, svc, ctx) {
         const thumb = s.grandparent_thumb || s.thumb;
         const url = thumb ? `/api/proxy/${svc.key}/api/v2?${new URLSearchParams({ cmd: 'pms_image_proxy', img: thumb, width: '80', height: '80', fallback: 'poster' }).toString()}` : null;
         rows.push(activityRow({ posterUrl: url, title: s.full_title || s.title,
-          sub: `Tautulli · ${state} · ${s.friendly_name || s.user || 'unknown'} · ${s.player || ''}`, progress: Number(s.progress_percent) || 0,
+          sub: `Tautulli · ${state} · ${showcaseName(s.friendly_name || s.user || 'unknown')} · ${s.player || ''}`, progress: Number(s.progress_percent) || 0,
           nav: { key: svc.key, tab: 'streams' } }));
       }
     } else if (def.id === 'sab') {
@@ -1261,7 +1262,7 @@ async function fetchSource(def, svc, ctx) {
         const posterUrl = detail && detail.posterPath ? `https://image.tmdb.org/t/p/w154${detail.posterPath}` : null;
         const label = def.id === 'seerr-approval' ? 'Needs approval' : (REQ_STATUS[r.status] || 'Requested');
         const actions = def.id === 'seerr-approval' ? approvalActions(ctx, svc.key, r.id) : null;
-        rows.push(activityRow({ posterUrl, icon: isTv ? '' : '', title, sub: `Seerr · ${label} · by ${r.requestedBy?.displayName || r.requestedBy?.username || 'unknown'}`, progress: 0, actions,
+        rows.push(activityRow({ posterUrl, icon: isTv ? '' : '', title, sub: `Seerr · ${label} · by ${showcaseName(r.requestedBy?.displayName || r.requestedBy?.username || 'unknown')}`, progress: 0, actions,
           nav: { key: svc.key, tab: def.id === 'seerr-approval' ? 'pending' : 'all' } }));
       }
     }

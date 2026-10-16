@@ -113,7 +113,10 @@ export function authFor(conn, { baseUrl } = {}) {
     if (conn.username || conn.password) generated.Authorization = `Basic ${basicCredentials(conn.username, conn.password)}`;
   } else if (type === 'deluge') {
     // auth.login + _session_id are handled by localBackend's direct transport.
-  } else if (type === 'jellyfin' || type === 'emby') {
+  } else if (type === 'jellyfin') {
+    // Standard header; Jellyfin 12 rejects legacy X-Emby-Token by default.
+    if (conn.apiKey) generated.Authorization = `MediaBrowser Client="Arr Command Center", Device="iPhone", DeviceId="arr-command-center-app", Version="1", Token="${conn.apiKey}"`;
+  } else if (type === 'emby') {
     if (conn.apiKey) generated['X-Emby-Token'] = conn.apiKey;
   } else if (type === 'flood' || type === 'maintainerr') {
     // Flood's jwt login is handled by localBackend; Maintainerr has no API auth.

@@ -61,6 +61,7 @@ export async function collectEvents(cfg) {
           events.push({
             id: `${key}:approval:${r.id}`,
             category: 'approval',
+            action: { service: key, requestId: r.id },
             title: 'Request needs approval',
             body: `${svc.label}: ${t}${who ? ` · ${who}` : ''}`,
             url: '/',
@@ -106,7 +107,7 @@ export async function pollOnce(cfg, opts = {}) {
       // Channels (ntfy/Gotify/Discord/Telegram/webhook) may opt into categories
       // independently of the browser-push prefs.
       try {
-        const ch = await channels.sendToChannels({ title: e.title, body: e.body, url: e.url, category: e.category }, { globalEnabled: (c) => push.categoryEnabled(c) });
+        const ch = await channels.sendToChannels({ title: e.title, body: e.body, url: e.url, category: e.category, actions: opts.actionsFor ? opts.actionsFor(e) : null }, { globalEnabled: (c) => push.categoryEnabled(c) });
         if (ch.results.length) results.push({ id: e.id, channels: ch.sent, channelFailures: ch.failed });
       } catch { /* channel failures never block web push */ }
       if (!push.categoryEnabled(e.category)) { skipped += 1; continue; }
@@ -138,7 +139,7 @@ export function startPoller(cfg, opts = {}) {
     if (running) return; // avoid overlap on slow upstreams
     running = true;
     try {
-      const r = await pollOnce(cfg);
+      const r = await pollOnce(cfg, { actionsFor: opts.actionsFor });
       if (r.pushed) console.log(`[poller] pushed ${r.pushed} notification(s) (${r.collected} events, ${r.fresh} new)`);
     } catch (e) {
       console.error('[poller] poll failed:', e.message);
