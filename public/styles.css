@@ -1545,3 +1545,37 @@ html[data-black] .hex-cell.hex-system .hex-face { background: linear-gradient(16
 @keyframes cachePulse { 50% { opacity: 0.3; } }
 @media (min-width: 721px) { .cache-pill { bottom: 20px; } }
 @media (prefers-reduced-motion: reduce) { .cache-pill-dot { animation: none; } }
+
+/* Settings → Notification channels */
+.notify-channel-list { display: grid; gap: 10px; margin: 6px 0 12px; }
+.notify-channel-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.notify-channel-main { display: grid; gap: 4px; min-width: 0; }
+.notify-channel-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.notify-channel-add { display: flex; gap: 8px; align-items: center; }
+.notify-channel-add .input { width: auto; min-height: 42px; }
+.notify-editor .input { min-height: 42px; }
+.notify-cats { flex-direction: column; gap: 4px; }
+
+/* Seerr request pipeline progress */
+.req-progress { display: grid; gap: 6px; margin-top: 8px; justify-items: start; }
+.req-progress .progress { width: 100%; max-width: 360px; }
+.hx-overlay .req-progress { justify-items: center; margin-top: 4px; }
+.hx-overlay .req-progress .progress { width: 80%; }
+
+/* Cleanup page */
+.cleanup-card { display: grid; gap: 12px; }
+.cleanup-summary { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.cleanup-total { font-size: 28px; font-weight: 800; color: var(--accent); }
+.cleanup-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.cleanup-filters .input { width: 100%; min-height: 42px; }
+.cleanup-check { display: flex; gap: 8px; align-items: center; min-height: 36px; }
+
+/* Settings → Tools */
+.tools-card { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.tool-link { display: grid; gap: 4px; align-content: start; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); text-decoration: none; transition: border-color 0.14s var(--ease), transform 0.12s var(--ease); }
+.tool-link:hover { border-color: var(--accent); }
+.tool-link:active { transform: scale(0.99); }
+.tool-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tool-link-title { font-weight: 800; font-size: 15px; color: var(--accent); }
+.tool-link-desc { font-size: 13px; color: var(--text-dim); line-height: 1.4; }
+.tool-link .pill { justify-self: start; margin-top: 4px; }

@@ -16,6 +16,7 @@ import { createPlexAuth } from './plexAuth.js';
 import * as store from './store.js';
 import * as plex from './plex.js';
 import * as push from './push.js';
+import * as channels from './channels.js';
 import { startPoller, pollOnce } from './poller.js';
 import * as automation from './automation.js';
 import { getOperations } from './operations.js';
@@ -339,10 +340,26 @@ app.post('/api/push/test', express.json({ limit: '4kb' }), async (req, res) => {
   });
   try {
     const result = await push.sendToAll(payload);
-    res.json({ ok: true, ...result });
+    const ch = await channels.sendToChannels({ title: payload.title, body: payload.body, url: '', category: 'test' });
+    res.json({ ok: true, ...result, channels: ch.sent, channelFailures: ch.failed });
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
+});
+
+// ---- Notification channels (ntfy/Gotify/Discord/Telegram/webhook) ----
+// Secrets are masked in every response (see channels.js).
+app.get('/api/notify/channels', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ channels: channels.listPublic(), types: channels.CHANNEL_TYPES, categories: push.CATEGORIES }); });
+app.post('/api/notify/channels', express.json({ limit: '8kb' }), (req, res) => {
+  const r = channels.upsertChannel(req.body || {});
+  if (r.error) return res.status(400).json({ error: r.error });
+  res.json({ ok: true, channel: r.channel });
+});
+app.delete('/api/notify/channels/:id', (req, res) => res.json({ ok: true, ...channels.removeChannel(req.params.id) }));
+app.post('/api/notify/channels/:id/test', async (req, res) => {
+  const r = await channels.sendToChannels({ title: 'Arr Command Center', body: 'Test notification — this channel works 🎉', url: '', category: 'test' }, { only: req.params.id });
+  if (!r.results.length) return res.status(404).json({ error: 'Unknown or disabled channel' });
+  res.json(r.results[0]);
 });
 
 // Push status (subscription count) for the settings UI.

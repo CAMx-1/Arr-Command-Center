@@ -32,6 +32,7 @@ import { renderEmbed } from './views/embed.js';
 import { renderSettings } from './views/settings.js';
 import { renderCalendar } from './views/calendar.js';
 import { renderListenarr } from './views/listenarr.js';
+import { renderCleanup } from './views/cleanup.js';
 import { openDetailModal } from './views/detail.js';
 import { fetchNotifications, getLastSeen, markSeen, notifKind } from './lib/notifications.js';
 import * as push from './lib/push.js';
@@ -207,6 +208,11 @@ async function navigate() {
   if (route === 'settings') {
     els.title.textContent = 'Settings';
     return renderSettings(els.view, ctx);
+  }
+
+  if (route === 'cleanup') {
+    els.title.textContent = 'Cleanup';
+    return renderCleanup(els.view, ctx);
   }
 
   if (route === 'calendar') {
@@ -705,6 +711,7 @@ function renderAllServicesGrid() {
     item('Search', false, h('span', { class: 'allsvc-search-ic', html: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' }), () => openSearch()),
     ...nav.map((svc) => { const meta = SERVICE_META[svc.type] || {}; const st = state.status[svc.key]; return item(svc.label, route === svc.key, svcIcon(meta.logo, meta.emoji || '', 24), () => { location.hash = `#/${svc.key}`; }, st ? (st.ok ? 'ok' : 'down') : '', svc); }),
     item('Calendar', route === 'calendar', calendarIcon(), () => { location.hash = '#/calendar'; }),
+    item('Cleanup', route === 'cleanup', h('span', { class: 'cal-nav-ic', html: '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/></svg>' }), () => { location.hash = '#/cleanup'; }),
     item('Settings', route === 'settings', hiveImg('/icons/command-center.svg'), () => { location.hash = '#/settings'; }),
   ];
   mount(sheet,

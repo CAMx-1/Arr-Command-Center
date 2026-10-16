@@ -202,7 +202,8 @@ function makeSonarr(opts = {}) {
   app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
   app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 500000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
   app.get('/api/v3/qualityprofile', (req, res) => res.json([{ id: 1, name: 'HD-1080p' }, { id: 2, name: 'Ultra-HD' }, { id: 3, name: 'Any' }]));
-  app.get('/api/v3/series', (req, res) => res.json(series));
+  // Stable fake 'added' dates (days ago derived from id) for cleanup/age features.
+  app.get('/api/v3/series', (req, res) => res.json(series.map((x) => (x.added ? x : { ...x, added: new Date(Date.now() - (120 + x.id * 97) * 86400000).toISOString() }))));
   app.get('/api/v3/queue', (req, res) => res.json({ page: 1, pageSize: 20, totalRecords: queue.length, records: queue }));
   app.delete('/api/v3/queue/:id', (req, res) => { queue = queue.filter(q => q.id !== Number(req.params.id)); res.json({}); });
   app.get('/api/v3/calendar', (req, res) => {
@@ -299,6 +300,8 @@ function makeRadarr(opts = {}) {
   else movies = fillRadarrLibrary(movies, opts.librarySize);
   let queue = [
     { id: 201, title: 'Furiosa 2024 2160p', movieId: 3, downloadId: 'SABnzbd_nzo_furiosa', status: 'downloading', trackedDownloadStatus: 'ok', trackedDownloadState: 'downloading', size: 21474836480, sizeleft: 6442450944, timeleft: '00:11:38', downloadClient: 'SABnzbd', indexer: 'DrunkenSlug' },
+    // Imported, still seeding, with a warning — finished, not a problem.
+    { id: 203, title: 'Oppenheimer.2023.2160p', movieId: 2, downloadId: 'qbit_hash_opp', status: 'completed', trackedDownloadStatus: 'warning', trackedDownloadState: 'imported', size: 50000000000, sizeleft: 0, downloadClient: 'qBittorrent', statusMessages: [{ title: 'Seeding', messages: ['Seed ratio not met'] }] },
     { id: 202, title: 'Furiosa.A.Mad.Max.Saga.2024.1080p.BluRay.x264-GROUP', movieId: 3, downloadId: 'qbit_hash_furiosa1080', status: 'completed', trackedDownloadStatus: 'warning', trackedDownloadState: 'importBlocked', size: 12884901888, sizeleft: 0, downloadClient: 'qBittorrent', indexer: 'Torznab', statusMessages: [{ title: 'Furiosa.A.Mad.Max.Saga.2024.1080p.BluRay.x264-GROUP', messages: ['Not a Custom Format upgrade for existing movie file(s)', 'Movie title mismatch, automatic import is not possible'] }] },
   ];
 
@@ -318,7 +321,7 @@ function makeRadarr(opts = {}) {
   app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
   app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 900000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
   app.get('/api/v3/qualityprofile', (req, res) => res.json([{ id: 1, name: 'HD-1080p' }, { id: 2, name: 'Ultra-HD' }, { id: 3, name: 'Any' }]));
-  app.get('/api/v3/movie', (req, res) => res.json(movies));
+  app.get('/api/v3/movie', (req, res) => res.json(movies.map((x) => (x.added ? x : { ...x, added: new Date(Date.now() - (90 + (x.id % 40) * 23) * 86400000).toISOString() }))));
   app.get('/api/v3/calendar', (req, res) => res.json([
     { id: 1, title: 'Furiosa', year: 2024, digitalRelease: new Date(Date.now() + 5 * 86400000).toISOString(), hasFile: false, images: [] },
     { id: 2, title: 'Gladiator II', year: 2024, inCinemas: new Date(Date.now() + 15 * 86400000).toISOString(), hasFile: false, images: [] },
@@ -391,6 +394,9 @@ function makeOverseerr() {
     { id: 11, status: 1, type: 'movie', createdAt: new Date(Date.now() - 3600000).toISOString(), media: { tmdbId: 533535, status: 3, title: 'Deadpool & Wolverine', mediaType: 'movie' }, requestedBy: { displayName: 'cameron', email: 'cameron@example.com' } },
     { id: 12, status: 1, type: 'tv', createdAt: new Date(Date.now() - 7200000).toISOString(), seasons: [{ seasonNumber: 1 }, { seasonNumber: 2 }], media: { tmdbId: 94997, status: 2, title: 'House of the Dragon', mediaType: 'tv' }, requestedBy: { displayName: 'guest', email: 'guest@example.com' } },
     { id: 13, status: 2, type: 'movie', createdAt: new Date(Date.now() - 172800000).toISOString(), media: { tmdbId: 786892, status: 5, title: 'Furiosa', mediaType: 'movie' }, requestedBy: { displayName: 'cameron', email: 'cameron@example.com' } },
+    { id: 14, status: 2, type: 'movie', createdAt: new Date(Date.now() - 5400000).toISOString(), media: { tmdbId: 693134, status: 3, mediaType: 'movie', externalServiceId: 4 }, requestedBy: { displayName: 'alex' } },
+    { id: 15, status: 2, type: 'tv', createdAt: new Date(Date.now() - 86400000).toISOString(), seasons: [{ seasonNumber: 2 }], media: { tmdbId: 95396, tvdbId: 371980, status: 3, mediaType: 'tv', externalServiceId: 1 }, requestedBy: { displayName: 'jamie' } },
+    { id: 16, status: 2, type: 'tv', createdAt: new Date(Date.now() - 4000000).toISOString(), media: { tmdbId: 136315, tvdbId: 388477, status: 3, mediaType: 'tv' }, requestedBy: { displayName: 'alex' } },
   ];
 
   app.use((req, res, next) => {
@@ -568,8 +574,12 @@ function makeTautulli() {
       return res.json(wrap({}));
     }
     if (cmd === 'get_history') {
-      return res.json(wrap({ recordsFiltered: 2, recordsTotal: 2, data: [
-        { full_title: 'Oppenheimer', user: 'cameron', player: 'Apple TV', media_type: 'movie', thumb: '/library/metadata/10/thumb/10', date: Math.floor((Date.now() - 3600000) / 1000), watched_status: 1, percent_complete: 100, duration: 10800 },
+      const ago = (d) => Math.floor((Date.now() - d * 86400000) / 1000);
+      return res.json(wrap({ recordsFiltered: 5, recordsTotal: 5, data: [
+        { full_title: 'Oppenheimer', title: 'Oppenheimer', year: 2023, user: 'cameron', player: 'Apple TV', media_type: 'movie', thumb: '/library/metadata/10/thumb/10', date: Math.floor((Date.now() - 3600000) / 1000), watched_status: 1, percent_complete: 100, duration: 10800 },
+        { full_title: 'Dune: Part Two', title: 'Dune: Part Two', year: 2024, user: 'alex', player: 'Roku', media_type: 'movie', date: ago(420), watched_status: 1, percent_complete: 100, duration: 9960 },
+        { full_title: 'The Bear - S03E01', grandparent_title: 'The Bear', user: 'cameron', player: 'iOS', media_type: 'episode', date: ago(2), watched_status: 1, percent_complete: 100, duration: 1800 },
+        { full_title: 'Foundation - S01E01', grandparent_title: 'Foundation', user: 'jamie', player: 'Apple TV', media_type: 'episode', date: ago(300), watched_status: 1, percent_complete: 100, duration: 3600 },
         { full_title: 'Severance - S02E01', user: 'guest', player: 'Chrome', media_type: 'episode', grandparent_thumb: '/library/metadata/11/thumb/11', date: Math.floor((Date.now() - 86400000) / 1000), watched_status: 1, percent_complete: 96, duration: 3600 },
       ] }));
     }

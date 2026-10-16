@@ -15,6 +15,7 @@
 //    events are still marked seen (so re-enabling doesn't replay old items).
 import * as store from './store.js';
 import * as push from './push.js';
+import * as channels from './channels.js';
 import { serviceGet } from './proxy.js';
 
 const SEEN_NS = 'pushSeen';
@@ -102,6 +103,12 @@ export async function pollOnce(cfg, opts = {}) {
 
   if (doPush && !suppressedBacklog) {
     for (const e of fresh) {
+      // Channels (ntfy/Gotify/Discord/Telegram/webhook) may opt into categories
+      // independently of the browser-push prefs.
+      try {
+        const ch = await channels.sendToChannels({ title: e.title, body: e.body, url: e.url, category: e.category }, { globalEnabled: (c) => push.categoryEnabled(c) });
+        if (ch.results.length) results.push({ id: e.id, channels: ch.sent, channelFailures: ch.failed });
+      } catch { /* channel failures never block web push */ }
       if (!push.categoryEnabled(e.category)) { skipped += 1; continue; }
       try {
         const r = await push.sendToAll(push.notification({ title: e.title, body: e.body, url: e.url, tag: e.id }));

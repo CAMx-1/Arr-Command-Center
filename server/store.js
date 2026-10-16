@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
-const DATA_DIR = path.join(ROOT, 'data');
+// ACC_DATA_DIR relocates the store (used by tests so they never touch real data).
+const DATA_DIR = process.env.ACC_DATA_DIR ? path.resolve(process.env.ACC_DATA_DIR) : path.join(ROOT, 'data');
 const FILE = path.join(DATA_DIR, 'store.json');
 
 let cache = null;

@@ -15,6 +15,7 @@ import { getSysmonPrefs, setSysmonPrefs, diskVisible } from '../lib/systemMonito
 import { getAppMode, setAppMode, isLocalMode, getConnection, getConnections, setConnection, removeConnection, LOCAL_SERVICE_DEFS, localServiceDef } from '../lib/connections.js';
 import { normalizeCustomHeaders } from '../lib/customHeaders.js';
 import { quickAddSettingsCard } from '../lib/quickAddSettings.js';
+import { channelsCard } from '../lib/notifyChannels.js';
 import { hasRequiredCredentials } from '../lib/serviceKinds.js';
 import { appLockAvailable, getLockStatus, enableLock, disableLock, changeLockPasscode, setLockTimeout, lockNow, newPasscodeError, isValidPasscode, lockErrorMessage, timeoutLabel, TIMEOUT_OPTIONS, PASSCODE_LENGTH } from '../lib/appLock.js';
 
@@ -144,6 +145,8 @@ export async function renderSettings(root, ctx) {
     settingsJumpNav(),
     h('div', { class: 'section-title', id: 'settings-general' }, 'General'),
     general,
+    h('div', { class: 'section-title', id: 'settings-tools' }, 'Tools'),
+    toolsCard(ctx),
     h('div', { class: 'section-title', id: 'settings-mobile' }, 'Mobile app'),
     h('div', { class: 'card', id: 'mobile-app-panel' }, h('div', { class: 'dim' }, 'Loading app information…')),
     appLockAvailable() ? h('div', { class: 'card', id: 'app-lock-panel' }, h('div', { class: 'dim' }, 'Loading passcode settings…')) : null,
@@ -161,6 +164,7 @@ export async function renderSettings(root, ctx) {
     dashboardSettingsCard(ctx),
     h('div', { class: 'section-title', id: 'settings-notifications' }, 'Notifications'),
     localMode ? serverOnlyCard('Notifications') : h('div', { class: 'card', id: 'push-panel' }, h('div', { class: 'dim' }, 'Loading…')),
+    localMode ? null : channelsCard(),
     h('div', { class: 'section-title' }, 'Automation'),
     localMode ? serverOnlyCard('Automation') : h('div', { class: 'card', id: 'automation-panel' }, h('div', { class: 'dim' }, 'Loading…')),
     h('div', { class: 'section-title', id: 'settings-services' }, 'Services'),
@@ -193,7 +197,7 @@ export async function renderSettings(root, ctx) {
 
 function settingsJumpNav() {
   const links = [
-    ['settings-mobile', 'App'], ['settings-favorites', 'Favorites'], ['settings-connection', 'Connection'], ['settings-quick-add', 'Quick Add'],
+    ['settings-tools', 'Tools'], ['settings-mobile', 'App'], ['settings-favorites', 'Favorites'], ['settings-connection', 'Connection'], ['settings-quick-add', 'Quick Add'],
     ['settings-notifications', 'Notifications'], ['settings-services', 'Services'], ['settings-diagnostics', 'Diagnostics'],
   ];
   return h('nav', { class: 'settings-jump', 'aria-label': 'Settings sections' },
@@ -202,6 +206,20 @@ function settingsJumpNav() {
       onclick: () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     }, label)),
   );
+}
+
+// Shortcuts to app-wide pages that aren't services (also in the phone's
+// All services sheet and the ⌘K command palette).
+function toolsCard(ctx) {
+  const hasArr = ctx.state.services.some((s) => (s.type === 'sonarr' || s.type === 'radarr') && s.configured !== false);
+  const hasTautulli = ctx.state.services.some((s) => s.type === 'tautulli' && s.configured !== false);
+  const tool = (route, title, desc, note) => h('a', { class: 'tool-link', href: `#/${route}` },
+    h('span', { class: 'tool-link-title' }, title),
+    h('span', { class: 'tool-link-desc' }, desc),
+    note ? h('span', { class: 'pill warn' }, note) : null);
+  return h('div', { class: 'card tools-card' },
+    tool('cleanup', 'Cleanup', 'Free up disk space: titles nobody has watched, largest first.', !hasTautulli ? 'Needs Tautulli' : !hasArr ? 'Needs Sonarr/Radarr' : null),
+    tool('calendar', 'Calendar', 'Upcoming episodes and movie releases for the month and the next 7 days.', !hasArr ? 'Needs Sonarr/Radarr' : null));
 }
 
 function favoriteNavigationCard(ctx) {

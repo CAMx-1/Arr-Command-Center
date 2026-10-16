@@ -8,6 +8,7 @@ function commandSet({ services, go, openSearch, openShortcuts }) {
     { label: 'Go to Overview', hint: 'Navigation', run: () => go('home') },
     { label: 'Open Settings', hint: 'Navigation', run: () => go('settings') },
     { label: 'Open Calendar', hint: 'Navigation', run: () => go('calendar') },
+    { label: 'Free up space (Cleanup)', hint: 'Navigation', run: () => go('cleanup') },
     { label: 'Open Action Inbox', hint: 'Dashboard', run: () => go('home', { focus: 'inbox' }) },
     { label: 'Search all libraries', hint: '/', run: () => setTimeout(openSearch, 0) },
     openShortcuts ? { label: 'Keyboard shortcuts', hint: '?', run: () => setTimeout(openShortcuts, 0) } : null,

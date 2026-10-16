@@ -4,6 +4,32 @@ import { addFailed } from '../lib/failedRequests.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet } from '../lib/cache.js';
+import { api } from '../lib/api.js';
+import { requestStage, findLibraryItem, queueFor, requestedSeasons } from '../lib/requestProgress.js';
+
+// Sonarr/Radarr libraries (shared cache) + live queues, for request progress.
+async function loadPipeline(services) {
+  const arrs = (services || []).filter((s) => (s.type === 'sonarr' || s.type === 'radarr') && s.configured !== false);
+  const per = await Promise.all(arrs.map(async (svc) => {
+    const path = svc.type === 'sonarr' ? 'series' : 'movie';
+    const arr = api.arr(svc.key);
+    const [items, queue] = await Promise.all([
+      cachedGet(`arr:${svc.key}:${path}`, () => arr.get(path), 300000).catch(() => []),
+      arr.get(`queue?page=1&pageSize=200&include${svc.type === 'sonarr' ? 'Series' : 'Movie'}=false`).catch(() => ({ records: [] })),
+    ]);
+    return { lib: { svc, items: Array.isArray(items) ? items : [] }, queue: { svc, records: (queue && queue.records) || [] } };
+  }));
+  return { libraries: per.map((p) => p.lib), queues: per.map((p) => p.queue) };
+}
+function progressFor(r, pipe) {
+  const lib = pipe ? findLibraryItem(r, pipe.libraries) : null;
+  return requestStage(r, { lib, queue: pipe ? queueFor(lib, pipe.queues, requestedSeasons(r)) : null });
+}
+function progressEl(p) {
+  return h('div', { class: `req-progress req-${p.stage}`, dataset: { stage: p.stage } },
+    h('span', { class: `pill ${p.cls}` }, p.label),
+    p.percent != null && p.stage !== 'available' ? h('div', { class: 'progress' }, h('span', { style: { width: `${Math.max(2, p.percent)}%` } })) : null);
+}
 
 // Seerr request status codes
 const REQ_STATUS = { 1: { label: 'Pending', cls: 'warn' }, 2: { label: 'Approved', cls: 'ok' }, 3: { label: 'Declined', cls: 'down' } };
@@ -90,7 +116,8 @@ async function tabRecentlyAdded(root, seerr, ctx) {
 function seerrHex(ctx, seerr, opts) {
   const titleEl = h('div', { class: 'hx-title' }, 'Loading…');
   const overlay = h('div', { class: 'hx-overlay' }, titleEl);
-  if (opts.pill) overlay.appendChild(h('span', { class: `pill ${opts.pill.cls}` }, opts.pill.label));
+  if (opts.progress) overlay.appendChild(opts.progress);
+  else if (opts.pill) overlay.appendChild(h('span', { class: `pill ${opts.pill.cls}` }, opts.pill.label));
   if (opts.sub) overlay.appendChild(h('div', { class: 'hx-sub' }, opts.sub));
   if (opts.actions) overlay.appendChild(opts.actions);
   const face = h('div', { class: 'hx-face' }, overlay);
@@ -135,11 +162,11 @@ function mediaListRow(m, seerr, ctx) {
   return row;
 }
 
-function requestListRow(r, seerr, ctx) {
+function requestListRow(r, seerr, ctx, pipe) {
   const media = r.media || {};
+  const prog = progressFor(r, pipe);
   const mediaType = r.type || media.mediaType;
   const isTv = mediaType === 'tv';
-  const st = REQ_STATUS[r.status] || { label: 'Unknown', cls: 'muted' };
   const posterEl = poster(null, '');
   const titleEl = h('div', { class: 'row-title' }, h('span', { class: 'dim' }, 'Loading…'));
   const row = h('div', { class: 'row clickable', onclick: () => openDetailModal(ctx, { mediaType, tmdbId: media.tmdbId, fallback: {} }) },
@@ -147,11 +174,11 @@ function requestListRow(r, seerr, ctx) {
     h('div', { class: 'row-main' },
       titleEl,
       h('div', { class: 'meta-line', style: { marginTop: '4px' } },
-        h('span', { class: `pill ${st.cls}` }, st.label),
         h('span', { class: 'pill muted' }, isTv ? 'TV' : 'Movie'),
         h('span', {}, `by ${r.requestedBy?.displayName || r.requestedBy?.username || 'unknown'}`),
         timeEl(r.createdAt),
       ),
+      h('div', { class: 'req-progress-slot', dataset: { reqId: String(r.id) } }, progressEl(prog)),
     ),
     r.status === 1 ? h('div', { class: 'row-actions' },
       h('button', { class: 'btn sm primary', onclick: (e) => { e.stopPropagation(); act(seerr, ctx, r.id, 'approve'); } }, '✓ Approve'),
@@ -176,11 +203,23 @@ async function tabRequests(root, seerr, ctx, filter) {
   mount(root, skeletonList());
   try {
     const q = filter === 'pending' ? '?filter=pending&take=60' : '?take=60&sort=added';
-    const data = await seerr.get(`request${q}`);
+    const [data, pipe] = await Promise.all([seerr.get(`request${q}`), loadPipeline(ctx.state.services).catch(() => null)]);
     const results = data.results || [];
     if (!results.length) return mount(root, empty('', filter === 'pending' ? 'No pending requests' : 'No requests yet'));
+    // Repaint just the progress chips every 15s while this tab is on screen.
+    const refreshProgress = async () => {
+      if (!root.isConnected) return;
+      const next = await loadPipeline(ctx.state.services).catch(() => null);
+      if (!next || !root.isConnected) return;
+      for (const r of results) {
+        const slot = root.querySelector(`.req-progress-slot[data-req-id="${r.id}"]`);
+        if (slot) mount(slot, progressEl(progressFor(r, next)));
+      }
+      setTimeout(refreshProgress, 15000);
+    };
+    setTimeout(refreshProgress, 15000);
     if (effectiveMode(ctx.service.key) === 'list') {
-      mount(root, h('div', { class: 'list' }, ...results.map((r) => requestListRow(r, seerr, ctx))));
+      mount(root, h('div', { class: 'list' }, ...results.map((r) => requestListRow(r, seerr, ctx, pipe))));
       return;
     }
     const cards = results.map((r) => {
@@ -195,7 +234,7 @@ async function tabRequests(root, seerr, ctx, filter) {
         );
       }
       return seerrHex(ctx, seerr, {
-        mediaType: mt, tmdbId: media.tmdbId, pill: stt,
+        mediaType: mt, tmdbId: media.tmdbId, pill: stt, progress: h('div', { class: 'req-progress-slot', dataset: { reqId: String(r.id) } }, progressEl(progressFor(r, pipe))),
         sub: `by ${r.requestedBy?.displayName || r.requestedBy?.username || 'unknown'}`,
         actions,
       });
