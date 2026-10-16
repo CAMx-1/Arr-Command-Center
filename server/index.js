@@ -22,6 +22,7 @@ import { getOperations } from './operations.js';
 import { getSystemStats } from './system.js';
 import { createAssetServer } from './assets.js';
 import { createStatusCache } from './statusCache.js';
+import { safeEqual, createAuthLimiter } from './authGuard.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -133,8 +134,21 @@ app.get('/healthcheck', (req, res) => {
 // Optional basic auth over the whole app (UI + proxy).
 if (cfg.auth && cfg.auth.enabled) {
   const expected = 'Basic ' + Buffer.from(`${cfg.auth.username}:${cfg.auth.password}`).toString('base64');
+  // Constant-time compare + per-client lockout after repeated failures.
+  // Keyed by socket address (trust proxy is off, so this can't be spoofed via
+  // X-Forwarded-For; behind a reverse proxy all clients share one bucket,
+  // which still caps guessing).
+  const limiter = createAuthLimiter();
   app.use((req, res, next) => {
-    if (req.headers.authorization === expected) return next();
+    const client = req.socket.remoteAddress || 'unknown';
+    const wait = limiter.blockedFor(client);
+    if (wait) {
+      res.set('Retry-After', String(Math.ceil(wait / 1000)));
+      return res.status(429).send('Too many failed sign-in attempts. Try again later.');
+    }
+    const given = req.headers.authorization;
+    if (typeof given === 'string' && safeEqual(given, expected)) { limiter.succeed(client); return next(); }
+    if (given) limiter.fail(client); // a missing header is the browser's first probe, not a guess
     res.set('WWW-Authenticate', 'Basic realm="Arr Command Center"');
     return res.status(401).send('Authentication required');
   });
@@ -391,7 +405,9 @@ app.get('/api/plex/image', async (req, res) => {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
-    const r = await fetch(target, { headers: { 'X-Plex-Token': token }, signal: controller.signal });
+    // redirect: 'manual' — a redirect from an allowed host must not carry the
+    // Plex token to wherever it points.
+    const r = await fetch(target, { headers: { 'X-Plex-Token': token }, signal: controller.signal, redirect: 'manual' });
     clearTimeout(timer);
     if (!r.ok) return res.status(r.status).end();
     const ct = r.headers.get('content-type'); if (ct) res.set('content-type', ct);

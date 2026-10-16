@@ -3,6 +3,10 @@
 // /api/plex/* routes which use these.
 import * as store from './store.js';
 
+// Plex-token-bearing requests never follow redirects (see proxy.js).
+const fetch = (url, init = {}) => globalThis.fetch(url, { redirect: 'manual', ...init });
+
+
 const PROVIDER = 'https://metadata.provider.plex.tv';
 const PLEX_TV = 'https://plex.tv';
 

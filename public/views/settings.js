@@ -6,7 +6,7 @@ import { globalMode, setGlobalMode } from '../lib/viewMode.js';
 import { getDensity, setDensity, DENSITIES } from '../lib/density.js';
 import { isHidden, setHidden, orderServices, setOrder, isServicePinned, toggleServicePinned, pinnedServices, movePinnedService, setServicePinned, CALENDAR_PIN, MAX_PINNED_SERVICES } from '../lib/servicePrefs.js';
 import { getNativeAppInfo, connectedServerOrigin, changeServer, reloadInterface, isNativeApp, saveLocalFallbackSnapshot, loadLocalFallbackSnapshot, persistAppMode } from '../lib/nativeApp.js';
-import { createLocalFallbackSnapshot, applyLocalFallbackSnapshot, fallbackMetadata } from '../lib/fallbackSync.js';
+import { createLocalFallbackSnapshot, applyLocalFallbackSnapshot, fallbackMetadata, applyLocalFallbackSnapshotSecure } from '../lib/fallbackSync.js';
 import { diagnosticReport, copyDiagnosticReport, clearClientLog, readClientLog } from '../lib/clientDiagnostics.js';
 import * as push from '../lib/push.js';
 import { renderQueueCleaner, renderHunting } from '../lib/automationUI.js';
@@ -583,7 +583,7 @@ async function hydrateLocalFallbackPanel(ctx) {
       const next = createLocalFallbackSnapshot(payload, localStorage, {
         dashboardUser: ctx.state.config?.auth?.user,
       });
-      const meta = applyLocalFallbackSnapshot(next, localStorage);
+      const meta = await applyLocalFallbackSnapshotSecure(next, localStorage);
       await saveLocalFallbackSnapshot(next);
       toast(`Local fallback synced · ${meta.serviceCount} service${meta.serviceCount === 1 ? '' : 's'}`, 'success', 3200);
       await hydrateLocalFallbackPanel(ctx);
@@ -604,7 +604,7 @@ async function hydrateLocalFallbackPanel(ctx) {
     try {
       const saved = await loadLocalFallbackSnapshot();
       if (!saved) throw new Error('No local fallback has been synced');
-      applyLocalFallbackSnapshot(saved, localStorage);
+      await applyLocalFallbackSnapshotSecure(saved, localStorage);
       setAppMode('local');
       await persistAppMode('local');
       location.reload();

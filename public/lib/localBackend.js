@@ -35,7 +35,10 @@ function nativeHttp() {
 // or CORS-enabled services). Returns a standard Response so callers are agnostic.
 async function directFetch(url, opts = {}) {
   const http = nativeHttp();
-  if (!http) return _origFetch(url, opts);
+  // These requests carry service credentials (API key headers/query, Basic,
+  // Cloudflare Access). Never follow redirects, so a redirecting service
+  // can't collect them on another host.
+  if (!http) return _origFetch(url, { redirect: 'manual', ...opts });
   const method = (opts.method || 'GET').toUpperCase();
   const headers = opts.headers || {};
   let data;
@@ -48,7 +51,7 @@ async function directFetch(url, opts = {}) {
     }
   }
   try {
-    const res = await http.request({ url, method, headers, data });
+    const res = await http.request({ url, method, headers, data, disableRedirects: true });
     const body = (typeof res.data === 'string') ? res.data : JSON.stringify(res.data);
     const respHeaders = res.headers || {};
     // Normalize a content-type so downstream JSON parsing works.

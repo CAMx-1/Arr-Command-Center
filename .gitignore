@@ -17,6 +17,11 @@ data/
 ios/App/Pods/
 ios/App/App/public/
 ios/App/build/
+# Any Xcode -derivedDataPath / archive output (build-device, build-release, …)
+ios/App/build-*/
+*.xcarchive/
+*.ipa
+**/Packaging.log
 ios/App/output/
 ios/DerivedData/
 ios/**/ModuleCache.noindex/

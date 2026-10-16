@@ -1,0 +1,11 @@
+# Secret scanning config for gitleaks (https://github.com/gitleaks/gitleaks).
+# Run:  gitleaks git .   (history)   |   gitleaks dir .   (working tree)
+[extend]
+useDefault = true
+
+[allowlist]
+description = "CocoaPods lockfile checksums are SHA-1 hashes of pod specs, not secrets"
+paths = [
+  '''ios/App/Podfile\.lock''',
+  '''ios/App/Pods/Manifest\.lock''',
+]

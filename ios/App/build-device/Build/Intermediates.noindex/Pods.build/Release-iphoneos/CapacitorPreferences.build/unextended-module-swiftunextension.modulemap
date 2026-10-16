@@ -1,4 +1,0 @@
-
-module CapacitorPreferences.__Swift {
-  exclude header "CapacitorPreferences-Swift.h"
-}

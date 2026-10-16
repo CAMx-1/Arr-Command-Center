@@ -6,6 +6,15 @@
 import express from 'express';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { secretsFor, isTextual, createRedactor } from './redact.js';
+
+// Every request from this module carries a service's credentials (API key
+// header/query, Basic, Cloudflare Access, session cookies). Never follow
+// redirects automatically: Node drops Authorization on cross-origin redirects
+// but keeps custom headers (X-Api-Key, CF-Access-*) and query-string keys, so
+// a redirecting upstream could collect them. Redirects reach the browser as a
+// bare 3xx instead (no Location is forwarded).
+const fetch = (url, init = {}) => globalThis.fetch(url, { redirect: 'manual', ...init });
 import { mergeProtectedHeaders } from '../public/lib/customHeaders.js';
 
 function trimSlash(u) {
@@ -100,16 +109,29 @@ function authFor(svc) {
 //
 // `controller` is the AbortController driving the upstream fetch; if the client
 // disconnects mid-stream we abort it so we don't keep pulling from the upstream.
-async function pipeUpstream(upstream, res, controller) {
+// Upstream-issued session tokens the proxy holds for a service (qBittorrent
+// SID, Transmission session id, Deluge/Flood session cookies); also redacted.
+function sessionTokensFor(serviceKey) {
+  if (!serviceKey) return [];
+  return [qbitSid, transmissionSession, delugeSession, floodSession]
+    .map((m) => m.get(serviceKey)).filter((v) => typeof v === 'string');
+}
+
+async function pipeUpstream(upstream, res, controller, svc = null, serviceKey = '') {
   if (!upstream.body) { res.end(); return; }
   const nodeStream = Readable.fromWeb(upstream.body);
+  // Text bodies are scrubbed of this service's injected credentials in case the
+  // upstream reflects the request (see redact.js). Binary bodies stream as-is.
+  const secrets = svc ? secretsFor(svc, sessionTokensFor(serviceKey)) : [];
+  const scrub = secrets.length && isTextual(upstream.headers.get('content-type'));
   // If the client goes away before we finish, stop reading from the upstream.
   const onClose = () => { try { controller.abort(); } catch { /* ignore */ } };
   res.on('close', onClose);
   try {
     // pipeline() propagates errors/backpressure in both directions and cleans up
     // both streams (destroying the upstream reader) if either side fails.
-    await pipeline(nodeStream, res);
+    if (scrub) await pipeline(nodeStream, createRedactor(secrets), res);
+    else await pipeline(nodeStream, res);
   } catch (err) {
     try { controller.abort(); } catch { /* ignore */ }
     if (!res.writableEnded) res.destroy(err);
@@ -215,7 +237,7 @@ async function forwardQbit(svc, serviceKey, subPath, req, res) {
     const ct = upstream.headers.get('content-type');
     if (ct) res.set('content-type', ct);
     // Stream the body; do NOT forward upstream auth/set-cookie headers.
-    await pipeUpstream(upstream, res, controller);
+    await pipeUpstream(upstream, res, controller, svc, serviceKey);
   } catch (err) {
     if (res.headersSent) { if (!res.writableEnded) res.destroy(err); return; }
     const aborted = err.name === 'AbortError';
@@ -271,7 +293,7 @@ async function forwardTransmission(svc, serviceKey, subPath, req, res) {
     res.status(upstream.status);
     const ct = upstream.headers.get('content-type');
     if (ct) res.set('content-type', ct);
-    await pipeUpstream(upstream, res, controller);
+    await pipeUpstream(upstream, res, controller, svc, serviceKey);
   } catch (err) {
     if (res.headersSent) { if (!res.writableEnded) res.destroy(err); return; }
     const reason = classifyUpstreamError(err);
@@ -351,7 +373,7 @@ async function forwardDeluge(svc, serviceKey, subPath, req, res) {
     res.status(upstream.status);
     const ct = upstream.headers.get('content-type');
     if (ct) res.set('content-type', ct);
-    await pipeUpstream(upstream, res, controller);
+    await pipeUpstream(upstream, res, controller, svc, serviceKey);
   } catch (err) {
     if (res.headersSent) { if (!res.writableEnded) res.destroy(err); return; }
     const reason = classifyUpstreamError(err);
@@ -432,7 +454,7 @@ async function forwardFlood(svc, serviceKey, subPath, req, res) {
     res.status(upstream.status);
     const ct = upstream.headers.get('content-type');
     if (ct) res.set('content-type', ct);
-    await pipeUpstream(upstream, res, controller);
+    await pipeUpstream(upstream, res, controller, svc, serviceKey);
   } catch (err) {
     clearTimeout(timer);
     if (res.headersSent) { if (!res.writableEnded) res.destroy(err); return; }
@@ -541,7 +563,7 @@ async function forward(svc, serviceKey, subPath, req, res) {
     if (ct) res.set('content-type', ct);
     // Stream the body instead of buffering it; do NOT forward upstream
     // auth-related headers (set-cookie / www-authenticate) back to the browser.
-    await pipeUpstream(upstream, res, controller);
+    await pipeUpstream(upstream, res, controller, svc, serviceKey);
   } catch (err) {
     clearTimeout(timeout);
     if (res.headersSent) { if (!res.writableEnded) res.destroy(err); return; }
@@ -752,11 +774,25 @@ export async function pingService(svc, serviceKey) {
     } catch { /* non-json */ }
     const error = upstream.ok ? undefined
       : (upstream.status === 401 || upstream.status === 403) ? 'Auth / access denied'
-      : `HTTP ${upstream.status}`;
+      : (upstream.status >= 300 && upstream.status < 400)
+        ? `Redirected (HTTP ${upstream.status}) — use the final URL as the base URL (e.g. https://)`
+        : `HTTP ${upstream.status}`;
     return { ok: upstream.ok, status: upstream.status, ms, version, error };
   } catch (err) {
     return { ok: false, status: 0, ms: Date.now() - started, error: classifyUpstreamError(err) };
   }
+}
+
+// True when any path segment is "." or ".." (after percent-decoding, repeated
+// so double-encoding can't sneak one through) or contains a backslash.
+export function hasDotSegment(subPath) {
+  let p = String(subPath || '');
+  // Decode until stable (bounded); anything still percent-encoding a dot,
+  // slash or backslash after that is treated as hostile.
+  for (let i = 0; i < 10; i++) { try { const d = decodeURIComponent(p); if (d === p) break; p = d; } catch { return true; } }
+  if (/%(2e|2f|5c)/i.test(p)) return true;
+  if (p.includes('\\')) return true;
+  return p.split('/').some((seg) => seg === '.' || seg === '..');
 }
 
 export function createProxyRouter(cfg) {
@@ -775,6 +811,10 @@ export function createProxyRouter(cfg) {
     }
     const rawPath = req.params.path;
     const subPath = Array.isArray(rawPath) ? rawPath.join('/') : (rawPath || '');
+    // `..` segments (literal or %2e-encoded) would let a request climb above
+    // the service's base path, e.g. from https://host/sonarr to /radarr on a
+    // shared reverse proxy, carrying Sonarr's injected credentials with it.
+    if (hasDotSegment(subPath)) return res.status(400).json({ error: 'Invalid path' });
     await forward(svc, req.params.service, subPath, req, res);
   });
 

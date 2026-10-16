@@ -1,5 +1,0 @@
-
-module CapacitorStatusBar.Swift {
-  header "CapacitorStatusBar-Swift.h"
-  requires objc
-}
