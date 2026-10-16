@@ -37,6 +37,14 @@ and the iOS app with local-only mode. Click the image to play.*
 feed, and a Seerr requests panel. The whole Overview is customizable — reorder, resize,
 show/hide widgets, and keep multiple dashboards (see Settings).*
 
+### iPhone app
+
+![Arr Command Center on iPhone: overview, request progress, ratings and live streams](docs/mobile.png)
+
+*The same dashboard as a native iOS app (or an installable web app) with a hex bottom
+bar for your favorite services — approve requests, track downloads, check ratings and
+stop streams from your phone.*
+
 ### Sonarr library (Hexagon view)
 
 ![Sonarr library in hexagon view](docs/sonarr-library.png)
@@ -77,6 +85,35 @@ in the URL for deep-linking.*
 Recently Added, or jump to Discover to create a new request — posters pulled straight
 from TMDB.*
 
+### Live request progress
+
+![All Requests with live download progress bars](docs/requests.png)
+
+*Every request shows where it really is — awaiting approval, downloading with percent and
+time left, upgrading, available, or an import that needs attention — matched against the
+Sonarr/Radarr queues.*
+
+### Ratings and where to watch
+
+![Detail popup with Rotten Tomatoes, IMDb and streaming providers](docs/detail-ratings.png)
+
+*Open any title for a rich detail view: TMDB, Rotten Tomatoes and IMDb ratings, runtime,
+genres, and where it's streaming, renting or for sale in your region.*
+
+### Calendar
+
+![Calendar of upcoming episodes and movie releases](docs/calendar.png)
+
+*One calendar across every Sonarr and Radarr instance, with per-instance filter chips and
+a next-7-days list.*
+
+### Cleanup
+
+![Cleanup page listing unwatched titles by size](docs/cleanup.png)
+
+*Find space to reclaim: titles nobody has watched (from Tautulli history) in a chosen
+window, largest first, skipping recent additions — remove them straight from the list.*
+
 ### Tautulli — active streams
 
 ![Tautulli active streams](docs/tautulli.png)
@@ -91,6 +128,21 @@ now-playing details with a Stop control, plus History, Statistics, and Graphs ta
 *Themes (light/dark) with accent colors, a comfortable/compact density toggle, a default
 library view, drag-to-reorder services, and a full Overview dashboard builder — all
 secrets stay server-side.*
+
+### Service uptime
+
+![Service cards with 24-hour uptime bars](docs/uptime.png)
+
+*Each service card shows a 24-hour uptime bar and percentage. If a service stays down for
+two minutes you get a "down" alert, and a "recovered" alert when it comes back.*
+
+### Notification channels
+
+![Push notification categories and ntfy/Discord channels](docs/notifications.png)
+
+*Choose what to be alerted about, then fan alerts out to ntfy, Gotify, Discord, Telegram
+or any webhook. ntfy alerts for new requests include Approve/Decline buttons, so you can
+act from the lock screen.*
 
 ### Push notifications (iOS / Safari)
 
