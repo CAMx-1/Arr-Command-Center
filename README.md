@@ -25,6 +25,14 @@ https://github.com/user-attachments/assets/7a740e3c-3042-4dfe-b002-9ec1d6c8a551
 *34-second tour: unified dashboard, Seerr requests, SABnzbd downloads, Tautulli streams,
 and the iOS app with local-only mode. Click the image to play.*
 
+## Setup & walkthrough video
+
+[![Setup and walkthrough video](docs/tutorial-poster.jpg)](docs/tutorial.md)
+
+*5½ minutes, from `git clone` to a working dashboard: add a service, tour every menu and
+setting, then the iPhone app in server and local-only mode. Chapters and notes are in
+[docs/tutorial.md](docs/tutorial.md), or [download the video](docs/tutorial.mp4).*
+
 ---
 
 ## Screenshots
