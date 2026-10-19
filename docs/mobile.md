@@ -87,6 +87,27 @@ ios/                           # generated native Xcode project (committed)
   App/App/public/              # synced web assets (git-ignored; run cap copy)
 ```
 
+## Face ID, quick actions and links
+
+- **Face ID / Touch ID unlock:** Settings → Passcode lock → *Unlock with Face ID*
+  (shown once a passcode is set). Turning it on needs the passcode and a Face ID
+  check. The lock screen offers Face ID once, automatically, and the keypad
+  always works. If the enrolled faces or fingers change, Face ID unlock
+  switches itself off until it is turned on again. Changing or turning off the
+  passcode still requires the passcode.
+- **Quick actions:** long-press the app icon for Search, Add a movie, Downloads
+  (or your Sonarr/Radarr queue) and Calendar. The list follows your services and
+  refreshes whenever you leave the app.
+- **`arrcc://` links** (navigation only; a link can never change anything):
+
+  | Link | Opens |
+  |---|---|
+  | `arrcc://search?q=dune&type=movie` | Search (`type`: `all`, `movie`, `tv`) |
+  | `arrcc://calendar`, `arrcc://settings`, `arrcc://cleanup`, `arrcc://home` | That page |
+  | `arrcc://service/<key>?tab=queue` | A configured service, optionally on a tab |
+
+  Links work from Safari, Notes, Shortcuts ("Open URLs") and ntfy click actions.
+
 ## Roadmap
 
 - **Direct mode (no backend):** talk straight to Sonarr/Radarr/Overseerr/SABnzbd/

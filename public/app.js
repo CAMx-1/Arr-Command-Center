@@ -39,7 +39,8 @@ import * as push from './lib/push.js';
 import { initAppearance } from './lib/theme.js';
 import { initDensity } from './lib/density.js';
 import { initUpdateBanner } from './lib/updateBanner.js';
-import { dismissNativeKeyboard, finishNativeLaunch, installNativeKeyboardHandling, onNativeAppStateChange } from './lib/nativeApp.js';
+import { dismissNativeKeyboard, finishNativeLaunch, installNativeKeyboardHandling, onNativeAppStateChange, isNativeApp } from './lib/nativeApp.js';
+import { installDeepLinks, refreshQuickActions } from './lib/deepLinks.js';
 import { installClientDiagnostics, recordClientEvent } from './lib/clientDiagnostics.js';
 import { hydrateCredentialVault } from './lib/credentialVault.js';
 import { openCommandPalette } from './lib/commandPalette.js';
@@ -954,7 +955,7 @@ function openShortcutsHelp() {
   });
 }
 
-function openSearch() {
+function openSearch({ query = '', type = 'all' } = {}) {
   const input = h('input', { class: 'input', type: 'search', name: 'query', enterkeyhint: 'search', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Search libraries & discover new titles…' });
   const results = h('div', { class: 'list search-results', 'aria-live': 'polite' });
   let typeFilter = 'all';
@@ -1044,6 +1045,10 @@ function openSearch() {
     wide: true,
     overlayClass: 'search-modal-overlay',
   });
+  if (query || type !== 'all') {
+    input.value = query;
+    if (type !== 'all') setType(type); else if (query) runSearch();
+  }
   setTimeout(() => input.focus(), 50);
 }
 
@@ -1473,6 +1478,18 @@ async function init() {
   window.addEventListener('hashchange', navigate);
   await navigate();
   await finishNativeLaunch();
+  // Native app: arrcc:// links and home-screen quick actions (navigation only).
+  if (isNativeApp()) {
+    installDeepLinks({
+      services: () => state.services,
+      open: (link) => {
+        recordClientEvent('info', 'Deep link opened', link.kind === 'search' ? 'search' : link.route);
+        if (link.kind === 'search') { if (overlayOpen('modal')) closeModal(); openSearch({ query: link.q, type: link.type }); return; }
+        navigateFromOverlay(buildHash(link.route, link.params));
+      },
+      onError: () => toast('That link isn’t available in this app', 'error'),
+    });
+  }
   await firstStatus;
   recordClientEvent('info', 'Initial route rendered', currentRoute());
 
@@ -1495,7 +1512,8 @@ async function init() {
   // A warm native resume keeps user context but refreshes status and notification
   // counts immediately instead of waiting for their polling intervals.
   onNativeAppStateChange(({ isActive }) => {
-    if (!isActive) return;
+    // Leaving the app is when the home-screen quick actions get looked at.
+    if (!isActive) { refreshQuickActions(state.services); return; }
     recordClientEvent('info', 'App returned to foreground');
     refreshStatus();
     refreshNotifications();

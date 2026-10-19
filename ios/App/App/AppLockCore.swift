@@ -36,6 +36,42 @@ struct PasscodeRecord: Codable, Equatable {
     var failedAttempts: Int = 0
     /// Wall-clock time until which entry is refused (nil = not throttled).
     var lockedUntil: Date?
+    /// Face ID / Touch ID unlock. Optional so records saved before 1.6 still decode.
+    var biometricsEnabled: Bool?
+    /// LAContext.evaluatedPolicyDomainState captured when biometrics were turned
+    /// on. If the enrolled faces/fingers change, it changes too, and biometric
+    /// unlock stops until the user re-enables it with the passcode.
+    var biometricDomainState: Data?
+}
+
+/// When the lock screen may offer Face ID / Touch ID instead of the keypad.
+enum BiometricPolicy {
+    static func shouldOffer(_ record: PasscodeRecord, available: Bool, currentDomainState: Data?, now: Date) -> Bool {
+        guard record.biometricsEnabled == true, available else { return false }
+        guard let saved = record.biometricDomainState, let current = currentDomainState, saved == current else { return false }
+        // While wrong-passcode throttling is active, only the passcode (after the wait) unlocks.
+        return AttemptLimiter.remainingLockout(record, now: now) == 0
+    }
+
+    /// True when biometrics were enabled but the enrollment changed since.
+    static func enrollmentChanged(_ record: PasscodeRecord, currentDomainState: Data?) -> Bool {
+        guard record.biometricsEnabled == true, let saved = record.biometricDomainState else { return false }
+        return saved != currentDomainState
+    }
+
+    static func enabling(_ record: PasscodeRecord, domainState: Data) -> PasscodeRecord {
+        var next = record
+        next.biometricsEnabled = true
+        next.biometricDomainState = domainState
+        return next
+    }
+
+    static func disabling(_ record: PasscodeRecord) -> PasscodeRecord {
+        var next = record
+        next.biometricsEnabled = false
+        next.biometricDomainState = nil
+        return next
+    }
 }
 
 enum PasscodeHasher {

@@ -19,7 +19,7 @@ import { quickAddSettingsCard } from '../lib/quickAddSettings.js';
 import { channelsCard } from '../lib/notifyChannels.js';
 import { hydrateUptime } from '../lib/uptimeBars.js';
 import { hasRequiredCredentials } from '../lib/serviceKinds.js';
-import { appLockAvailable, getLockStatus, enableLock, disableLock, changeLockPasscode, setLockTimeout, lockNow, newPasscodeError, isValidPasscode, lockErrorMessage, timeoutLabel, TIMEOUT_OPTIONS, PASSCODE_LENGTH } from '../lib/appLock.js';
+import { appLockAvailable, getLockStatus, enableLock, disableLock, changeLockPasscode, setLockTimeout, lockNow, newPasscodeError, isValidPasscode, lockErrorMessage, timeoutLabel, TIMEOUT_OPTIONS, PASSCODE_LENGTH, biometryLabel, setBiometrics } from '../lib/appLock.js';
 
 import { portableBackupPayload, encryptPortableBackup, decryptPortableBackup, applyPortableBackup } from '../lib/configBackup.js';
 export async function renderSettings(root, ctx) {
@@ -335,9 +335,26 @@ async function hydrateAppLockPanel() {
     catch (e) { toast(lockErrorMessage(e), 'error'); timeout.value = String(status.timeoutMinutes); }
   });
 
+  // Face ID / Touch ID: offered once a passcode exists and the device has biometrics set up.
+  const bioName = biometryLabel(status.biometryType);
+  let bioRow = null;
+  if (status.enabled && bioName) {
+    const bio = h('input', { type: 'checkbox', role: 'switch', 'aria-label': `Unlock with ${bioName}` });
+    bio.checked = status.biometricsEnabled;
+    bio.addEventListener('change', async () => {
+      const want = bio.checked;
+      bio.checked = status.biometricsEnabled; // reflect only after success
+      if (want) { openPasscodeModal('biometrics'); return; }
+      try { await setBiometrics(false); toast(`${bioName} unlock is off`, 'success'); hydrateAppLockPanel(); }
+      catch (e) { toast(lockErrorMessage(e), 'error'); }
+    });
+    bioRow = settingRow(`Unlock with ${bioName}`, h('span', { class: 'pw-toggle' }, bio));
+  }
+
   mount(panel,
     h('h3', {}, 'Passcode lock'),
     settingRow('Require passcode', h('span', { class: 'pw-toggle' }, toggle)),
+    bioRow,
     settingRow('Lock after', timeout),
     status.enabled ? h('div', { class: 'settings-action-grid' },
       h('button', { class: 'btn sm', type: 'button', onclick: () => openPasscodeModal('change') }, 'Change passcode'),
@@ -345,7 +362,7 @@ async function hydrateAppLockPanel() {
     ) : null,
     h('p', { class: 'dim settings-copy' },
       status.enabled
-        ? 'The app asks for your passcode when it opens and after it has been in the background for the selected time. The screen is hidden in the app switcher.'
+        ? `The app asks for your passcode when it opens and after it has been in the background for the selected time. The screen is hidden in the app switcher.${status.biometricsEnabled && bioName ? ` ${bioName} is offered first; the passcode always works too. If ${bioName} changes on this device (for example a new face or finger), it switches off until you turn it on again here.` : ''}`
         : `Protect the app with a ${PASSCODE_LENGTH}-digit passcode. It is stored only on this device, in the iOS Keychain.`),
     h('p', { class: 'dim settings-copy' }, 'Forgot it? Deleting and reinstalling the app removes the passcode (you will need to reconnect to your server).'),
   );
@@ -359,12 +376,13 @@ async function hydrateAppLockPanel() {
     });
     const field = (label, input) => h('label', { style: { display: 'grid', gap: '6px', marginBottom: '12px' } }, h('span', { class: 'dim', style: { fontSize: '13px' } }, label), input);
     const current = kind === 'enable' ? null : digits('Current passcode');
-    const next = kind === 'disable' ? null : digits('New passcode');
-    const confirm = kind === 'disable' ? null : digits('Confirm new passcode');
+    const next = kind === 'disable' || kind === 'biometrics' ? null : digits('New passcode');
+    const confirm = kind === 'disable' || kind === 'biometrics' ? null : digits('Confirm new passcode');
     const pick = kind === 'enable' ? h('select', { class: 'input', 'aria-label': 'Lock after' }, ...TIMEOUT_OPTIONS.map((m) => h('option', { value: String(m) }, timeoutLabel(m)))) : null;
     if (pick) pick.value = String(status.timeoutMinutes);
-    const titles = { enable: 'Turn on passcode', disable: 'Turn off passcode', change: 'Change passcode' };
-    const labels = { enable: 'Turn on', disable: 'Turn off', change: 'Save' };
+    const bioTitle = biometryLabel(status.biometryType) || 'Face ID';
+    const titles = { enable: 'Turn on passcode', disable: 'Turn off passcode', change: 'Change passcode', biometrics: `Turn on ${bioTitle}` };
+    const labels = { enable: 'Turn on', disable: 'Turn off', change: 'Save', biometrics: 'Continue' };
     const submit = h('button', { class: `btn ${kind === 'disable' ? 'danger' : 'primary'}`, type: 'button' }, labels[kind]);
 
     const save = async () => {
@@ -375,9 +393,10 @@ async function hydrateAppLockPanel() {
       try {
         if (kind === 'enable') await enableLock(next.value, Number(pick.value));
         else if (kind === 'disable') await disableLock(current.value);
+        else if (kind === 'biometrics') await setBiometrics(true, current.value);
         else await changeLockPasscode(current.value, next.value);
         closeModal();
-        toast(kind === 'enable' ? 'Passcode lock is on' : kind === 'disable' ? 'Passcode lock is off' : 'Passcode changed', 'success');
+        toast(kind === 'enable' ? 'Passcode lock is on' : kind === 'disable' ? 'Passcode lock is off' : kind === 'biometrics' ? `${bioTitle} unlock is on` : 'Passcode changed', 'success');
         hydrateAppLockPanel();
       } catch (e) {
         error.textContent = lockErrorMessage(e);
@@ -393,6 +412,7 @@ async function hydrateAppLockPanel() {
       title: titles[kind],
       body: h('div', {},
         kind === 'enable' ? h('p', { class: 'dim settings-copy', style: { marginTop: 0 } }, `Choose a ${PASSCODE_LENGTH}-digit passcode. There is no way to recover it except reinstalling the app.`) : null,
+        kind === 'biometrics' ? h('p', { class: 'dim settings-copy', style: { marginTop: 0 } }, `Enter your passcode, then confirm with ${bioTitle}.`) : null,
         current ? field('Current passcode', current) : null,
         next ? field('New passcode', next) : null,
         confirm ? field('Confirm new passcode', confirm) : null,

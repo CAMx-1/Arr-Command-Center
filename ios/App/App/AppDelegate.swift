@@ -16,6 +16,7 @@ final class AppBridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(AppLockPlugin())
+        bridge?.registerPluginInstance(QuickActionsPlugin())
     }
 
     override func viewDidLoad() {
@@ -54,7 +55,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Cover the UI before the first frame if the passcode lock is on.
         DispatchQueue.main.async { AppLockManager.shared.appDidLaunch() }
+        // Cold launch from a home-screen quick action: hold the link until the
+        // web app asks for it (QuickActions.getPending). Returning false stops
+        // iOS from also calling performActionFor for the same action.
+        if let item = launchOptions?[.shortcutItem] as? UIApplicationShortcutItem {
+            DeepLinkCenter.pendingURL = DeepLinkCenter.url(for: item)
+            return false
+        }
         return true
+    }
+
+    // Quick action while the app is already running.
+    func application(_ application: UIApplication, performActionFor shortcutItem: UIApplicationShortcutItem, completionHandler: @escaping (Bool) -> Void) {
+        guard let url = DeepLinkCenter.url(for: shortcutItem) else { return completionHandler(false) }
+        DeepLinkCenter.deliver(url)
+        completionHandler(true)
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

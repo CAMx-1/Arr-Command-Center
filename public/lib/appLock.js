@@ -33,15 +33,32 @@ export function newPasscodeError(passcode, confirm) {
 export function lockErrorMessage(err) {
   const code = err && (err.code || err.errorMessage);
   if (code === 'WRONG_PASSCODE') return 'Current passcode is incorrect';
-  if (code === 'THROTTLED' || code === 'INVALID_PASSCODE' || code === 'INVALID_TIMEOUT') return err.message;
+  if (code === 'THROTTLED' || code === 'INVALID_PASSCODE' || code === 'INVALID_TIMEOUT'
+    || code === 'BIOMETRY_UNAVAILABLE' || code === 'BIOMETRY_FAILED') return err.message;
   return (err && err.message) || 'Passcode lock request failed';
 }
 
 export async function getLockStatus() {
   const p = plugin();
-  if (!p) return { available: false, enabled: false, timeoutMinutes: 1 };
+  if (!p) return { available: false, enabled: false, timeoutMinutes: 1, biometryType: 'none', biometricsEnabled: false };
   const s = await p.getStatus();
-  return { available: true, enabled: !!s.enabled, timeoutMinutes: TIMEOUT_OPTIONS.includes(s.timeoutMinutes) ? s.timeoutMinutes : 1 };
+  return {
+    available: true,
+    enabled: !!s.enabled,
+    timeoutMinutes: TIMEOUT_OPTIONS.includes(s.timeoutMinutes) ? s.timeoutMinutes : 1,
+    biometryType: ['faceID', 'touchID', 'opticID'].includes(s.biometryType) ? s.biometryType : 'none',
+    biometricsEnabled: !!s.biometricsEnabled,
+  };
+}
+
+/** "Face ID" / "Touch ID" / "Optic ID", or null when the device has none set up. */
+export function biometryLabel(type) {
+  return { faceID: 'Face ID', touchID: 'Touch ID', opticID: 'Optic ID' }[type] || null;
+}
+
+/** Turning on needs the current passcode (and a Face ID / Touch ID check, done natively). */
+export async function setBiometrics(enabled, passcode) {
+  return plugin().setBiometrics(enabled ? { enabled: true, passcode } : { enabled: false });
 }
 
 export async function enableLock(passcode, timeoutMinutes) {

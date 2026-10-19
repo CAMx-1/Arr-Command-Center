@@ -1,6 +1,7 @@
 import UIKit
 import Security
 import Capacitor
+import LocalAuthentication
 
 // MARK: - Keychain persistence ------------------------------------------------
 // The passcode record lives in the Keychain (ThisDeviceOnly: never synced to
@@ -85,23 +86,101 @@ final class AppLockManager {
 
     func appDidBecomeActive() {
         guard let rec = record else { hideCover(); return }
-        if isLocked { showCover(mode: .passcode); return }
+        if isLocked {
+            showCover(mode: .passcode)
+            (coverWindow?.rootViewController as? LockViewController)?.appBecameActive()
+            return
+        }
         let lockNow = backgroundedAt != nil && LockPolicy.shouldLock(
             enabled: true, backgroundedAtUptime: backgroundedAt,
             nowUptime: ProcessInfo.processInfo.systemUptime, timeoutMinutes: rec.timeoutMinutes)
         backgroundedAt = nil
-        if lockNow { lock() } else { hideCover() }
+        if lockNow {
+            lock()
+            (coverWindow?.rootViewController as? LockViewController)?.appBecameActive()
+        } else { hideCover() }
     }
 
     func lock() {
         isLocked = true
+        autoBiometricsPending = true
         showCover(mode: .passcode)
+    }
+    /// One automatic Face ID prompt per lock (cancelling it must not re-prompt in a loop).
+    var autoBiometricsPending = false
+
+    // MARK: biometrics
+    /// "faceID" | "touchID" | "opticID" | "none"
+    var biometryType: String {
+        let ctx = LAContext()
+        guard ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil) else { return "none" }
+        switch ctx.biometryType {
+        case .faceID: return "faceID"
+        case .touchID: return "touchID"
+        default:
+            if #available(iOS 17.0, *), ctx.biometryType == .opticID { return "opticID" }
+            return "none"
+        }
+    }
+    var biometryName: String {
+        switch biometryType { case "faceID": return "Face ID"; case "touchID": return "Touch ID"; case "opticID": return "Optic ID"; default: return "Biometrics" }
+    }
+    private var currentDomainState: Data? {
+        let ctx = LAContext()
+        _ = ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+        return ctx.evaluatedPolicyDomainState
+    }
+    var biometricsEnabled: Bool { record?.biometricsEnabled == true }
+
+    /// Whether the lock screen may offer biometrics right now. If the enrolled
+    /// faces/fingers changed since it was turned on, biometric unlock is
+    /// switched off (re-enable in Settings with the passcode).
+    func canOfferBiometrics() -> Bool {
+        guard let rec = record else { return false }
+        let state = currentDomainState
+        if BiometricPolicy.enrollmentChanged(rec, currentDomainState: state) {
+            AppLockStore.save(BiometricPolicy.disabling(rec))
+            biometricsInvalidated = true
+            return false
+        }
+        return BiometricPolicy.shouldOffer(rec, available: biometryType != "none", currentDomainState: state, now: Date())
+    }
+    /// Set when biometrics were switched off because enrollment changed (shown once on the lock screen).
+    var biometricsInvalidated = false
+
+    /// Prompt for Face ID / Touch ID. Completion runs on the main queue.
+    func evaluateBiometrics(reason: String, completion: @escaping (Bool, Data?) -> Void) {
+        let ctx = LAContext()
+        ctx.localizedFallbackTitle = "Enter Passcode"
+        ctx.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { ok, _ in
+            let state = ctx.evaluatedPolicyDomainState
+            DispatchQueue.main.async { completion(ok, state) }
+        }
+    }
+
+    func setBiometrics(enabled: Bool, domainState: Data?) -> Bool {
+        guard let rec = record else { return false }
+        if enabled {
+            guard let state = domainState else { return false }
+            return AppLockStore.save(BiometricPolicy.enabling(AttemptLimiter.registerSuccess(rec), domainState: state))
+        }
+        return AppLockStore.save(BiometricPolicy.disabling(rec))
+    }
+
+    func registerBiometricUnlock() {
+        if let rec = record { AppLockStore.save(AttemptLimiter.registerSuccess(rec)) }
     }
 
     // MARK: configuration (called from the plugin)
+    /// Saves a new passcode. Changing the passcode keeps the biometrics setting.
     @discardableResult
-    func enable(passcode: String, timeoutMinutes: Int) -> Bool {
-        AppLockStore.save(PasscodeHasher.makeRecord(passcode: passcode, timeoutMinutes: timeoutMinutes))
+    func enable(passcode: String, timeoutMinutes: Int, keepBiometricsFrom old: PasscodeRecord? = nil) -> Bool {
+        var next = PasscodeHasher.makeRecord(passcode: passcode, timeoutMinutes: timeoutMinutes)
+        if let old, old.biometricsEnabled == true {
+            next.biometricsEnabled = true
+            next.biometricDomainState = old.biometricDomainState
+        }
+        return AppLockStore.save(next)
     }
 
     func setTimeout(_ minutes: Int) -> Bool {
@@ -176,6 +255,8 @@ final class LockViewController: UIViewController {
     private let dots = UIStackView()
     private let pad = UIStackView()
     private var digitButtons: [UIButton] = []
+    private let bioButton = UIButton(type: .system)
+    private var bioInFlight = false
 
     private let bg = UIColor(red: 0x0f / 255, green: 0x11 / 255, blue: 0x17 / 255, alpha: 1)
     private let accent = UIColor(red: 0x8b / 255, green: 0x5c / 255, blue: 0xf6 / 255, alpha: 1)
@@ -223,7 +304,7 @@ final class LockViewController: UIViewController {
 
         pad.axis = .vertical
         pad.spacing = 16
-        let rows: [[String]] = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["", "0", "⌫"]]
+        let rows: [[String]] = [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["bio", "0", "⌫"]]
         for row in rows {
             let r = UIStackView()
             r.axis = .horizontal
@@ -260,6 +341,14 @@ final class LockViewController: UIViewController {
 
     private func makeKey(_ key: String) -> UIView {
         guard !key.isEmpty else { return UIView() }
+        if key == "bio" {
+            bioButton.tintColor = .white
+            bioButton.translatesAutoresizingMaskIntoConstraints = false
+            bioButton.widthAnchor.constraint(equalToConstant: 76).isActive = true
+            bioButton.heightAnchor.constraint(equalToConstant: 76).isActive = true
+            bioButton.addAction(for: { [weak self] in self?.tryBiometrics() })
+            return bioButton
+        }
         let b = UIButton(type: .system)
         b.setTitle(key, for: .normal)
         b.setTitleColor(.white, for: .normal)
@@ -282,7 +371,46 @@ final class LockViewController: UIViewController {
         pad.isHidden = !locked
         messageLabel.isHidden = !locked
         if locked { refreshThrottle() }
+        refreshBiometricButton()
         renderDots()
+    }
+
+    private func refreshBiometricButton() {
+        let mgr = AppLockManager.shared
+        let offer = mode == .passcode && mgr.canOfferBiometrics()
+        bioButton.isHidden = !offer
+        bioButton.isEnabled = offer
+        let symbol = mgr.biometryType == "touchID" ? "touchid" : (mgr.biometryType == "opticID" ? "opticid" : "faceid")
+        bioButton.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .regular)), for: .normal)
+        bioButton.accessibilityLabel = "Unlock with \(mgr.biometryName)"
+        if mode == .passcode, mgr.biometricsInvalidated {
+            mgr.biometricsInvalidated = false
+            messageLabel.text = "\(mgr.biometryName) changed on this device. Enter your passcode, then turn it on again in Settings."
+        }
+    }
+
+    /// Called when the app is active with the lock showing: one automatic prompt per lock.
+    func appBecameActive() {
+        guard mode == .passcode, AppLockManager.shared.autoBiometricsPending else { return }
+        AppLockManager.shared.autoBiometricsPending = false
+        // Let the cover finish appearing before the system sheet slides up.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.tryBiometrics() }
+    }
+
+    private func tryBiometrics() {
+        let mgr = AppLockManager.shared
+        guard mode == .passcode, !bioInFlight, mgr.canOfferBiometrics() else { return }
+        bioInFlight = true
+        mgr.evaluateBiometrics(reason: "Unlock Arr Command Center") { [weak self] ok, _ in
+            guard let self else { return }
+            self.bioInFlight = false
+            guard ok, self.mode == .passcode else { return } // cancelled/failed: keypad stays
+            mgr.registerBiometricUnlock()
+            self.entered = ""
+            self.messageLabel.text = ""
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            self.onUnlock?()
+        }
     }
 
     private func digit(_ d: String) {
@@ -383,18 +511,44 @@ public class AppLockPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "setTimeout", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "changePasscode", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "lockNow", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setBiometrics", returnType: CAPPluginReturnPromise),
     ]
 
     private var manager: AppLockManager { .shared }
 
     @objc func getStatus(_ call: CAPPluginCall) {
+        _ = manager.canOfferBiometrics() // switches biometrics off if enrollment changed
         let rec = manager.record
         call.resolve([
             "enabled": rec != nil,
             "timeoutMinutes": rec?.timeoutMinutes ?? AppLockConfig.defaultTimeoutMinutes,
             "timeoutOptions": AppLockConfig.timeoutOptions,
             "passcodeLength": AppLockConfig.passcodeLength,
+            "biometryType": manager.biometryType,
+            "biometricsEnabled": rec?.biometricsEnabled == true,
         ])
+    }
+
+    /// Turning biometrics on needs the current passcode and a successful
+    /// Face ID / Touch ID check (which also records the enrollment state).
+    /// Turning it off needs neither: it only makes unlocking stricter.
+    @objc func setBiometrics(_ call: CAPPluginCall) {
+        guard manager.isEnabled else { return call.reject("Passcode lock is off", "NOT_ENABLED") }
+        let enabled = call.getBool("enabled") ?? false
+        if !enabled {
+            return manager.setBiometrics(enabled: false, domainState: nil) ? call.resolve(["biometricsEnabled": false]) : call.reject("Could not save the setting", "STORAGE_FAILED")
+        }
+        guard manager.biometryType != "none" else { return call.reject("Face ID or Touch ID isn't set up on this device", "BIOMETRY_UNAVAILABLE") }
+        withVerifiedPasscode(call) {
+            DispatchQueue.main.async {
+                self.manager.evaluateBiometrics(reason: "Turn on \(self.manager.biometryName) for Arr Command Center") { ok, state in
+                    guard ok else { return call.reject("\(self.manager.biometryName) wasn't confirmed", "BIOMETRY_FAILED") }
+                    self.manager.setBiometrics(enabled: true, domainState: state)
+                        ? call.resolve(["biometricsEnabled": true])
+                        : call.reject("Could not save the setting", "STORAGE_FAILED")
+                }
+            }
+        }
     }
 
     @objc func enable(_ call: CAPPluginCall) {
@@ -422,8 +576,9 @@ public class AppLockPlugin: CAPPlugin, CAPBridgedPlugin {
             return call.reject("New passcode must be \(AppLockConfig.passcodeLength) digits", "INVALID_PASSCODE")
         }
         withVerifiedPasscode(call) {
-            let minutes = self.manager.record?.timeoutMinutes ?? AppLockConfig.defaultTimeoutMinutes
-            guard self.manager.enable(passcode: next, timeoutMinutes: minutes) else {
+            let old = self.manager.record
+            let minutes = old?.timeoutMinutes ?? AppLockConfig.defaultTimeoutMinutes
+            guard self.manager.enable(passcode: next, timeoutMinutes: minutes, keepBiometricsFrom: old) else {
                 return call.reject("Could not save the passcode to the Keychain", "STORAGE_FAILED")
             }
             call.resolve(["enabled": true])

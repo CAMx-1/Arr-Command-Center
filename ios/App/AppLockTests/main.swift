@@ -69,6 +69,30 @@ check(!LockPolicy.shouldLock(enabled: true, backgroundedAtUptime: 100, nowUptime
 check(LockPolicy.shouldLock(enabled: true, backgroundedAtUptime: 100, nowUptime: 700, timeoutMinutes: 10), "10 min locks")
 check(LockPolicy.shouldLock(enabled: true, backgroundedAtUptime: 500, nowUptime: 10, timeoutMinutes: 10), "uptime went backwards (reboot) → lock")
 
+// Biometrics (Face ID / Touch ID)
+let base = PasscodeHasher.makeRecord(passcode: "482913", timeoutMinutes: 1, rounds: 1000)
+let stateA = Data([1, 2, 3]), stateB = Data([9, 9])
+let now0 = Date(timeIntervalSince1970: 1_800_000_000)
+check(!BiometricPolicy.shouldOffer(base, available: true, currentDomainState: stateA, now: now0), "off by default")
+let bio = BiometricPolicy.enabling(base, domainState: stateA)
+check(BiometricPolicy.shouldOffer(bio, available: true, currentDomainState: stateA, now: now0), "offered when enabled + same enrollment")
+check(!BiometricPolicy.shouldOffer(bio, available: false, currentDomainState: stateA, now: now0), "not offered when hardware unavailable")
+check(!BiometricPolicy.shouldOffer(bio, available: true, currentDomainState: stateB, now: now0), "enrollment change blocks biometrics")
+check(!BiometricPolicy.shouldOffer(bio, available: true, currentDomainState: nil, now: now0), "unknown enrollment blocks biometrics")
+check(BiometricPolicy.enrollmentChanged(bio, currentDomainState: stateB), "enrollment change detected")
+check(!BiometricPolicy.enrollmentChanged(bio, currentDomainState: stateA), "same enrollment not flagged")
+var throttledBio = bio
+for _ in 0..<AttemptLimiter.freeAttempts { throttledBio = AttemptLimiter.registerFailure(throttledBio, now: now0) }
+check(!BiometricPolicy.shouldOffer(throttledBio, available: true, currentDomainState: stateA, now: now0), "not offered while throttled")
+let off = BiometricPolicy.disabling(bio)
+check(off.biometricsEnabled == false && off.biometricDomainState == nil, "disabling clears state")
+// Records saved before biometrics existed must still decode.
+struct LegacyRecord: Codable { var salt: Data; var hash: Data; var rounds: UInt32; var timeoutMinutes: Int; var failedAttempts: Int; var lockedUntil: Date? }
+let legacy = try! JSONEncoder().encode(LegacyRecord(salt: base.salt, hash: base.hash, rounds: base.rounds, timeoutMinutes: 5, failedAttempts: 0, lockedUntil: nil))
+let decoded = try? JSONDecoder().decode(PasscodeRecord.self, from: legacy)
+check(decoded != nil && decoded!.biometricsEnabled == nil && decoded!.timeoutMinutes == 5, "legacy record decodes")
+check(decoded.map { PasscodeHasher.verify("482913", against: $0) } == true, "legacy record still verifies")
+
 check(lockoutMessage(30) == "Try again in 30 sec", "sec message")
 check(lockoutMessage(61) == "Try again in 2 min", "min message rounds up")
 
