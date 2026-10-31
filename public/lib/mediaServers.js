@@ -1,3 +1,5 @@
+import { mediaPlayMethod } from './playbackDecision.js';
+
 const itemsOf = (value) => Array.isArray(value) ? value : (value?.Items || []);
 
 export function mediaImageUrl(serviceKey, item, width = 300) {
@@ -20,12 +22,13 @@ export function normalizeMediaSession(session = {}, serviceKey = '') {
   const position = Number(session.PlayState?.PositionTicks) || 0;
   const runtime = Number(item.RunTimeTicks) || 0;
   const transcode = session.TranscodingInfo;
+  const decision = mediaPlayMethod(session);
   return {
     id: session.Id, user: session.UserName || session.UserId || 'Unknown', client: session.Client || '', device: session.DeviceName || '',
     title: item.SeriesName ? `${item.SeriesName} — ${item.Name || ''}` : item.Name || 'Unknown media',
     state: session.PlayState?.IsPaused ? 'paused' : item.Id ? 'playing' : 'idle',
     progress: runtime > 0 ? Math.round(position / runtime * 100) : 0,
-    image: mediaImageUrl(serviceKey, item), transcode: !!transcode,
+    image: mediaImageUrl(serviceKey, item), transcode: decision.transcode, playMethod: decision.label,
     videoCodec: transcode?.VideoCodec || item.MediaStreams?.find((stream) => stream.Type === 'Video')?.Codec || '',
     bitrate: Number(transcode?.Bitrate) || 0,
   };

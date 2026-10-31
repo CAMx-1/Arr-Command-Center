@@ -20,6 +20,64 @@ import { hasRequiredCredentials } from './serviceKinds.js';
 let _origFetch = null;
 const activeBases = new Map();
 
+// ---- Local/remote fallback reachability --------------------------------
+// In auto mode a service's local URL is tried before its remote URL. Away
+// from home a LAN address often never answers, and a native request has no
+// timeout of its own (CapacitorHttp's iOS default is 600 s), so the fallback
+// to the remote URL could stall for minutes. Before using any candidate that
+// isn't the last one, check that its origin answers at all (any HTTP status
+// counts) within a few seconds. Results are cached briefly and cleared when
+// the network changes or the app returns to the foreground.
+export const REACH_PROBE_TIMEOUT_MS = 4000;
+export const REACH_TTL_MS = 30000;
+const reachCache = new Map(); // origin -> { ok, at }
+
+export function resetReachability() { reachCache.clear(); }
+export function markUnreachable(baseUrl, now = Date.now()) { reachCache.set(originOf(baseUrl), { ok: false, at: now }); }
+
+function originOf(baseUrl) { try { return new URL(baseUrl).origin; } catch { return String(baseUrl || ''); } }
+
+// Resolves true if the origin returned any HTTP response before the timeout.
+// No credentials are sent: the probe only needs to know the host answers.
+async function rawProbe(baseUrl, timeoutMs = REACH_PROBE_TIMEOUT_MS) {
+  const url = `${originOf(baseUrl)}/`;
+  const http = nativeHttp();
+  if (http) {
+    try { await http.request({ url, method: 'GET', headers: {}, connectTimeout: timeoutMs, readTimeout: timeoutMs, disableRedirects: true }); return true; }
+    catch { return false; }
+  }
+  if (!_origFetch) return true; // nothing to probe with; let the request decide
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    // no-cors: an opaque response still proves the host answered.
+    await _origFetch(url, { method: 'GET', mode: 'no-cors', credentials: 'omit', cache: 'no-store', signal: controller ? controller.signal : undefined });
+    return true;
+  } catch { return false; }
+  finally { if (timer) clearTimeout(timer); }
+}
+
+export async function probeReachable(baseUrl, { probe = rawProbe, now = Date.now() } = {}) {
+  const origin = originOf(baseUrl);
+  const hit = reachCache.get(origin);
+  if (hit && now - hit.at < REACH_TTL_MS) return hit.ok;
+  const ok = !!(await probe(baseUrl));
+  reachCache.set(origin, { ok, at: now });
+  return ok;
+}
+
+// Drop candidates (except the last) whose origin doesn't answer quickly. The
+// last candidate is always kept so its own error reaches the caller.
+export async function reachableCandidates(requests, { policy = 'auto', probe, now } = {}) {
+  if (policy !== 'auto' || requests.length < 2) return requests;
+  const out = [];
+  for (let i = 0; i < requests.length; i += 1) {
+    const last = i === requests.length - 1;
+    if (last || await probeReachable(requests[i].baseUrl, { probe, now })) out.push(requests[i]);
+  }
+  return out;
+}
+
 // Native HTTP plugin accessor (present only in the Capacitor app). Used to make
 // cross-origin direct service calls without tripping CORS.
 function nativeHttp() {
@@ -223,7 +281,10 @@ export function statusPath(type) {
 async function pingConnection(conn) {
   const started = Date.now();
   try {
-    const requests = buildDirectRequestCandidates(`/api/proxy/${conn.key}/${statusPath(conn.type)}`, conn, { preferredBaseUrl: activeBases.get(conn.key) });
+    const requests = await reachableCandidates(
+      buildDirectRequestCandidates(`/api/proxy/${conn.key}/${statusPath(conn.type)}`, conn, { preferredBaseUrl: activeBases.get(conn.key) }),
+      { policy: conn.connectionPolicy },
+    );
     const rpc = conn.type === 'transmission'
       ? { method: 'POST', body: JSON.stringify({ method: 'session-get', arguments: {} }) }
       : conn.type === 'deluge'
@@ -238,6 +299,7 @@ async function pingConnection(conn) {
       try { r = await directServiceFetch(conn, request, opts); }
       catch { r = new Response('', { status: 502 }); }
       if (r.status !== 502 && r.status !== 504) { used = request.baseUrl; break; }
+      markUnreachable(request.baseUrl);
     }
     if (!r) r = new Response('', { status: 502 });
     if (used) activeBases.set(conn.key, used);
@@ -290,7 +352,10 @@ async function handleLocal(u, input, init) {
     const key = pathname.split('/')[3];
     const c = conns[key];
     if (!c) return json({ error: `No local connection for “${key}”. Add it in Settings.` }, 502);
-    const requests = buildDirectRequestCandidates(pathname + u.search, c, { preferredBaseUrl: activeBases.get(key) });
+    const requests = await reachableCandidates(
+      buildDirectRequestCandidates(pathname + u.search, c, { preferredBaseUrl: activeBases.get(key) }),
+      { policy: c.connectionPolicy },
+    );
     const src = init || (typeof input === 'object' ? input : null);
     let last = null;
     for (const request of requests) {
@@ -304,6 +369,7 @@ async function handleLocal(u, input, init) {
       catch { last = new Response(JSON.stringify({ error: 'Network error' }), { status: 502, headers: { 'content-type': 'application/json' } }); }
       if (last.status !== 502 && last.status !== 504) { activeBases.set(key, request.baseUrl); return last; }
       if (c.connectionPolicy !== 'auto') return last;
+      markUnreachable(request.baseUrl);
     }
     return last || json({ error: 'No local or remote URL configured' }, 502);
   }
@@ -323,6 +389,15 @@ export function installLocalBackend() {
   if (_installed || typeof window === 'undefined' || !window.fetch) return;
   _installed = true;
   _origFetch = window.fetch.bind(window);
+  // A network change (Wi-Fi <-> cellular, VPN up/down) or returning to the
+  // app can change which URL works, so re-check reachability.
+  if (typeof window.addEventListener === 'function') {
+    window.addEventListener('online', resetReachability);
+    window.addEventListener('offline', resetReachability);
+  }
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resetReachability(); });
+  }
   window.fetch = function (input, init) {
     try {
       if (isLocalMode()) {

@@ -762,31 +762,61 @@ function makeBazarr() {
   app.get('/api/system/languages/profiles', (req, res) => res.json(profiles));
 
   // ---- Actions (demo: mutate state so the UI feels live) ----
-  // Search subtitles for a wanted episode -> "download" it (move to history).
-  app.patch('/api/episodes', (req, res) => {
-    const epId = Number(req.query.episodeid || (req.body && req.body.episodeid));
-    const item = wantedEpisodes.find((w) => w.sonarrEpisodeId === epId);
-    if (item) {
-      const lang = item.missing_subtitles[0] || L.en;
-      wantedEpisodes = wantedEpisodes.filter((w) => w.sonarrEpisodeId !== epId);
+  // Subtitle searches. These mirror real Bazarr: PATCH /api/movies and
+  // /api/series need an `action` (400 "Unknown action" otherwise),
+  // /api/episodes is GET-only (405), and a single episode language is fetched
+  // with PATCH /api/episodes/subtitles (seriesid, episodeid, language, forced,
+  // hi all required).
+  const historyText = (lang) => `${lang.name} subtitles manually downloaded from OpenSubtitles.com with a score of 100%.`;
+  const sameLang = (a, b) => a.code2 === b.code2 && !!a.forced === !!b.forced && !!a.hi === !!b.hi;
+  function fetchEpisodeSub(item, lang) {
+    item.missing_subtitles = (item.missing_subtitles || []).filter((x) => !sameLang(x, lang));
+    if (!item.missing_subtitles.length) {
+      wantedEpisodes = wantedEpisodes.filter((w) => w !== item);
       const s = series.find((x) => x.sonarrSeriesId === item.sonarrSeriesId);
       if (s && s.episodeMissingCount > 0) s.episodeMissingCount -= 1;
-      seriesHistory.unshift({ action: 2, timestamp: new Date().toISOString(), description: `${lang.name} subtitles manually downloaded from OpenSubtitles.com with a score of 100%.`, language: lang, provider: 'opensubtitlescom', score: '100%', seriesTitle: item.seriesTitle, episode_number: item.episode_number, episodeTitle: item.episodeTitle, sonarrSeriesId: item.sonarrSeriesId, sonarrEpisodeId: epId });
     }
-    res.json({});
+    seriesHistory.unshift({ action: 2, timestamp: new Date().toISOString(), description: historyText(lang), language: { name: lang.name, code2: lang.code2, code3: lang.code3 }, provider: 'opensubtitlescom', score: '100%', seriesTitle: item.seriesTitle, episode_number: item.episode_number, episodeTitle: item.episodeTitle, sonarrSeriesId: item.sonarrSeriesId, sonarrEpisodeId: item.sonarrEpisodeId });
+  }
+  function fetchMovieSubs(item) {
+    wantedMovies = wantedMovies.filter((w) => w !== item);
+    const m = movies.find((x) => x.radarrId === item.radarrId);
+    for (const lang of item.missing_subtitles || []) {
+      if (m) { m.subtitles = [...(m.subtitles || []), have(lang.code2, `${m.path}/subtitle.${lang.code2}.srt`)]; m.missing_subtitles = (m.missing_subtitles || []).filter((x) => x.code2 !== lang.code2); }
+      movieHistory.unshift({ action: 2, timestamp: new Date().toISOString(), description: historyText(lang), language: { name: lang.name, code2: lang.code2, code3: lang.code3 }, provider: 'opensubtitlescom', score: '100%', title: item.title, radarrId: item.radarrId });
+    }
+  }
+  const fetchSeriesSubs = (seriesId) => {
+    for (const item of wantedEpisodes.filter((w) => w.sonarrSeriesId === seriesId)) {
+      for (const lang of [...(item.missing_subtitles || [])]) fetchEpisodeSub(item, lang);
+    }
+  };
+  app.patch('/api/episodes', (req, res) => res.status(405).json({ message: 'The method is not allowed for the requested URL.' }));
+  app.patch('/api/episodes/subtitles', (req, res) => {
+    const { seriesid, episodeid, language, forced, hi } = req.query;
+    if ([seriesid, episodeid, language, forced, hi].some((v) => v === undefined || v === '')) {
+      return res.status(400).json({ message: 'seriesid, episodeid, language, forced and hi are required' });
+    }
+    const item = wantedEpisodes.find((w) => w.sonarrSeriesId === Number(seriesid) && w.sonarrEpisodeId === Number(episodeid));
+    if (!item) return res.status(404).send('Episode not found');
+    const want = { code2: language, forced: /^true$/i.test(forced), hi: /^true$/i.test(hi) };
+    const lang = (item.missing_subtitles || []).find((x) => sameLang(x, want));
+    if (lang) fetchEpisodeSub(item, lang);
+    res.status(204).end();
   });
-  // Search subtitles for a wanted movie -> "download" it.
+  app.patch('/api/series', (req, res) => {
+    const { action } = req.query;
+    if (action === 'search-missing') fetchSeriesSubs(Number(req.query.seriesid));
+    else if (action === 'search-wanted') for (const id of [...new Set(wantedEpisodes.map((w) => w.sonarrSeriesId))]) fetchSeriesSubs(id);
+    else if (action !== 'scan-disk' && action !== 'sync') return res.status(400).send('Unknown action');
+    res.status(204).end();
+  });
   app.patch('/api/movies', (req, res) => {
-    const rid = Number(req.query.radarrid || (req.body && req.body.radarrid));
-    const item = wantedMovies.find((w) => w.radarrId === rid);
-    if (item) {
-      const lang = item.missing_subtitles[0] || L.en;
-      wantedMovies = wantedMovies.filter((w) => w.radarrId !== rid);
-      const m = movies.find((x) => x.radarrId === rid);
-      if (m) { m.subtitles = [...(m.subtitles || []), have(lang.code2, `${m.path}/subtitle.${lang.code2}.srt`)]; m.missing_subtitles = (m.missing_subtitles || []).filter((s) => s.code2 !== lang.code2); }
-      movieHistory.unshift({ action: 2, timestamp: new Date().toISOString(), description: `${lang.name} subtitles manually downloaded from OpenSubtitles.com with a score of 100%.`, language: lang, provider: 'opensubtitlescom', score: '100%', title: item.title, radarrId: rid });
-    }
-    res.json({});
+    const { action } = req.query;
+    if (action === 'search-missing') { const item = wantedMovies.find((w) => w.radarrId === Number(req.query.radarrid)); if (item) fetchMovieSubs(item); }
+    else if (action === 'search-wanted') for (const item of [...wantedMovies]) fetchMovieSubs(item);
+    else if (action !== 'scan-disk' && action !== 'sync') return res.status(400).send('Unknown action');
+    res.status(204).end();
   });
   // Manual subtitle download (from the "search available" modal).
   app.post('/api/subtitles', (req, res) => res.json({}));
@@ -1386,4 +1416,4 @@ export function startMockServices() {
 }
 
 // Exposed for tests (in-process, ephemeral ports).
-export { makeSonarr as _makeSonarrMock, makeRadarr as _makeRadarrMock };
+export { makeSonarr as _makeSonarrMock, makeRadarr as _makeRadarrMock, makeBazarr as _makeBazarrMock };

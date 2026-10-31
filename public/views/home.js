@@ -1,5 +1,6 @@
 import { showcaseName } from '../lib/showcase.js';
 import { listenarrStats } from './listenarr.js';
+import { tautulliDecision } from '../lib/playbackDecision.js';
 import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast, openModal, confirmModal } from '../lib/ui.js';
 import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
 import { SERVICE_META, attachLongPress, openServiceQuickActions, openInArr } from '../app.js';
@@ -508,12 +509,12 @@ async function hydrateStreams(ctx) {
     // Hexagons size → flowing poster-hex honeycomb (like the Tautulli page); otherwise a list.
     if (hex) {
       const cards = items.map(({ svc, s }) => {
-        const isTranscode = (s.transcode_decision || '').toLowerCase().includes('transcode');
+        const decision = tautulliDecision(s.transcode_decision);
         return posterHexCard({
           posterUrl: proxyPoster(svc, s, 300, 450),
           title: s.full_title || s.title,
           sub: `${showcaseName(s.friendly_name || s.user || 'unknown')} · ${s.state || 'playing'}`,
-          pills: [{ label: isTranscode ? 'Transcode' : 'Direct Play', cls: isTranscode ? 'warn' : 'ok' }],
+          pills: [{ label: decision.label, cls: decision.cls }],
           progress: Number(s.progress_percent) || 0,
           onClick: () => goTo(svc.key, 'streams'),
         });
@@ -523,10 +524,10 @@ async function hydrateStreams(ctx) {
     }
 
     const rows = items.map(({ svc, s }) => {
-      const isTranscode = (s.transcode_decision || '').toLowerCase().includes('transcode');
+      const decision = tautulliDecision(s.transcode_decision);
       return activityRow({
         posterUrl: proxyPoster(svc, s, 80, 80), title: s.full_title || s.title,
-        sub: `${showcaseName(s.friendly_name || s.user || 'unknown')} · ${s.state || 'playing'} · ${isTranscode ? 'Transcode' : 'Direct Play'}`,
+        sub: `${showcaseName(s.friendly_name || s.user || 'unknown')} · ${s.state || 'playing'} · ${decision.label}`,
         progress: Number(s.progress_percent) || 0,
         nav: { key: svc.key, tab: 'streams' },
       });

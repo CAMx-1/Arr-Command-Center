@@ -73,7 +73,7 @@ async function sessionsTab(root, media, ctx) {
         session.image ? poster(session.image, '▶') : h('div', { class: 'poster' }, '▶'),
         h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, session.title), h('div', { class: 'meta-line' },
           h('span', { class: `pill ${session.state === 'playing' ? 'ok' : 'warn'}` }, session.state), h('span', {}, session.user), h('span', {}, session.client || session.device),
-          h('span', { class: `pill ${session.transcode ? 'warn' : 'ok'}` }, session.transcode ? 'Transcode' : 'Direct Play'), session.videoCodec ? h('span', {}, session.videoCodec) : null),
+          h('span', { class: `pill ${session.transcode ? 'warn' : 'ok'}` }, session.playMethod || (session.transcode ? 'Transcode' : 'Direct Play')), session.videoCodec ? h('span', {}, session.videoCodec) : null),
           h('div', { class: 'progress' }, h('span', { style: { width: pct(session.progress) } }))),
       ))));
     } catch (error) { if (!silent) mount(wrap, empty('⚠️', 'Failed to load sessions', error.message)); }

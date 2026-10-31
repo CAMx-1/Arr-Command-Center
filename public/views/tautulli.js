@@ -3,6 +3,7 @@ import { h, mount, tabs, spinner, skeletonList, empty, pct, poster, toast, timeE
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { barChart } from '../lib/charts.js';
+import { tautulliDecision } from '../lib/playbackDecision.js';
 
 export async function renderTautulli(root, ctx) {
   const svc = ctx.service;
@@ -118,7 +119,7 @@ function stateInfo(state) {
 
 function streamListRow(s, tau, svcKey, reload) {
   const st = stateInfo(s.state);
-  const isTranscode = (s.transcode_decision || '').toLowerCase().includes('transcode');
+  const decision = tautulliDecision(s.transcode_decision);
   const progress = Number(s.progress_percent) || 0;
   const resRaw = s.stream_video_resolution || s.video_resolution || '';
   const res = /^\d+$/.test(resRaw) ? `${resRaw}p` : resRaw;
@@ -131,7 +132,7 @@ function streamListRow(s, tau, svcKey, reload) {
         h('span', { class: `pill ${st.cls}` }, s.state || 'unknown'),
         h('span', {}, `${showcaseName(s.friendly_name || s.user || 'unknown')}`),
         h('span', {}, s.player || ''),
-        h('span', { class: `pill ${isTranscode ? 'warn' : 'ok'}` }, isTranscode ? 'Transcode' : 'Direct Play'),
+        h('span', { class: `pill ${decision.cls}` }, decision.label),
         res ? h('span', {}, res) : null,
       ),
       h('div', { class: 'progress' }, h('span', { style: { width: pct(progress) } })),
@@ -143,12 +144,12 @@ function streamListRow(s, tau, svcKey, reload) {
 }
 
 function streamHex(s, tau, svcKey, reload) {
-  const isTranscode = (s.transcode_decision || '').toLowerCase().includes('transcode');
+  const decision = tautulliDecision(s.transcode_decision);
   const progress = Number(s.progress_percent) || 0;
   const overlay = h('div', { class: 'hx-overlay' },
     h('div', { class: 'hx-title' }, s.full_title || s.title),
     h('div', { class: 'hx-sub' }, `${showcaseName(s.friendly_name || s.user || 'unknown')} · ${s.state || ''}`),
-    h('span', { class: `pill ${isTranscode ? 'warn' : 'ok'}` }, isTranscode ? 'Transcode' : 'Direct Play'),
+    h('span', { class: `pill ${decision.cls}` }, decision.label),
     h('div', { class: 'progress' }, h('span', { style: { width: pct(progress) } })),
     h('div', { class: 'row-actions' },
       h('button', { class: 'btn sm danger', title: 'Stop this stream', onclick: (e) => { e.stopPropagation(); confirmStop(s, tau, reload); } }, '⏹ Stop'),

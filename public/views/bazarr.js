@@ -3,6 +3,7 @@ import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet } from '../lib/cache.js';
+import { movieSearchPath, seriesSearchPath, episodeSearchPaths, SEARCH_ALL_WANTED_PATHS } from '../lib/bazarrSearch.js';
 
 // Bazarr (subtitle manager) panel. Mirrors the Sonarr/Radarr/Prowlarr layout:
 // tabbed sections, a Hex/List toggle, stat-hex headers, and a filter bar that
@@ -211,7 +212,7 @@ function seriesRow(s, bz, profileMap, reload) {
 async function searchSeries(s, bz, reload) {
   toast(`Searching subtitles for ${s.title}…`, 'info', 1500);
   try {
-    await bz.patch(`series?seriesid=${s.sonarrSeriesId}`);
+    await bz.patch(seriesSearchPath(s.sonarrSeriesId));
     toast(`Subtitle search queued for ${s.title}`, 'success');
     if (reload) reload();
   } catch (e) { toast(e.message || 'Search failed', 'error'); }
@@ -301,7 +302,7 @@ function movieRow(m, bz, profileMap, reload) {
 async function searchMovie(m, bz, reload) {
   toast(`Searching subtitles for ${m.title}…`, 'info', 1500);
   try {
-    await bz.patch(`movies?radarrid=${m.radarrId}`);
+    await bz.patch(movieSearchPath(m.radarrId));
     toast(`Subtitle search queued for ${m.title}`, 'success');
     if (reload) reload();
   } catch (e) { toast(e.message || 'Search failed', 'error'); }
@@ -331,8 +332,10 @@ async function tabWanted(root, ctx, bz) {
     const searchAll = h('button', { class: 'btn sm primary', onclick: async () => {
       toast('Searching all wanted subtitles…', 'info', 1800);
       try {
-        for (const e of eps) await bz.patch(`episodes?episodeid=${e.sonarrEpisodeId}`);
-        for (const m of mvs) await bz.patch(`movies?radarrid=${m.radarrId}`);
+        // Bazarr's own wanted-search actions: one request per side.
+        const [seriesAll, moviesAll] = SEARCH_ALL_WANTED_PATHS;
+        if (eps.length) await bz.patch(seriesAll);
+        if (mvs.length) await bz.patch(moviesAll);
         toast('Subtitle search queued for all wanted items', 'success');
         reload();
       } catch (err) { toast(err.message || 'Search failed', 'error'); }
@@ -367,7 +370,7 @@ function wantedEpisodeRow(e, bz, reload) {
     h('div', { class: 'row-actions' },
       h('button', { class: 'btn sm primary', title: 'Auto-search & download best subtitle', onclick: async () => {
         toast('Searching subtitles…', 'info', 1200);
-        try { await bz.patch(`episodes?episodeid=${e.sonarrEpisodeId}`); toast('Subtitle search complete', 'success'); reload(); }
+        try { for (const path of episodeSearchPaths(e)) await bz.patch(path); toast('Subtitle search complete', 'success'); reload(); }
         catch (err) { toast(err.message || 'Search failed', 'error'); }
       } }, 'Search'),
       h('button', { class: 'btn sm', title: 'Browse providers and pick a subtitle', onclick: () => openManualSearch(bz, 'episode', e, reload) }, 'Manual'),
@@ -389,7 +392,7 @@ function wantedMovieRow(m, bz, reload) {
     h('div', { class: 'row-actions' },
       h('button', { class: 'btn sm primary', title: 'Auto-search & download best subtitle', onclick: async () => {
         toast('Searching subtitles…', 'info', 1200);
-        try { await bz.patch(`movies?radarrid=${m.radarrId}`); toast('Subtitle search complete', 'success'); reload(); }
+        try { await bz.patch(movieSearchPath(m.radarrId)); toast('Subtitle search complete', 'success'); reload(); }
         catch (err) { toast(err.message || 'Search failed', 'error'); }
       } }, 'Search'),
       h('button', { class: 'btn sm', title: 'Browse providers and pick a subtitle', onclick: () => openManualSearch(bz, 'movie', m, reload) }, 'Manual'),
