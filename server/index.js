@@ -10,7 +10,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, publicConfig, localFallbackConfig, ALLOWED_SERVICE_TYPES, saveServiceToDisk, removeServiceFromDisk, isInsecureExposure, buildServiceUpdate } from './config.js';
-import { createProxyRouter, pingService, serviceRequest } from './proxy.js';
+import { createProxyRouter, pingService, serviceRequest, serviceGet } from './proxy.js';
 import { startMockServices } from './mock/mockServices.js';
 import { createPlexAuth } from './plexAuth.js';
 import * as store from './store.js';
@@ -26,6 +26,8 @@ import { createStatusCache } from './statusCache.js';
 import { createUptimeTracker } from './uptime.js';
 import { createActionTokens } from './actionTokens.js';
 import { safeEqual, createAuthLimiter } from './authGuard.js';
+import { createRoleGuard, mountUserRoutes } from './roleRoutes.js';
+import { createLiveHub } from './live.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -203,6 +205,11 @@ const plexAuth = createPlexAuth(cfg, { root: ROOT, publicDir: PUBLIC_DIR });
 app.use('/api/auth', plexAuth.router);
 app.use(plexAuth.middleware);
 if (plexAuth.enabled) console.log('[startup] Plex authentication is ENABLED.');
+// Roles: every /api request is checked against the caller's role (admin /
+// user / guest). Without Plex sign-in everyone is an admin.
+const roleGuard = createRoleGuard(plexAuth);
+app.use(roleGuard.app);
+mountUserRoutes(app, plexAuth, { plex, cfg });
 
 // Fail closed: refuse to expose the secret-injecting proxy on a public
 // interface with no authentication (unless explicitly opted in).
@@ -223,7 +230,7 @@ if (!localOnly && !anyAuth) {
 }
 
 // Public (secret-free) config for the frontend.
-app.get('/api/config', (req, res) => res.json({ ...publicConfig(cfg), buildId: BUILD_ID, auth: { plexEnabled: plexAuth.enabled, user: req.plexUser || null } }));
+app.get('/api/config', (req, res) => res.json({ ...publicConfig(cfg), buildId: BUILD_ID, auth: { plexEnabled: plexAuth.enabled, user: req.plexUser || null, role: plexAuth.roleOf(req) } }));
 
 // Explicit credential-bearing export for the native local-fallback feature.
 // Authentication middleware above protects this route; normal /api/config and
@@ -509,7 +516,11 @@ app.get('/api/plex/image', async (req, res) => {
 });
 
 // The proxy (handles its own raw body parsing).
-app.use('/api/proxy', createProxyRouter(cfg));
+app.use('/api/proxy', createProxyRouter(cfg, { authorize: roleGuard.proxy }));
+
+// Live updates (Server-Sent Events) for download queues and now-playing.
+const liveHub = createLiveHub({ getService: (key) => cfg.services[key], fetchJson: (svc, p) => serviceGet(svc, p, { timeout: 8000 }) });
+app.get('/api/live/:service', liveHub.handler(roleGuard.read));
 
 // ---- Add / edit / remove a service (writes config.json). Behind auth. ----
 // Note: this persists API keys / Cloudflare tokens to config.json on the server.

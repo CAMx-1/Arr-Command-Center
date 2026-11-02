@@ -1,4 +1,6 @@
 import { getAddDefaults, setAddDefaults, initialAddChoices } from '../lib/addDefaults.js';
+import { liveRefresh } from '../lib/live.js';
+import { collapseSeasonDrops } from '../lib/seasonDrops.js';
 import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, autoRefresh, swipeToAction, rootFolderLabel } from '../lib/ui.js';
 import { openDetailModal, openArrFileInfo } from './detail.js';
 import { openReleaseSearch } from './releaseSearch.js';
@@ -146,7 +148,7 @@ function seriesHex(s, arr, ctx) {
   const url = img && (img.remoteUrl || img.url);
   const rating = s.ratings && s.ratings.value;
   const actions = actionGroup([
-    { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, true, s, arr) },
+    { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, true, s, arr, ctx) },
     { label: 'Seasons', title: 'Seasons & episodes', onClick: () => openSeasonBrowser(arr, ctx, s) },
     { label: 'Search', title: 'Interactive search', primary: true, onClick: () => openInteractive(ctx, arr, s) },
     { label: 'Auto', title: 'Automatic search', onClick: async () => {
@@ -193,7 +195,7 @@ function seriesRow(s, arr, ctx) {
       stats.episodeCount ? h('div', { class: 'progress' }, h('span', { style: { width: pct(stats.percentOfEpisodes ?? 0) } })) : null,
     ),
     actionGroup([
-      { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, true, s, arr) },
+      { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, true, s, arr, ctx) },
       { label: 'Seasons', title: 'Seasons & episodes', onClick: () => openSeasonBrowser(arr, ctx, s) },
       { label: 'Interactive', title: 'Interactive search', primary: true, onClick: () => openInteractive(ctx, arr, s) },
       { label: 'Auto', title: 'Automatic search', onClick: async () => {
@@ -213,10 +215,34 @@ async function tabCalendar(root, arr) {
     const items = await arr.get(`calendar?start=${start.toISOString()}&end=${end.toISOString()}&includeSeries=true`);
     if (!items.length) return mount(root, empty('', 'Nothing scheduled', 'No upcoming episodes in the next 4 weeks'));
     items.sort((a, b) => new Date(a.airDateUtc) - new Date(b.airDateUtc));
-    mount(root, h('div', { class: 'list' }, ...items.map(calRow)));
+    const rows = collapseSeasonDrops(items.map((e) => ({
+      when: e.airDateUtc, raw: e, svc: { key: 'self' }, filterTitle: (e.series && e.series.title) || '',
+      episode: { seriesId: e.seriesId, seriesTitle: (e.series && e.series.title) || e.title, seasonNumber: e.seasonNumber, episodeNumber: e.episodeNumber },
+    })));
+    mount(root, h('div', { class: 'list' }, ...rows.map((r) => (r.collapsed ? calDropRow(r) : calRow(r.raw)))));
   } catch (err) {
     mount(root, empty('', 'Failed to load calendar', err.message));
   }
+}
+
+// A whole season (or a run of episodes) released on one day.
+function calDropRow(r) {
+  const eps = r.collapsed.map((x) => x.raw);
+  const done = eps.filter((e) => e.hasFile).length;
+  return h('div', { class: 'row' },
+    h('div', { class: 'poster', style: { width: '54px', height: '54px', fontSize: '13px', flexDirection: 'column' } },
+      h('div', { style: { fontWeight: '700' } }, `S${String(r.episode.seasonNumber).padStart(2, '0')}`),
+      h('div', {}, `×${eps.length}`),
+    ),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title' }, r.episode.seriesTitle),
+      h('div', { class: 'row-sub' }, `${r.title.split(' · ').pop()} · ${r.sub}`),
+      h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+        h('span', {}, fmtDate(r.when), ' · ', fmtRelative(r.when)),
+        done === eps.length ? h('span', { class: 'pill ok' }, 'Downloaded') : done ? h('span', { class: 'pill info' }, `${done}/${eps.length} downloaded`) : h('span', { class: 'pill warn' }, 'Pending'),
+      ),
+    ),
+  );
 }
 
 function calRow(e) {
@@ -255,7 +281,7 @@ async function tabQueue(root, arr, ctx) {
     }
   };
   await load(false);
-  autoRefresh(wrap, 5000, () => load(true));
+  liveRefresh(wrap, ctx.service, 5000, () => load(true));
 }
 
 // Surface stalled/failed downloads as a banner (and emit to the notifications

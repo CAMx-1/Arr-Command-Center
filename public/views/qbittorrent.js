@@ -132,8 +132,10 @@ function torrentMeta(t) {
   const parts = [
     `${fmtBytes(done)} / ${fmtBytes(t.size || 0)}`,
   ];
-  if ((t.progress || 0) < 1 && (t.dlspeed || 0) > 0) parts.push(`↓ ${fmtSpeed(t.dlspeed)}`);
-  if ((t.upspeed || 0) > 0) parts.push(`↑ ${fmtSpeed(t.upspeed)}`);
+  // Incomplete torrents always show both speeds (even 0) so the row doesn't
+  // reflow each time a speed starts, stops or gains a digit.
+  if ((t.progress || 0) < 1) parts.push(`↓ ${fmtSpeed(t.dlspeed)}`);
+  if ((t.progress || 0) < 1 || (t.upspeed || 0) > 0) parts.push(`↑ ${fmtSpeed(t.upspeed)}`);
   if ((t.progress || 0) < 1) parts.push(`ETA ${fmtEta(t.eta)}`);
   parts.push(`▲ ${t.num_seeds ?? 0} ▼ ${t.num_leechs ?? 0}`);
   if (t.ratio != null) parts.push(`ratio ${Number(t.ratio).toFixed(2)}`);
@@ -151,7 +153,7 @@ function torrentRow(t, qb, ctx) {
       h('div', { class: 'meta-line', style: { marginTop: '4px' } },
         h('span', { class: `pill ${s.cls}` }, s.label),
         t.category ? h('span', { class: 'pill muted' }, t.category) : null,
-        ...torrentMeta(t).map((x) => h('span', {}, x)),
+        ...torrentMeta(t).map((x) => h('span', { class: /^[↓↑] /.test(x) ? 'speed' : '' }, x)),
       ),
       h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })),
     ),

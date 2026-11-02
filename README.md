@@ -3,7 +3,8 @@
 A single, locally-hosted web dashboard to view and manage your whole media stack —
 **Sonarr**, **Radarr**, **Lidarr**, **Bindery** (with legacy **Readarr** fallback), **Overseerr/Seerr**, **SABnzbd**,
 **qBittorrent**, **Transmission**, **Deluge**, **NZBGet**, **Flood**, **Tautulli**, **Bazarr**, **Prowlarr**, **Plex**, **Jellyfin**, **Emby**,
-**Audiobookshelf**, **Autobrr**, **Maintainerr**, **Tdarr**, and any Newznab **indexer** — from one place.
+**Audiobookshelf**, **Autobrr**, **Maintainerr**, **Tdarr**, **Portainer** (read-only), **Glances**, **Pi-hole**,
+**AdGuard Home**, **Syncthing**, **Navidrome**, **Pulsarr**, **Whisparr**, and any Newznab **indexer** — from one place.
 
 Built as a self-hosted replacement for the now-discontinued **LunaSea** iOS app. Because
 it's a responsive web app, it works from your phone's browser (and you can "Add to Home
@@ -272,6 +273,24 @@ Where to find each **API key**:
 | Maintainerr | No API key — Maintainerr has no API auth, so keep it on your LAN/VPN |
 | Tdarr       | Only if server auth is enabled: Tools → API Keys |
 
+### Users and roles (Sign in with Plex)
+
+With `auth.plex.enabled`, each person who signs in has a role:
+
+| Role | Can |
+|------|-----|
+| admin | Everything: settings, services, users, logs and deleting |
+| user | Browse, request, search, grab and manage downloads. No settings, no deleting |
+| guest | Read-only |
+
+Everyone in `auth.plex.allowedUsers` is an admin, so existing setups keep full
+access. Add people and change roles in **Settings → Users & roles** (admins
+only); those entries are stored in `data/store.json`. You can also set roles in
+`config.json` with `auth.plex.roles` (for example `{ "kid@example.com": "guest" }`).
+With `allowAnyPlexUser`, people who aren't listed get `auth.plex.defaultRole`
+(default `guest`). Roles are enforced by the server on every request, and
+removing someone or changing their role takes effect on their next request.
+
 ### Migrating Readarr to Bindery
 
 Readarr was archived in June 2025. Arr Command Center keeps Readarr available as an
@@ -428,6 +447,26 @@ internal traffic typically bypasses Cloudflare Access — in that case just omit
 ---
 
 ## Features
+
+**Newer integrations** (server mode only; not available in the iOS local-only mode yet)
+- **Portainer** — environments and containers grouped by stack, with health. Read-only:
+  the proxy refuses every write, and container inspect/logs are admin-only because they
+  can contain secrets. Auth: a Portainer access token.
+- **Glances** (API v4) — CPU, memory, load, disks, temperatures from the `sensors` plugin,
+  and containers. Optional Basic auth if Glances runs with `--password`.
+- **Pi-hole v6** — queries, blocked %, top domains and clients; admins can pause blocking.
+  ACC signs in with the web or app password and reuses one session (Pi-hole limits them).
+- **AdGuard Home** — the same stats and a protection pause, using your login.
+- **Syncthing** — folder sync state, what's left to sync, devices, and a rescan button.
+- **Navidrome** — songs, album artists (credited-only people aren't counted), now playing,
+  recently added, and a library scan. Uses salted Subsonic tokens, never the raw password.
+- **Pulsarr** — approval queue (admins approve or reject) and recent watchlist requests.
+- **Whisparr v2** — uses the Sonarr screens, since it speaks the Sonarr v3 API.
+
+**Live updates** — Sonarr/Radarr/Lidarr/Readarr/Whisparr queues, SABnzbd, Tautulli and
+Jellyfin/Emby now-playing update over Server-Sent Events (`/api/live/<service>`): the server
+polls once for every viewer and only signals real changes. Other views, and the iOS
+local-only mode, keep polling.
 
 **Unified dashboard**
 - **Overview** — live status of every service, versions, quick stats, and a filterable

@@ -572,6 +572,10 @@ html[data-theme="dark"] .hex-disk-fill {
 
 /* meta line */
 .meta-line { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; color: var(--text-dim); font-size: 12px; }
+/* Transfer speeds: fixed-width digits and room for "↓ 999.9 MB/s", so rows
+   don't jump or wrap as the numbers change. */
+.meta-line .speed { font-variant-numeric: tabular-nums; white-space: nowrap; display: inline-block; min-width: 12.5ch; }
+.stat-value { font-variant-numeric: tabular-nums; }
 .meta-line b { color: var(--text); font-weight: 700; }
 
 /* empty & loading */
@@ -1606,3 +1610,14 @@ html[data-black] .hex-cell.hex-system .hex-face { background: linear-gradient(16
 .wp-item:not(:has(img)) { padding-left: 10px; }
 .wp-more { font-size: 12px; justify-self: start; }
 @media (max-width: 720px) { .detail-extra { padding: 12px 4px 0; } }
+
+/* ---------- iPadOS 26 window controls ----------
+   The native app sets --acc-wc-left/right (and .has-window-controls) when the
+   close/minimise/resize controls overlay the window's top-left corner. Push
+   the sidebar's first hex below them, and keep the top bar's first item clear
+   when the sidebar is hidden (narrow windows). */
+:root { --acc-wc-left: 0px; --acc-wc-right: 0px; }
+.has-window-controls #sidebar { padding-top: calc(env(safe-area-inset-top) + 34px); }
+@media (max-width: 720px) {
+  .has-window-controls #topbar { padding-left: max(14px, env(safe-area-inset-left), calc(var(--acc-wc-left) + 8px)); }
+}

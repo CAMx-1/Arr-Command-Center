@@ -15,6 +15,8 @@ import { dashboardSettingsCard } from '../lib/dashboardSettings.js';
 import { getSysmonPrefs, setSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
 import { getAppMode, setAppMode, isLocalMode, getConnection, getConnections, setConnection, removeConnection, LOCAL_SERVICE_DEFS, localServiceDef } from '../lib/connections.js';
 import { normalizeCustomHeaders } from '../lib/customHeaders.js';
+import { normalizeRpcPath, DEFAULT_RPC_PATH } from '../lib/transmissionPath.js';
+import { usersRolesCard, currentRole, ROLE_INFO } from '../lib/usersRoles.js';
 import { quickAddSettingsCard } from '../lib/quickAddSettings.js';
 import { channelsCard } from '../lib/notifyChannels.js';
 import { hydrateUptime } from '../lib/uptimeBars.js';
@@ -34,6 +36,12 @@ export async function renderSettings(root, ctx) {
 
   const cfg = state.config || { services: {} };
   const localMode = isLocalMode();
+  // Non-admins (Sign in with Plex roles) keep their own device preferences but
+  // not the server's settings, credentials, users or logs. The server enforces
+  // this too; hiding the cards just avoids buttons that would be refused.
+  const role = localMode ? 'admin' : currentRole(cfg);
+  const admin = role === 'admin';
+  const plexAuth = !localMode && cfg.auth && cfg.auth.plexEnabled;
 
   const general = h('div', { class: 'card' },
     h('h3', {}, 'General'),
@@ -43,6 +51,7 @@ export async function renderSettings(root, ctx) {
     (cfg.auth && cfg.auth.plexEnabled)
       ? settingRow('Signed in as', h('span', {},
           h('span', { style: { marginRight: '10px' } }, cfg.auth.user || 'unknown'),
+          h('span', { class: `pill ${role === 'admin' ? 'ok' : role === 'user' ? 'info' : 'muted'}`, title: ROLE_INFO[role], style: { marginRight: '10px' } }, role),
           h('button', { class: 'btn sm', onclick: () => confirmModal({
             title: 'Sign out',
             message: 'Are you sure you want to sign out?',
@@ -126,7 +135,7 @@ export async function renderSettings(root, ctx) {
         h('span', { class: 'svc-favorite-star', 'aria-hidden': 'true' }, favorite ? '★' : '☆'),
         favorite ? 'Favorited' : 'Add to bottom bar'),
         (st && !st.ok) ? h('button', { class: 'btn sm', title: 'Re-check connection', onclick: () => renderSettings(root, ctx) }, '↻ Retry') : null,
-        cfg.mock ? null : h('button', { class: 'btn sm', onclick: () => openServiceForm(root, ctx, svc.key, svc) }, 'Edit'),
+        (cfg.mock || !admin) ? null : h('button', { class: 'btn sm', onclick: () => openServiceForm(root, ctx, svc.key, svc) }, 'Edit'),
         h('button', { class: `btn sm ${hidden ? 'primary' : ''}`, onclick: () => { setHidden(svc.key, !hidden); ctx.reload(); } }, hidden ? 'Show' : 'Hide'),
       ),
       (st && !st.ok && st.error) ? h('div', { class: 'release-reject', style: { marginTop: '8px' } }, st.error) : null,
@@ -167,36 +176,38 @@ export async function renderSettings(root, ctx) {
     dashboardSettingsCard(ctx),
     h('div', { class: 'section-title', id: 'settings-notifications' }, 'Notifications'),
     localMode ? serverOnlyCard('Notifications') : h('div', { class: 'card', id: 'push-panel' }, h('div', { class: 'dim' }, 'Loading…')),
-    localMode ? null : channelsCard(),
-    h('div', { class: 'section-title' }, 'Automation'),
-    localMode ? serverOnlyCard('Automation') : h('div', { class: 'card', id: 'automation-panel' }, h('div', { class: 'dim' }, 'Loading…')),
+    (localMode || !admin) ? null : channelsCard(),
+    admin ? h('div', { class: 'section-title' }, 'Automation') : null,
+    localMode ? serverOnlyCard('Automation') : admin ? h('div', { class: 'card', id: 'automation-panel' }, h('div', { class: 'dim' }, 'Loading…')) : null,
+    (plexAuth && admin) ? h('div', { class: 'section-title', id: 'settings-users' }, 'Users & roles') : null,
+    (plexAuth && admin) ? usersRolesCard() : null,
     h('div', { class: 'section-title', id: 'settings-services' }, 'Services'),
     h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', margin: '-4px 0 12px' } },
       h('div', { class: 'dim', style: { fontSize: '13px', flex: '1' } }, (localMode ? 'Manage local connections under “Connection” above. Drag a service card to reorder it, or Hide it from the sidebar and Home.' : 'Drag a service card to reorder it, and use Hide to remove one from the sidebar and Home (it stays configured and reachable directly).') + ' Add up to four favorites to the mobile bottom bar.'),
-      (cfg.mock || localMode) ? null : h('button', { class: 'btn sm primary hex-btn', onclick: () => openServiceForm(root, ctx, null, null) }, '+ Add service'),
+      (cfg.mock || localMode || !admin) ? null : h('button', { class: 'btn sm primary hex-btn', onclick: () => openServiceForm(root, ctx, null, null) }, '+ Add service'),
     ),
     h('div', { class: 'grid cols-2' }, ...serviceCards),
     h('div', { class: 'section-title' }, 'About'),
     note,
-    h('div', { class: 'section-title', id: 'settings-diagnostics' }, 'Server diagnostics'),
-    localMode ? serverOnlyCard('Server diagnostics') : h('div', { class: 'card', id: 'diag-panel' }, h('div', { class: 'dim' }, 'Loading diagnostics…')),
-    h('div', { class: 'section-title' }, 'Custom Links'),
-    localMode ? serverOnlyCard('Custom Links') : h('div', { class: 'card', id: 'links-admin' }, h('div', { class: 'dim' }, 'Loading…')),
-    (!localMode && cfg.auth && cfg.auth.plexEnabled) ? h('div', { class: 'section-title' }, 'Login log') : null,
-    (!localMode && cfg.auth && cfg.auth.plexEnabled) ? h('div', { class: 'card', id: 'loginlog-panel' }, h('div', { class: 'dim' }, 'Loading…')) : null,
+    admin ? h('div', { class: 'section-title', id: 'settings-diagnostics' }, 'Server diagnostics') : null,
+    localMode ? serverOnlyCard('Server diagnostics') : admin ? h('div', { class: 'card', id: 'diag-panel' }, h('div', { class: 'dim' }, 'Loading diagnostics…')) : null,
+    admin ? h('div', { class: 'section-title' }, 'Custom Links') : null,
+    localMode ? serverOnlyCard('Custom Links') : admin ? h('div', { class: 'card', id: 'links-admin' }, h('div', { class: 'dim' }, 'Loading…')) : null,
+    (plexAuth && admin) ? h('div', { class: 'section-title' }, 'Login log') : null,
+    (plexAuth && admin) ? h('div', { class: 'card', id: 'loginlog-panel' }, h('div', { class: 'dim' }, 'Loading…')) : null,
   );
 
   hydrateMobileAppPanel(ctx);
   hydrateUptime(root);
   hydrateAppLockPanel();
-  if (!localMode) hydrateLocalFallbackPanel(ctx);
+  if (!localMode && admin) hydrateLocalFallbackPanel(ctx);
 
-  if (!localMode) hydrateDiagnostics(ctx);
-  if (!localMode) hydrateLinksAdmin(ctx);
+  if (!localMode && admin) hydrateDiagnostics(ctx);
+  if (!localMode && admin) hydrateLinksAdmin(ctx);
   if (!localMode) hydrateNotifications(ctx);
-  if (!localMode) hydrateAutomation();
+  if (!localMode && admin) hydrateAutomation();
   if (!localMode) hydrateSystemMonitor(ctx);
-  if (!localMode && cfg.auth && cfg.auth.plexEnabled) hydrateLoginLog(ctx);
+  if (plexAuth && admin) hydrateLoginLog(ctx);
 }
 
 function settingsJumpNav() {
@@ -814,6 +825,7 @@ function localConnectionsPanel(root, ctx) {
   const password = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Password' });
   const cfId = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'CF-Access-Client-Id (optional)' });
   const cfSecret = h('input', { class: 'input', type: 'password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'CF-Access-Client-Secret (optional)' });
+  const rpcPath = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: DEFAULT_RPC_PATH });
   const status = h('div', { class: 'dim', style: { fontSize: '12px', minHeight: '16px', margin: '2px 0' } });
   const typeSel = h('select', { class: 'input' }, ...defs.map((d) => h('option', { value: d.type }, d.name)));
 
@@ -832,6 +844,7 @@ function localConnectionsPanel(root, ctx) {
     password.value = c.password || '';
     cfId.value = c.cfClientId || '';
     cfSecret.value = c.cfClientSecret || '';
+    rpcPath.value = c.rpcPath || '';
     status.textContent = '';
   };
   const selectType = (t) => { typeSel.value = t; fill(t); updateCredentialFields(); typeSel.scrollIntoView({ block: 'nearest' }); };
@@ -852,6 +865,7 @@ function localConnectionsPanel(root, ctx) {
       cfClientId: (cfId.value || '').trim(),
       cfClientSecret: (cfSecret.value || '').trim(),
       customHeaders: parseCustomHeadersInput(customHeaders.value),
+      ...(t === 'transmission' ? { rpcPath: normalizeRpcPath(rpcPath.value) } : {}),
     };
   };
   const credentialError = (c) => {
@@ -916,6 +930,7 @@ function localConnectionsPanel(root, ctx) {
   const usernameField = field('Username', username);
   const passwordField = field('Password', password);
   const credentialHint = h('div', { class: 'dim', style: { fontSize: '11px', margin: '-2px 0 6px' } });
+  const rpcPathField = h('div', {}, field('RPC path', rpcPath), h('div', { class: 'dim', style: { fontSize: '11px', margin: '-2px 0 6px' } }, 'Leave as /transmission/rpc unless Transmission’s rpc-url or your seedbox uses another path (e.g. /rpc).'));
   // Show username/password only for services whose def declares a credentialMode
   // (transmission = optional basic, deluge = password only, nzbget = basic).
   const updateCredentialFields = () => {
@@ -932,6 +947,7 @@ function localConnectionsPanel(root, ctx) {
           ? (d.type === 'flood' ? 'Use your Flood login username and password.' : 'Use the NZBGet ControlUsername and ControlPassword.')
           : '';
     keyField.style.display = (d.keyMode === 'none' || mode) ? 'none' : '';
+    rpcPathField.style.display = d.type === 'transmission' ? '' : 'none';
     keyHintEl.textContent = d.keyMode === 'none' ? '' : d.keyMode === 'optional' ? 'Optional — only needed if the service has API authentication enabled.' : '';
   };
 
@@ -954,6 +970,7 @@ function localConnectionsPanel(root, ctx) {
       usernameField,
       passwordField,
       credentialHint,
+      rpcPathField,
       field('Cloudflare Access — Client Id', cfId),
       field('Cloudflare Access — Client Secret', cfSecret),
       field('Custom headers (JSON)', customHeaders),
@@ -1165,13 +1182,17 @@ async function hydrateNotifications(ctx) {
   render();
 }
 
-const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex'];
+const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex', 'portainer', 'glances', 'pihole', 'adguard', 'syncthing', 'navidrome', 'pulsarr', 'whisparr'];
 // Where to find the API key / what auth each newer integration expects.
 const SERVICE_KEY_HINTS = {
   autobrr: 'Autobrr → Settings → API keys (sent as X-API-Token).',
   listenarr: 'Listenarr → Settings → General → API key (default port 4545). Listenarr is pre-1.0 beta, so some screens may change.',
   audiobookshelf: 'Audiobookshelf → Settings → API Keys (v2.26+), or your user API token.',
   tdarr: 'Only needed if Tdarr server auth is enabled (Tools → API Keys).',
+  portainer: 'Portainer → My account → Access tokens (sent as X-API-Key). Arr Command Center only reads from Portainer.',
+  syncthing: 'Syncthing → Actions → Settings → General → API Key.',
+  pulsarr: 'Pulsarr → System → API keys (sent as X-API-Key).',
+  whisparr: 'Whisparr v2 → Settings → General → API Key.',
   maintainerr: 'Maintainerr has no API authentication; leave blank. Keep it off the public internet and rely on ACC’s own login.',
 };
 
@@ -1195,9 +1216,11 @@ function openServiceForm(root, ctx, existingKey, existing) {
   const cfId = h('input', { class: 'input', placeholder: existing && existing.hasCloudflareAccess ? '•••• (leave blank to keep)' : 'CF-Access-Client-Id (optional)' });
   const cfSecret = h('input', { class: 'input', type: 'password', placeholder: existing && existing.hasCloudflareAccess ? '•••• (leave blank to keep)' : 'CF-Access-Client-Secret (optional)' });
   const customHeaders = h('textarea', { class: 'input', rows: '5', spellcheck: 'false', placeholder: existing && existing.hasCustomHeaders ? '•••• (leave blank to keep; enter {} to clear)' : '{ "X-Custom-Token": "value" }' });
+  const rpcPath = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: DEFAULT_RPC_PATH, value: (existing && existing.rpcPath && existing.rpcPath !== DEFAULT_RPC_PATH) ? existing.rpcPath : '' });
+  const rpcPathWrap = h('div', {}, field('RPC path', rpcPath, 'Leave as /transmission/rpc unless Transmission’s rpc-url or your seedbox uses another path (e.g. /rpc).'));
   const enabled = h('input', { type: 'checkbox', checked: (existing ? existing : { }) && (!existing || existing.enabled !== false) ? 'checked' : null });
 
-  const credentialTypes = new Set(['qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood']);
+  const credentialTypes = new Set(['qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'glances', 'pihole', 'adguard', 'navidrome']);
   const apiKeyHint = h('span', {});
   const apiKeyWrap = h('div', {}, field('API key', apiKey, apiKeyHint));
   const maintainerrWarn = h('div', { class: 'dim', style: { fontSize: '12px', margin: '4px 0 8px', color: 'var(--amber)' } },
@@ -1209,7 +1232,7 @@ function openServiceForm(root, ctx, existingKey, existing) {
   const updateCredentialFields = () => {
     const type = typeSel.value;
     loginCreds.style.display = credentialTypes.has(type) ? '' : 'none';
-    usernameWrap.style.display = type === 'deluge' ? 'none' : '';
+    usernameWrap.style.display = (type === 'deluge' || type === 'pihole') ? 'none' : '';
     credentialHint.textContent = type === 'qbittorrent'
       ? 'Only needed for qBittorrent versions without an API key; prefer an API key.'
       : type === 'transmission'
@@ -1218,10 +1241,15 @@ function openServiceForm(root, ctx, existingKey, existing) {
           ? 'Enter the Deluge Web password; Deluge does not use a username here.'
           : type === 'flood'
             ? 'Use your Flood login username and password; ACC signs in and keeps the session server-side.'
+            : type === 'glances' ? 'Only if Glances runs with --password.'
+            : type === 'pihole' ? 'Pi-hole v6 web password or an app password (Settings → Web interface / API). Leave blank if none is set.'
+            : type === 'adguard' ? 'Your AdGuard Home login.'
+            : type === 'navidrome' ? 'A Navidrome user. ACC sends a salted token, never the password itself.'
             : 'Use NZBGet ControlUsername and ControlPassword.';
-    apiKeyWrap.style.display = (type === 'maintainerr' || ['transmission', 'deluge', 'nzbget', 'flood'].includes(type)) ? 'none' : '';
+    apiKeyWrap.style.display = (type === 'maintainerr' || ['transmission', 'deluge', 'nzbget', 'flood', 'glances', 'pihole', 'adguard', 'navidrome'].includes(type)) ? 'none' : '';
     apiKeyHint.textContent = SERVICE_KEY_HINTS[type] || 'Required for API-key services.';
     maintainerrWarn.style.display = type === 'maintainerr' ? '' : 'none';
+    rpcPathWrap.style.display = type === 'transmission' ? '' : 'none';
   };
   typeSel.addEventListener('change', updateCredentialFields);
   updateCredentialFields();
@@ -1238,6 +1266,9 @@ function openServiceForm(root, ctx, existingKey, existing) {
     };
     if (username.value.trim()) service.username = username.value.trim();
     if (password.value.trim()) service.password = password.value.trim();
+    if (typeSel.value === 'transmission') {
+      try { service.rpcPath = normalizeRpcPath(rpcPath.value); } catch (error) { toast(error.message, 'error'); return; }
+    }
     if (cfId.value.trim() || cfSecret.value.trim()) service.cloudflareAccess = { clientId: cfId.value.trim(), clientSecret: cfSecret.value.trim() };
     if (customHeaders.value.trim()) {
       try { service.customHeaders = parseCustomHeadersInput(customHeaders.value); }
@@ -1272,6 +1303,7 @@ function openServiceForm(root, ctx, existingKey, existing) {
     apiKeyWrap,
     maintainerrWarn,
     loginCreds,
+    rpcPathWrap,
     field('CF Access ID', cfId),
     field('CF Access secret', cfSecret),
     field('Custom headers (JSON)', customHeaders, 'Cloudflare Access headers remain managed by the dedicated fields above and cannot be overridden.'),

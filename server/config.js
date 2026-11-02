@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { MOCK_PORTS } from './mock/mockServices.js';
 import { normalizeCustomHeaders, hasCustomHeaders } from '../public/lib/customHeaders.js';
+import { normalizeRpcPath, safeRpcPath, DEFAULT_RPC_PATH } from '../public/lib/transmissionPath.js';
 import { credentialRequirement, hasRequiredCredentials, usesLoginCredentials } from '../public/lib/serviceKinds.js';
 
 const fsp = fs.promises;
@@ -32,7 +33,7 @@ export function loadDotEnv() {
   }
 }
 
-const SERVICE_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex'];
+const SERVICE_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex', 'portainer', 'glances', 'pihole', 'adguard', 'syncthing', 'navidrome', 'pulsarr', 'whisparr'];
 export const ALLOWED_SERVICE_TYPES = SERVICE_TYPES;
 export const CONFIG_PATH = path.join(ROOT, 'config.json');
 
@@ -200,6 +201,14 @@ export function buildServiceUpdate(key, service, prev = {}, { isHttpUrl = defaul
     else if (prevHasCustomHeaders && !originChanged) clean.customHeaders = normalizeCustomHeaders(prev.customHeaders);
   } catch (error) { return { error: error.message }; }
 
+  if (clean.type === 'transmission') {
+    const supplied = Object.prototype.hasOwnProperty.call(service, 'rpcPath') ? service.rpcPath : prev.rpcPath;
+    try {
+      const rpcPath = normalizeRpcPath(supplied);
+      if (rpcPath !== DEFAULT_RPC_PATH) clean.rpcPath = rpcPath;
+    } catch (error) { return { error: error.message }; }
+  }
+
   if (clean.type === 'deluge' && !clean.password) return { error: 'Deluge Web password is required' };
   if (clean.type === 'nzbget' && (!clean.username || !clean.password)) return { error: 'NZBGet ControlUsername and ControlPassword are required' };
   if (clean.type === 'transmission' && (!!clean.username !== !!clean.password)) return { error: 'Enter both Transmission username and password, or leave both blank' };
@@ -280,6 +289,14 @@ function buildMockConfig() {
       // Maintainerr has no API auth, so no key is configured.
       maintainerr: { label: 'Maintainerr', type: 'maintainerr', enabled: true, baseUrl: `http://127.0.0.1:${MOCK_PORTS.maintainerr}`, cloudflareAccess: { clientId: 'mock.access', clientSecret: 'mock-secret' } },
       tdarr: mk('tdarr', 'Tdarr', 'tdarr', MOCK_PORTS.tdarr),
+      portainer: mk('portainer', 'Portainer', 'portainer', MOCK_PORTS.portainer),
+      glances: { ...mk('glances', 'Glances', 'glances', MOCK_PORTS.glances), apiKey: undefined },
+      pihole: mkLogin('Pi-hole', 'pihole', MOCK_PORTS.pihole, '', 'mock-pihole'),
+      adguard: mkLogin('AdGuard Home', 'adguard', MOCK_PORTS.adguard, 'admin', 'mock-adguard'),
+      syncthing: mk('syncthing', 'Syncthing', 'syncthing', MOCK_PORTS.syncthing),
+      navidrome: mkLogin('Navidrome', 'navidrome', MOCK_PORTS.navidrome, 'admin', 'mock-navidrome'),
+      pulsarr: mk('pulsarr', 'Pulsarr', 'pulsarr', MOCK_PORTS.pulsarr),
+      whisparr: mk('whisparr', 'Whisparr', 'whisparr', MOCK_PORTS.whisparr),
       jellyfin: mk('jellyfin', 'Jellyfin', 'jellyfin', MOCK_PORTS.jellyfin),
       emby: mk('emby', 'Emby', 'emby', MOCK_PORTS.emby),
       // Public Usenet indexer (e.g. NZBGeek) — Newznab-compatible API, no custom headers.
@@ -365,6 +382,7 @@ export function publicConfig(cfg) {
       configured: serviceConfigured(svc),
       // A sample service renders built-in demo data client-side (no backend).
       sample: !!svc.sample,
+      ...(svc.type === 'transmission' ? { rpcPath: safeRpcPath(svc.rpcPath) } : {}),
       // When embed is enabled, expose the browser-reachable URL so the UI can
       // iframe the real app instead of using the custom panel. Only safe/useful
       // for services NOT behind Cloudflare Access (the browser can't inject the
@@ -438,6 +456,7 @@ export function localFallbackConfig(cfg, { now = Date.now() } = {}) {
       ...(username ? { username: username.slice(0, 120) } : {}),
       ...(password ? { password: password.slice(0, 1000) } : {}),
       ...(cfClientId ? { cfClientId: cfClientId.slice(0, 1000), cfClientSecret: cfClientSecret.slice(0, 1000) } : {}),
+      ...(svc.type === 'transmission' && safeRpcPath(svc.rpcPath) !== DEFAULT_RPC_PATH ? { rpcPath: safeRpcPath(svc.rpcPath) } : {}),
       ...(hasCustomHeaders(svc.customHeaders) ? { customHeaders: normalizeCustomHeaders(svc.customHeaders) } : {}),
     };
   }

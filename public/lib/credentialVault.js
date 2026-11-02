@@ -27,7 +27,7 @@ function legacySource(storage) {
 }
 function scrubbedEnvelope(source) {
   const connections = {};
-  for (const [key, value = {}] of Object.entries(source || {})) connections[key] = { key, type: String(value.type || key), label: String(value.label || key).slice(0, 60), localUrl: String(value.localUrl || value.baseUrl || '').replace(/\/+$/, ''), remoteUrl: String(value.remoteUrl || '').replace(/\/+$/, ''), connectionPolicy: ['auto', 'local', 'remote'].includes(value.connectionPolicy) ? value.connectionPolicy : 'auto' };
+  for (const [key, value = {}] of Object.entries(source || {})) connections[key] = { key, type: String(value.type || key), label: String(value.label || key).slice(0, 60), localUrl: String(value.localUrl || value.baseUrl || '').replace(/\/+$/, ''), remoteUrl: String(value.remoteUrl || '').replace(/\/+$/, ''), connectionPolicy: ['auto', 'local', 'remote'].includes(value.connectionPolicy) ? value.connectionPolicy : 'auto', ...(value.rpcPath ? { rpcPath: String(value.rpcPath).slice(0, 200) } : {}) };
   return { version: 2, connections };
 }
 async function readNative() {

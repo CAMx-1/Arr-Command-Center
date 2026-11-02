@@ -1,6 +1,7 @@
 import { replaceConnections, replaceConnectionsSecure } from './connections.js';
 import { hasRequiredCredentials, usesLoginCredentials } from './serviceKinds.js';
 import { normalizeCustomHeaders } from './customHeaders.js';
+import { safeRpcPath, DEFAULT_RPC_PATH } from './transmissionPath.js';
 // Server-to-local fallback snapshot helpers. The credential-bearing server
 // response is strictly validated before it can replace local direct-mode state.
 // Only an explicit allowlist of UI preference keys is copied across origins.
@@ -79,6 +80,7 @@ export function normalizeLocalFallbackExport(payload) {
       ...(password ? { password } : {}),
       customHeaders: normalizeCustomHeaders(raw.customHeaders),
       ...(cfClientId ? { cfClientId, cfClientSecret } : {}),
+      ...(raw.type === 'transmission' && safeRpcPath(raw.rpcPath) !== DEFAULT_RPC_PATH ? { rpcPath: safeRpcPath(raw.rpcPath) } : {}),
     };
   }
   const skipped = Array.isArray(payload.skipped) ? payload.skipped.slice(0, 100).map((item) => ({

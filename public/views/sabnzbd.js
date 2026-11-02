@@ -1,4 +1,5 @@
 import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, pct, poster, openModal, closeModal, autoRefresh, swipeToAction } from '../lib/ui.js';
+import { liveRefresh } from '../lib/live.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 
@@ -40,7 +41,7 @@ async function tabQueue(root, sab, ctx) {
     }
   };
   await load(false);
-  autoRefresh(wrap, 5000, () => load(true));
+  liveRefresh(wrap, ctx.service, 5000, () => load(true));
 }
 
 // Fill in posters after the list has rendered (they're not needed to show it).

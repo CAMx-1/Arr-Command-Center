@@ -10,6 +10,7 @@ const GRADIENT = {
   nzbget: 'linear-gradient(160deg, #16a34a, #052e16)',
 };
 
+export const isSpeedPart = (value) => typeof value === 'string' && /^[↓↑] /.test(value);
 function fmtSpeed(bytes) { return `${fmtBytes(Number(bytes) || 0)}/s`; }
 function fmtEta(seconds) {
   const value = Number(seconds) || 0;
@@ -101,8 +102,10 @@ function globalControls(adapter, ctx, session) {
 
 function itemMeta(item, adapter) {
   const parts = [`${fmtBytes(item.sizeDone)} / ${fmtBytes(item.size)}`];
-  if (!item.completed && item.dlSpeed > 0) parts.push(`↓ ${fmtSpeed(item.dlSpeed)}`);
-  if (adapter.capabilities.upload && item.upSpeed > 0) parts.push(`↑ ${fmtSpeed(item.upSpeed)}`);
+  // Incomplete items always show their speeds (even 0) so the row doesn't
+  // reflow each time a speed starts, stops or gains a digit.
+  if (!item.completed) parts.push(`↓ ${fmtSpeed(item.dlSpeed)}`);
+  if (adapter.capabilities.upload && (!item.completed || item.upSpeed > 0)) parts.push(`↑ ${fmtSpeed(item.upSpeed)}`);
   if (!item.completed && item.eta > 0) parts.push(`ETA ${fmtEta(item.eta)}`);
   if (item.seeds != null) parts.push(`▲ ${item.seeds}`);
   if (item.leechs != null) parts.push(`▼ ${item.leechs}`);
@@ -134,7 +137,7 @@ function itemRow(item, adapter, ctx) {
       h('div', { class: 'meta-line', style: { marginTop: '4px' } },
         h('span', { class: `pill ${item.stateClass}` }, item.stateLabel),
         item.category ? h('span', { class: 'pill muted' }, item.category) : null,
-        ...itemMeta(item, adapter).map((value) => h('span', { class: item.failMessage === value ? 'dim' : '' }, value)),
+        ...itemMeta(item, adapter).map((value) => h('span', { class: item.failMessage === value ? 'dim' : isSpeedPart(value) ? 'speed' : '' }, value)),
       ),
       !item.history ? h('div', { class: 'progress' }, h('span', { style: { width: pct(item.progress * 100) } })) : null,
     ),

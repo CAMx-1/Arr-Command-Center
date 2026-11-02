@@ -28,6 +28,7 @@ import { renderIndexer } from './views/indexer.js';
 import { renderPlex } from './views/plex.js';
 import { renderMediaServer } from './views/mediaServer.js';
 import { renderAutobrr, renderMaintainerr, renderTdarr, renderAudiobookshelf } from './views/extraServices.js';
+import { renderPortainer, renderGlances, renderPihole, renderAdguard, renderSyncthing, renderNavidrome, renderPulsarr } from './views/integrations.js';
 import { renderEmbed } from './views/embed.js';
 import { renderSettings } from './views/settings.js';
 import { renderCalendar } from './views/calendar.js';
@@ -76,6 +77,15 @@ export const SERVICE_META = {
   plex: { logo: '/icons/plex.svg', emoji: '▶', renderer: renderPlex },
   jellyfin: { logo: '/icons/jellyfin.svg', emoji: '▶', renderer: renderMediaServer },
   emby: { logo: '/icons/emby.svg', emoji: '▶', renderer: renderMediaServer },
+  portainer: { emoji: '🐳', renderer: renderPortainer },
+  glances: { emoji: '📈', renderer: renderGlances },
+  pihole: { emoji: '🛡', renderer: renderPihole },
+  adguard: { emoji: '🛡', renderer: renderAdguard },
+  syncthing: { emoji: '🔄', renderer: renderSyncthing },
+  navidrome: { emoji: '🎶', renderer: renderNavidrome },
+  pulsarr: { emoji: '📝', renderer: renderPulsarr },
+  // Whisparr v2 speaks the Sonarr v3 API, so it uses the Sonarr screens.
+  whisparr: { logo: '/icons/sonarr.svg', emoji: '', renderer: renderSonarr },
 };
 
 const state = {
@@ -490,6 +500,11 @@ const QUICK_ACTIONS = {
   plex: [['watchlist', 'Watchlist'], ['duplicates', 'Duplicates'], ['users', 'Users'], ['friends', 'Friends'], ['sessions', 'Now Playing']],
   jellyfin: [['libraries', 'Libraries'], ['latest', 'Recently Added'], ['sessions', 'Now Playing'], ['users', 'Users']],
   emby: [['libraries', 'Libraries'], ['latest', 'Recently Added'], ['sessions', 'Now Playing'], ['users', 'Users']],
+  portainer: [['containers', 'Containers'], ['environments', 'Environments']],
+  glances: [['overview', 'Overview'], ['sensors', 'Temperatures'], ['containers', 'Containers']],
+  syncthing: [['folders', 'Folders'], ['devices', 'Devices']],
+  pulsarr: [['approvals', 'Approvals'], ['recent', 'Recent requests']],
+  whisparr: [['series', 'Library'], ['calendar', 'Calendar'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['history', 'History']],
 };
 
 // Attach a press-and-hold gesture: fires `onLongPress` after ~550ms if the
@@ -1428,6 +1443,8 @@ async function init() {
   });
   try {
     state.config = await api.config();
+    // Sign in with Plex role (admin | user | guest), for styling and views.
+    try { const auth = state.config && state.config.auth; document.documentElement.dataset.role = (auth && auth.plexEnabled) ? (auth.role || 'guest') : 'admin'; } catch { /* ignore */ }
   } catch (err) {
     // Auth layers: when running on the server origin (native app after the
     // WebView navigated there, or the web/PWA build), an unauthenticated boot

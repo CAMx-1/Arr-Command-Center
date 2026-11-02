@@ -27,24 +27,24 @@ store (`data/store.json`).
   request options, SWR caching, diagnostics, structured logging, `/healthcheck`.
 
 ## Next — Organizr parity
-- [ ] **User groups & access control** — per‑user roles (admin/user/guest) controlling
+- [x] **User groups & access control** — per‑user roles (admin/user/guest) controlling
       which services/links/tabs are visible. Requires user records in the data store and
       role checks in the auth middleware + frontend gating.
 - [ ] **Custom links in the sidebar** (not just Home), with categories/ordering, and an
       optional **iframe/embed** mode per link (base app already has service embed mode).
 - [ ] **Top‑bar branding** — configurable site name/logo.
-- [ ] **Manage the Plex allowlist from the UI** (add/remove allowed users) + a
+- [x] **Manage the Plex allowlist from the UI** (add/remove allowed users) + a
       registration/approval flow.
 - [ ] Per‑user "default page", pin/unpin sidebar, upload custom icons.
 
 ## Next — full *arr task coverage (via API)
 - [x] **Manual import** — "Fix import" on stuck Sonarr/Radarr queue items (re-map series/episodes/movie + quality, reprocess, import, command tracking).
-- [ ] **Quality profiles / custom formats / release profiles** management (view + edit).
+- [~] **Quality profiles / custom formats / release profiles** management (view done; edit still in Sonarr/Radarr).
 - [ ] **Indexer management** (Prowlarr live: add/edit/test/sync, app sync).
 - [ ] **Download client settings**, remote path mappings.
-- [ ] **Tags** management and per‑item tag editing.
-- [ ] **Blocklist** view + remove/redownload.
-- [ ] **Cutoff‑unmet** list; **manual season/movie search** result grabbing from the UI.
+- [x] **Tags** management (usage, rename, delete) and per‑item tag editing.
+- [x] **Blocklist** view (paged) + remove + clear all.
+- [x] **Cutoff‑unmet** list; **manual season/movie search** result grabbing from the UI.
 - [ ] **Import lists** management.
 - [ ] Per‑episode/season monitor **bulk** toggles from the season browser.
 - [ ] **SABnzbd**: category/scheduler/server config; **Tautulli**: notifications, libraries.
@@ -58,7 +58,7 @@ store (`data/store.json`).
 ## Platform
 - [ ] Consider **SQLite** (`node:sqlite`) if the JSON store outgrows itself (users,
       logs, per‑user prefs).
-- [ ] Real‑time updates (SSE/WebSocket) for queues/sessions.
+- [x] Real‑time updates (SSE) for queues/sessions.
 - [ ] Automated tests + CI.
 
 ## Security notes

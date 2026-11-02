@@ -10,6 +10,8 @@ import Capacitor
 @objc(AppBridgeViewController)
 final class AppBridgeViewController: CAPBridgeViewController {
     private var startupCachePurgeStarted = false
+    private var windowControlsInset: (left: CGFloat, right: CGFloat) = (0, 0)
+    private var loadingObservation: NSKeyValueObservation?
 
     // Register the in-app passcode lock plugin (window.Capacitor.Plugins.AppLock).
     // registerPluginInstance also exports it to server-origin pages.
@@ -21,6 +23,11 @@ final class AppBridgeViewController: CAPBridgeViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // Server mode navigates to a new document, so re-apply the window
+        // controls inset each time a page finishes loading.
+        loadingObservation = webView?.observe(\.isLoading, options: [.new]) { [weak self] view, _ in
+            if !view.isLoading { self?.pushWindowControlsInset(force: true) }
+        }
         // The first-run connect screen and external authentication pages do not
         // execute app.js, so they cannot call SplashScreen.hide themselves.
         // Dismiss the native overlay after the WebView has had time to paint;
@@ -44,6 +51,59 @@ final class AppBridgeViewController: CAPBridgeViewController {
         // otherwise-rendered page uncomposited; server build IDs and no-store
         // headers handle web asset version changes instead.
         URLCache.shared.removeAllCachedResponses()
+    }
+
+    // iPadOS 26 windowed mode draws the close/minimise/resize controls over the
+    // window's top-left corner. Measure how much horizontal room they need (the
+    // corner-adapted layout margins UIKit uses for its own bars) and expose it
+    // to the page as --acc-wc-left / --acc-wc-right (CSS px == points). Both
+    // are 0 on iPhone, full-screen iPad and iOS < 26.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        pushWindowControlsInset(force: false)
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in self?.pushWindowControlsInset(force: false) }
+    }
+
+    // A maximised window reports a small corner margin (9 pt in the iPadOS 26.3
+    // simulator) with no controls over content; only a margin of 24 pt or more
+    // means the control cluster overlaps the top-left corner.
+    private func pushWindowControlsInset(force: Bool) {
+        let inset = measureWindowControlsInset()
+        guard force || inset != windowControlsInset else { return }
+        windowControlsInset = inset
+        let js = "(function(){var s=document.documentElement&&document.documentElement.style;if(!s)return;"
+            + "s.setProperty('--acc-wc-left','\(Int(inset.left.rounded(.up)))px');"
+            + "s.setProperty('--acc-wc-right','\(Int(inset.right.rounded(.up)))px');"
+            + "document.documentElement.classList.toggle('has-window-controls',\(inset.left >= 24));})()"
+        webView?.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    private func measureWindowControlsInset() -> (left: CGFloat, right: CGFloat) {
+        #if compiler(>=6.2)
+        guard #available(iOS 26.0, *), let window = view.window else { return (0, 0) }
+        // Corner adaptation only applies to views that reach into the window's
+        // top corners, so measure with a probe laid over the top strip.
+        let probe = UIView(frame: CGRect(x: 0, y: 0, width: window.bounds.width, height: 120))
+        probe.alpha = 0
+        probe.isUserInteractionEnabled = false
+        probe.isAccessibilityElement = false
+        window.addSubview(probe)
+        defer { probe.removeFromSuperview() }
+        window.setNeedsUpdateProperties()
+        probe.setNeedsUpdateProperties()
+        window.updatePropertiesIfNeeded()
+        probe.updatePropertiesIfNeeded()
+        let adapted = probe.edgeInsets(for: .margins(cornerAdaptation: .horizontal))
+        let baseline = probe.edgeInsets(for: .margins(cornerAdaptation: .none))
+        return (adapted.left == baseline.left ? 0 : adapted.left,
+                adapted.right == baseline.right ? 0 : adapted.right)
+        #else
+        return (0, 0)
+        #endif
     }
 }
 

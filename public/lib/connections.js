@@ -1,5 +1,6 @@
 // Local direct-mode connection storage and request construction.
 import { mergeProtectedHeaders, normalizeCustomHeaders } from './customHeaders.js';
+import { safeRpcPath, DEFAULT_RPC_PATH, transmissionSubPath } from './transmissionPath.js';
 import { getCredential, stageCredential, setCredential, removeCredential, replaceCredentials, secureCredentialStorageAvailable } from './credentialVault.js';
 
 const MODE_KEY = 'acc:app-mode';
@@ -69,6 +70,7 @@ export function normalizeConnection(key, value = {}) {
     cfClientId: String(value.cfClientId || ''),
     cfClientSecret: String(value.cfClientSecret || ''),
     customHeaders,
+    ...(value.type === 'transmission' && safeRpcPath(value.rpcPath) !== DEFAULT_RPC_PATH ? { rpcPath: safeRpcPath(value.rpcPath) } : {}),
   };
 }
 export function getConnections(storage) {
@@ -79,7 +81,7 @@ export function getConnections(storage) {
     return Object.fromEntries(Object.entries(source).map(([key, value]) => [key, normalizeConnection(key, value)]));
   } catch { return {}; }
 }
-function metadataOnly(key, value) { const metadata = { key, type: value.type, label: value.label, localUrl: value.localUrl, remoteUrl: value.remoteUrl, connectionPolicy: value.connectionPolicy }; return secureCredentialStorageAvailable() ? metadata : { ...metadata, ...getCredential(key) }; }
+function metadataOnly(key, value) { const metadata = { key, type: value.type, label: value.label, localUrl: value.localUrl, remoteUrl: value.remoteUrl, connectionPolicy: value.connectionPolicy, ...(value.rpcPath ? { rpcPath: value.rpcPath } : {}) }; return secureCredentialStorageAvailable() ? metadata : { ...metadata, ...getCredential(key) }; }
 function saveConnections(all, storage) { const metadata = Object.fromEntries(Object.entries(all).map(([key, value]) => [key, metadataOnly(key, value)])); try { storageFor(storage).setItem(CONN_KEY, JSON.stringify({ version: CONNECTIONS_VERSION, connections: metadata })); } catch {} return all; }
 export function getConnection(key, storage) { return getConnections(storage)[key] || null; }
 export function setConnection(key, conn, storage) { const all = getConnections(storage); stageCredential(key, conn); all[key] = normalizeConnection(key, { ...all[key], ...conn }); saveConnections(all, storage); setCredential(key, all[key]).catch(() => {}); return all[key]; }
@@ -136,7 +138,8 @@ function requestForBase(proxyPath, conn, baseUrl) {
   const parts = String(proxyPath).split(/\?(.*)/s);
   const pathOnly = parts[0]; const rawQs = parts[1] || '';
   const match = pathOnly.match(/^\/api\/proxy\/[^/]+\/(.*)$/);
-  const upstream = match ? match[1] : pathOnly.replace(/^\/+/, '');
+  const logical = match ? match[1] : pathOnly.replace(/^\/+/, '');
+  const upstream = conn && conn.type === 'transmission' ? transmissionSubPath(logical, conn.rpcPath) : logical;
   const { headers, query } = authFor(conn, { baseUrl });
   const existing = new URLSearchParams(rawQs); const authPairs = [];
   for (const [key, value] of Object.entries(query)) if (!existing.has(key)) authPairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);

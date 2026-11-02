@@ -1,4 +1,5 @@
 import { showcaseName } from '../lib/showcase.js';
+import { liveRefresh } from '../lib/live.js';
 import { h, mount, tabs, spinner, skeletonList, empty, pct, poster, toast, timeEl, openModal, closeModal, autoRefresh } from '../lib/ui.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { hive, posterHexCard } from '../lib/hive.js';
@@ -93,7 +94,7 @@ async function tabStreams(root, tau, svcKey) {
     }
   };
   await load(false);
-  autoRefresh(wrap, 5000, () => load(true));
+  liveRefresh(wrap, { key: svcKey, type: 'tautulli' }, 5000, () => load(true));
 }
 
 function statCard(label, value) {

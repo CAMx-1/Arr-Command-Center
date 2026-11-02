@@ -7,7 +7,8 @@
 //   none           : the service has no API auth at all (Maintainerr)
 //   password       : password only (Deluge Web)
 //   basic          : username + password required (NZBGet, Flood)
-//   optional-basic : username + password optional, but both or neither (Transmission)
+//   optional-basic : username + password optional, but both or neither (Transmission, Glances)
+//   optional-password : password optional (Pi-hole without a web password)
 const REQUIREMENTS = {
   maintainerr: 'none',
   tdarr: 'optional-key',
@@ -16,6 +17,10 @@ const REQUIREMENTS = {
   nzbget: 'basic',
   flood: 'basic',
   transmission: 'optional-basic',
+  glances: 'optional-basic',
+  adguard: 'basic',
+  navidrome: 'basic',
+  pihole: 'optional-password',
 };
 
 export function credentialRequirement(type) {
@@ -26,7 +31,8 @@ export function credentialRequirement(type) {
 export function hasRequiredCredentials(type, { apiKey, username, password } = {}) {
   switch (credentialRequirement(type)) {
     case 'none':
-    case 'optional-key': return true;
+    case 'optional-key':
+    case 'optional-password': return true;
     case 'password': return !!password;
     case 'basic': return !!(username && password);
     case 'optional-basic': return !!username === !!password;
@@ -36,5 +42,5 @@ export function hasRequiredCredentials(type, { apiKey, username, password } = {}
 
 // Types whose credentials are a login (username/password), not an API key.
 export function usesLoginCredentials(type) {
-  return ['password', 'basic', 'optional-basic'].includes(credentialRequirement(type));
+  return ['password', 'basic', 'optional-basic', 'optional-password'].includes(credentialRequirement(type));
 }

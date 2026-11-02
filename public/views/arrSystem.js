@@ -1,6 +1,7 @@
 // Shared "System" + "Wanted" tabs for Sonarr/Radarr — health checks, disk space,
 // system status, maintenance commands, and the missing/wanted list.
-import { h, mount, skeletonList, empty, toast, fmtBytes, pct, timeEl } from '../lib/ui.js';
+import { h, mount, skeletonList, empty, toast, fmtBytes, pct, timeEl, openModal, closeModal, confirmModal } from '../lib/ui.js';
+import { profileSummary, formatSpecSummary, tagUsage } from '../lib/arrProfiles.js';
 import { openPathFix } from '../lib/pathFix.js';
 import { openDuplicates } from '../lib/duplicates.js';
 
@@ -9,13 +10,14 @@ const HEALTH_CLS = { error: 'down', warning: 'warn', notice: 'info' };
 export async function tabSystem(root, arr, ctx, kind) {
   mount(root, skeletonList());
   try {
-    const [health, disks, status, blocklist, tags, profiles] = await Promise.all([
+    const [health, disks, status, blocklist, tags, profiles, formats] = await Promise.all([
       arr.get('health').catch(() => []),
       arr.get('diskspace').catch(() => []),
       arr.get('system/status').catch(() => ({})),
-      arr.get('blocklist?page=1&pageSize=20&sortDirection=descending').catch(() => ({ records: [] })),
-      arr.get('tag').catch(() => []),
+      arr.get('blocklist?page=1&pageSize=20&sortKey=date&sortDirection=descending').catch(() => ({ records: [] })),
+      arr.get('tag/detail').catch(() => arr.get('tag').catch(() => [])),
       arr.get('qualityprofile').catch(() => []),
+      arr.get('customformat').catch(() => []),
     ]);
     const reload = () => tabSystem(root, arr, ctx, kind);
     const run = async (name) => {
@@ -72,9 +74,11 @@ export async function tabSystem(root, arr, ctx, kind) {
       h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Blocklist'),
       blocklistSection(blocklist, arr, reload),
       h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Tags'),
-      tagsSection(tags, arr, reload),
+      tagsSection(tags, arr, reload, kind),
       h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Quality profiles'),
-      profilesSection(profiles),
+      profilesSection(profiles, formats),
+      h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Custom formats'),
+      formatsSection(formats, profiles),
     );
   } catch (err) {
     mount(root, empty('', 'Failed to load system info', err.message, { label: 'Retry', onClick: () => tabSystem(root, arr, ctx, kind) }));
@@ -85,63 +89,157 @@ function infoRow(label, value) {
   return h('div', { class: 'setting-row' }, h('span', { class: 'dim' }, label), h('span', { class: 'right' }, value));
 }
 
-function blocklistSection(blocklist, arr, reload) {
-  const records = (blocklist && blocklist.records) || [];
-  if (!records.length) return h('div', { class: 'dim' }, 'Blocklist is empty.');
-  return h('div', { class: 'list' }, ...records.map((b) => h('div', { class: 'row' },
+// Blocklist: newest first, 20 at a time with "Load more", per-item remove
+// and "Clear all" (bulk delete of every entry).
+function blocklistSection(first, arr, reload) {
+  const wrap = h('div', {});
+  let records = [...((first && first.records) || [])];
+  let total = (first && first.totalRecords) || records.length;
+  let page = 1;
+  const row = (b) => h('div', { class: 'row' },
     h('div', { class: 'row-main' },
-      h('div', { class: 'row-title', style: { fontSize: '13px' } }, b.sourceTitle || 'Unknown'),
+      h('div', { class: 'row-title', style: { fontSize: '13px', wordBreak: 'break-all' } }, b.sourceTitle || 'Unknown'),
       h('div', { class: 'meta-line', style: { marginTop: '2px' } },
         b.protocol ? h('span', { class: 'pill muted' }, b.protocol) : null,
+        b.quality && b.quality.quality ? h('span', { class: 'pill info' }, b.quality.quality.name) : null,
         b.indexer ? h('span', {}, b.indexer) : null,
         b.date ? timeEl(b.date) : null,
+        b.message ? h('span', { class: 'dim' }, b.message) : null,
       ),
     ),
-    h('div', { class: 'row-actions' }, h('button', { class: 'btn sm danger', onclick: async () => {
-      try { await arr.del(`blocklist/${b.id}`); toast('Removed from blocklist', 'success'); reload(); }
+    h('div', { class: 'row-actions' }, h('button', { class: 'btn sm danger', title: 'Allow this release to be grabbed again', onclick: async () => {
+      try { await arr.del(`blocklist/${b.id}`); records = records.filter((x) => x.id !== b.id); total -= 1; paint(); toast('Removed from blocklist', 'success'); }
       catch (e) { toast(e.message, 'error'); }
     } }, 'Remove')),
-  )));
+  );
+  const more = async (btn) => {
+    btn.disabled = true;
+    try {
+      const next = await arr.get(`blocklist?page=${page + 1}&pageSize=20&sortKey=date&sortDirection=descending`);
+      page += 1; records = records.concat(next.records || []); total = next.totalRecords ?? total; paint();
+    } catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+  };
+  const clearAll = () => confirmModal({
+    title: 'Clear blocklist', message: `Remove all ${total} blocklisted releases? They can be grabbed again.`, confirmLabel: 'Clear all', danger: true,
+    onConfirm: async () => {
+      try {
+        const all = await arr.get(`blocklist?page=1&pageSize=${Math.max(total, 1)}`);
+        const ids = (all.records || []).map((b) => b.id);
+        if (ids.length) await arr.del('blocklist/bulk', { ids });
+        toast(`Cleared ${ids.length} blocklist entr${ids.length === 1 ? 'y' : 'ies'}`, 'success');
+        reload();
+      } catch (e) { toast(e.message, 'error'); }
+    },
+  });
+  function paint() {
+    if (!records.length) { mount(wrap, h('div', { class: 'dim' }, 'Blocklist is empty.')); return; }
+    const moreBtn = records.length < total ? h('button', { class: 'btn sm', onclick: (e) => more(e.currentTarget) }, `Load more (${total - records.length} left)`) : null;
+    mount(wrap,
+      h('div', { class: 'meta-line', style: { marginBottom: '8px' } }, h('span', { class: 'dim' }, `${total} blocklisted`), h('button', { class: 'btn sm danger', onclick: clearAll }, 'Clear all')),
+      h('div', { class: 'list' }, ...records.map(row)),
+      moreBtn ? h('div', { style: { marginTop: '8px' } }, moreBtn) : null);
+  }
+  paint();
+  return wrap;
 }
-function profilesSection(profiles) {
+
+// Quality profiles (read-only): allowed qualities, cutoff, upgrades and the
+// custom format scores. Tap a profile for the full breakdown.
+function profilesSection(profiles, formats) {
   const list = profiles || [];
   if (!list.length) return h('div', { class: 'dim' }, 'No quality profiles.');
   return h('div', { class: 'list' }, ...list.map((p) => {
-    const qualities = [];
-    for (const item of (p.items || [])) {
-      if (item.quality && item.allowed) qualities.push(item.quality.name);
-      else if (item.items) for (const q of item.items) if (q.allowed && q.quality) qualities.push(q.quality.name);
-    }
-    return h('div', { class: 'row' },
+    const sum = profileSummary(p, formats);
+    return h('div', { class: 'row clickable', role: 'button', tabindex: '0', onclick: () => openProfile(sum) },
       h('div', { class: 'row-main' },
         h('div', { class: 'row-title', style: { fontSize: '14px' } }, p.name),
         h('div', { class: 'meta-line', style: { marginTop: '2px' } },
-          h('span', { class: 'pill info' }, `${qualities.length} qualities`),
-          h('span', { class: 'dim' }, qualities.slice(0, 6).join(', ') + (qualities.length > 6 ? '…' : '')),
+          h('span', { class: 'pill info' }, `${sum.qualities.length} qualities`),
+          sum.cutoff ? h('span', {}, `Cutoff: ${sum.cutoff}`) : null,
+          h('span', { class: `pill ${sum.upgradeAllowed ? 'ok' : 'muted'}` }, sum.upgradeAllowed ? 'Upgrades on' : 'No upgrades'),
+          sum.scored.length ? h('span', { class: 'dim' }, `${sum.scored.length} scored formats`) : null,
         ),
       ),
     );
   }));
 }
 
+function openProfile(sum) {
+  const sec = (t) => h('div', { class: 'section-title', style: { margin: '14px 0 6px' } }, t);
+  openModal({
+    title: sum.name,
+    body: h('div', {},
+      infoRow('Upgrades', sum.upgradeAllowed ? 'Allowed' : 'Off'),
+      infoRow('Upgrade until', sum.cutoff || '—'),
+      infoRow('Minimum format score', String(sum.minFormatScore)),
+      infoRow('Upgrade until format score', String(sum.cutoffFormatScore)),
+      sec('Allowed qualities (best first)'),
+      h('div', { class: 'meta-line', style: { flexWrap: 'wrap', gap: '6px' } }, ...sum.qualities.map((name) => h('span', { class: `pill ${name === sum.cutoff ? 'ok' : 'muted'}` }, name))),
+      sec('Custom format scores'),
+      sum.scored.length
+        ? h('div', { class: 'list' }, ...sum.scored.map((f) => h('div', { class: 'row' }, h('div', { class: 'row-main' }, h('div', { class: 'row-title', style: { fontSize: '13px' } }, f.name)), h('span', { class: `pill ${f.score > 0 ? 'ok' : 'down'}` }, f.score > 0 ? `+${f.score}` : String(f.score)))))
+        : h('div', { class: 'dim' }, 'No custom formats are scored in this profile.'),
+      h('p', { class: 'dim settings-copy' }, 'Edit profiles in Sonarr/Radarr itself; this view is read-only.')),
+    footer: h('button', { class: 'btn', onclick: closeModal }, 'Close'),
+  });
+}
 
-function tagsSection(tags, arr, reload) {
-  const list = tags || [];
+function formatsSection(formats, profiles) {
+  const list = formats || [];
+  if (!list.length) return h('div', { class: 'dim' }, 'No custom formats.');
+  return h('div', { class: 'list' }, ...list.map((f) => {
+    const usedBy = (profiles || []).filter((p) => (p.formatItems || []).some((fi) => fi.format === f.id && fi.score)).map((p) => {
+      const score = p.formatItems.find((fi) => fi.format === f.id).score;
+      return `${p.name} ${score > 0 ? '+' : ''}${score}`;
+    });
+    return h('div', { class: 'row' },
+      h('div', { class: 'row-main' },
+        h('div', { class: 'row-title', style: { fontSize: '14px' } }, f.name),
+        h('div', { class: 'meta-line', style: { marginTop: '2px', flexWrap: 'wrap' } },
+          ...(f.specifications || []).map((sp) => h('span', { class: 'pill muted', title: formatSpecSummary(sp).detail }, formatSpecSummary(sp).label)),
+          usedBy.length ? h('span', { class: 'dim' }, `Scored in: ${usedBy.join(', ')}`) : h('span', { class: 'dim' }, 'Not scored in any profile'),
+        ),
+      ),
+    );
+  }));
+}
+
+// Tags with usage counts. Rename and delete are admin actions in Sonarr/Radarr
+// terms (they change every item using the tag); per-item tags are edited from
+// an item's Edit screen or in bulk from the library.
+function tagsSection(tags, arr, reload, kind) {
+  const list = tagUsage(tags, kind);
   const input = h('input', { class: 'input', placeholder: 'New tag label', style: { maxWidth: '220px' } });
   const add = async () => {
     if (!input.value.trim()) return;
     try { await arr.post('tag', { label: input.value.trim() }); toast('Tag added', 'success'); reload(); }
     catch (e) { toast(e.message, 'error'); }
   };
+  const rename = (t) => {
+    const field = h('input', { class: 'input', value: t.label });
+    const save = async () => {
+      const label = field.value.trim();
+      if (!label || label === t.label) { closeModal(); return; }
+      try { await arr.put(`tag/${t.id}`, { id: t.id, label }); toast('Tag renamed', 'success'); closeModal(); reload(); }
+      catch (e) { toast(e.message, 'error'); }
+    };
+    field.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+    openModal({ title: `Rename “${t.label}”`, body: h('div', {}, field, h('p', { class: 'dim settings-copy' }, t.total ? `Used by ${t.summary}.` : 'Not used yet.')),
+      footer: h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', width: '100%' } }, h('button', { class: 'btn', onclick: closeModal }, 'Cancel'), h('button', { class: 'btn primary', onclick: save }, 'Rename')) });
+  };
+  const remove = (t) => confirmModal({
+    title: 'Delete tag', message: t.total ? `“${t.label}” is used by ${t.summary}. Deleting it removes it from all of them.` : `Delete “${t.label}”?`, confirmLabel: 'Delete', danger: true,
+    onConfirm: async () => { try { await arr.del(`tag/${t.id}`); toast('Tag deleted', 'success'); reload(); } catch (e) { toast(e.message, 'error'); } },
+  });
   return h('div', {},
-    h('div', { class: 'meta-line', style: { gap: '6px', flexWrap: 'wrap', marginBottom: '10px' } },
-      ...list.map((t) => h('span', { class: 'pill muted' }, t.label,
-        h('button', { class: 'tag-x', type: 'button', title: `Delete tag ${t.label}`, 'aria-label': `Delete tag ${t.label}`, onclick: async () => {
-          try { await arr.del(`tag/${t.id}`); toast('Tag deleted', 'success'); reload(); }
-          catch (e) { toast(e.message, 'error'); }
-        } }, '×'))),
-      list.length ? null : h('span', { class: 'dim' }, 'No tags'),
-    ),
+    list.length ? h('div', { class: 'list', style: { marginBottom: '10px' } }, ...list.map((t) => h('div', { class: 'row' },
+      h('div', { class: 'row-main' },
+        h('div', { class: 'row-title', style: { fontSize: '14px' } }, t.label),
+        h('div', { class: 'meta-line', style: { marginTop: '2px' } }, h('span', { class: 'dim' }, t.total ? `Used by ${t.summary}` : 'Unused'))),
+      h('div', { class: 'row-actions' },
+        h('button', { class: 'btn sm', onclick: () => rename(t) }, 'Rename'),
+        h('button', { class: 'btn sm danger', onclick: () => remove(t) }, 'Delete')),
+    ))) : h('div', { class: 'dim', style: { marginBottom: '10px' } }, 'No tags'),
     h('div', { class: 'meta-line', style: { gap: '8px' } }, input, h('button', { class: 'btn sm', onclick: add }, 'Add tag')),
   );
 }

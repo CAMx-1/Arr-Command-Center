@@ -1,4 +1,5 @@
 import { getAddDefaults, setAddDefaults, initialAddChoices } from '../lib/addDefaults.js';
+import { liveRefresh } from '../lib/live.js';
 import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, poster, arrEventInfo, openModal, closeModal, confirmModal, autoRefresh, swipeToAction, rootFolderLabel } from '../lib/ui.js';
 import { reconcileQueueIssues } from '../lib/queueIssues.js';
 import { openDetailModal, openArrFileInfo } from './detail.js';
@@ -178,7 +179,7 @@ function movieHex(m, arr, ctx) {
   const url = img && (img.remoteUrl || img.url);
   const rating = m.ratings && (m.ratings.tmdb?.value || m.ratings.imdb?.value || m.ratings.value);
   const actions = actionGroup([
-    { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, false, m) },
+    { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, false, m, null, ctx) },
     { label: 'Search', title: 'Interactive search', primary: true, onClick: () => openReleaseSearch(ctx, ctx.service.key, `movieId=${m.id}`, `${m.title} (${m.year})`) },
     { label: 'Auto', title: 'Automatic search', onClick: async () => {
       try { await arr.post('command', { name: 'MoviesSearch', movieIds: [m.id] }); toast(`Searching for ${m.title}`, 'success'); }
@@ -221,7 +222,7 @@ function movieRow(m, arr, ctx) {
       ),
     ),
     actionGroup([
-      { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, false, m) },
+      { label: 'Info', title: 'Storage & file info', onClick: () => openArrFileInfo(ctx.service.label, false, m, null, ctx) },
       { label: 'Interactive', title: 'Interactive search', primary: true, onClick: () => openReleaseSearch(ctx, ctx.service.key, `movieId=${m.id}`, `${m.title} (${m.year})`) },
       { label: 'Auto', title: 'Automatic search', onClick: async () => {
         try { await arr.post('command', { name: 'MoviesSearch', movieIds: [m.id] }); toast(`Searching for ${m.title}`, 'success'); }
@@ -250,7 +251,7 @@ async function tabQueue(root, arr, ctx) {
     }
   };
   await load(false);
-  autoRefresh(wrap, 5000, () => load(true));
+  liveRefresh(wrap, ctx.service, 5000, () => load(true));
 }
 
 const _queueIssueState = new Map(); // serviceKey -> Set of currently-bad keys

@@ -1,4 +1,5 @@
 import { h, mount, tabs, skeletonList, empty, poster, pct, fmtRelative, autoRefresh } from '../lib/ui.js';
+import { liveRefresh } from '../lib/live.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { mediaServerFor } from '../lib/mediaServers.js';
@@ -78,7 +79,7 @@ async function sessionsTab(root, media, ctx) {
       ))));
     } catch (error) { if (!silent) mount(wrap, empty('⚠️', 'Failed to load sessions', error.message)); }
   };
-  await load(); autoRefresh(wrap, 5000, () => load(true));
+  await load(); liveRefresh(wrap, ctx.service, 5000, () => load(true));
 }
 
 async function usersTab(root, media) {

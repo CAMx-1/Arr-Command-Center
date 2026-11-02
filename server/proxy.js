@@ -6,6 +6,7 @@
 import express from 'express';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { createHash, randomBytes } from 'node:crypto';
 import { secretsFor, isTextual, createRedactor } from './redact.js';
 
 // Every request from this module carries a service's credentials (API key
@@ -16,6 +17,7 @@ import { secretsFor, isTextual, createRedactor } from './redact.js';
 // bare 3xx instead (no Location is forwarded).
 const fetch = (url, init = {}) => globalThis.fetch(url, { redirect: 'manual', ...init });
 import { mergeProtectedHeaders } from '../public/lib/customHeaders.js';
+import { safeRpcPath, transmissionSubPath } from '../public/lib/transmissionPath.js';
 
 function trimSlash(u) {
   return String(u || '').replace(/\/+$/, '');
@@ -51,6 +53,14 @@ function cfHeaders(svc) {
 
 function combinedHeaders(svc, generated = {}) {
   return mergeProtectedHeaders(svc.customHeaders, generated, cfHeaders(svc));
+}
+
+export function subsonicAuth(svc, salt = randomBytes(8).toString('hex')) {
+  return {
+    u: svc.username || '',
+    t: createHash('md5').update(`${svc.password || ''}${salt}`).digest('hex'),
+    s: salt, v: '1.16.1', c: 'ArrCommandCenter', f: 'json',
+  };
 }
 
 function authFor(svc) {
@@ -93,6 +103,21 @@ function authFor(svc) {
   } else if (type === 'tdarr') {
     // Only required when Tdarr server auth is enabled.
     if (svc.apiKey) headers['x-api-key'] = svc.apiKey;
+  } else if (type === 'portainer') {
+    // Portainer access token (My account → Access tokens).
+    if (svc.apiKey) headers['X-API-Key'] = svc.apiKey;
+  } else if (type === 'syncthing') {
+    if (svc.apiKey) headers['X-API-Key'] = svc.apiKey;
+  } else if (type === 'pulsarr') {
+    if (svc.apiKey) headers['X-API-Key'] = svc.apiKey;
+  } else if (type === 'glances' || type === 'adguard') {
+    // Glances (when started with --password) and AdGuard Home use Basic auth.
+    if (svc.username || svc.password) headers.Authorization = `Basic ${Buffer.from(`${svc.username || ''}:${svc.password || ''}`).toString('base64')}`;
+  } else if (type === 'navidrome') {
+    // Subsonic API token auth: t = md5(password + salt), fresh salt per call.
+    Object.assign(query, subsonicAuth(svc));
+  } else if (type === 'pihole') {
+    // Pi-hole v6 uses a session id from POST /api/auth; see forwardPihole.
   } else if (type === 'maintainerr') {
     // Maintainerr has no API authentication. Nothing to inject; access control
     // is ACC's own auth (and Cloudflare Access, if configured).
@@ -118,7 +143,7 @@ function authFor(svc) {
 // SID, Transmission session id, Deluge/Flood session cookies); also redacted.
 function sessionTokensFor(serviceKey) {
   if (!serviceKey) return [];
-  return [qbitSid, transmissionSession, delugeSession, floodSession]
+  return [qbitSid, transmissionSession, delugeSession, floodSession, piholeSession]
     .map((m) => m.get(serviceKey)).filter((v) => typeof v === 'string');
 }
 
@@ -281,7 +306,7 @@ async function transmissionFetch(svc, serviceKey, target, init, timeoutMs = 1200
 
 async function forwardTransmission(svc, serviceKey, subPath, req, res) {
   const incomingQs = (req.originalUrl.split('?')[1]) || '';
-  const target = buildTargetUrl(svc, subPath, incomingQs);
+  const target = buildTargetUrl(svc, transmissionSubPath(subPath, svc.rpcPath), incomingQs);
   const { headers: authHeaders } = authFor(svc);
   const headers = { ...authHeaders };
   if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
@@ -392,6 +417,98 @@ async function forwardDeluge(svc, serviceKey, subPath, req, res) {
 // Cached per ROUTE service key; a 401 triggers one re-login + retry.
 const floodSession = new Map();
 const floodPending = new Map();
+// ---- Pi-hole v6 sessions ----
+// POST /api/auth { password } returns { session: { valid, sid } }; requests
+// then carry X-FTL-SID. With no web password set, sid is null and no header is
+// needed. Pi-hole limits concurrent sessions, so one is cached per service and
+// replaced only when it expires (401).
+const piholeSession = new Map();
+const piholePending = new Map();
+export function _resetPiholeSessions() { piholeSession.clear(); piholePending.clear(); }
+
+async function piholeLogin(svc) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  let response;
+  try {
+    response = await fetch(`${trimSlash(svc.baseUrl)}/api/auth`, {
+      method: 'POST', redirect: 'manual', signal: controller.signal,
+      headers: combinedHeaders(svc, { 'content-type': 'application/json', accept: 'application/json' }),
+      body: JSON.stringify({ password: svc.password || '' }),
+    });
+  } finally { clearTimeout(timer); }
+  const data = await response.json().catch(() => null);
+  if (response.status === 401 || (data && data.session && data.session.valid === false)) throw new Error('Pi-hole login failed (check the web or app password)');
+  if (!response.ok) throw new Error(`Pi-hole login failed (HTTP ${response.status})`);
+  return (data && data.session && data.session.sid) || '';
+}
+
+async function ensurePiholeSession(svc, serviceKey, force = false) {
+  if (!force && piholeSession.has(serviceKey)) return piholeSession.get(serviceKey);
+  if (piholePending.has(serviceKey)) return piholePending.get(serviceKey);
+  const pending = piholeLogin(svc)
+    .then((sid) => { piholeSession.set(serviceKey, sid); piholePending.delete(serviceKey); return sid; })
+    .catch((error) => { piholePending.delete(serviceKey); throw error; });
+  piholePending.set(serviceKey, pending);
+  return pending;
+}
+
+async function piholeFetch(svc, serviceKey, target, init, timeoutMs = 60000) {
+  const controller = init.signal ? null : new AbortController();
+  const run = async (sid) => {
+    const headers = { ...init.headers, ...(sid ? { 'X-FTL-SID': sid } : {}) };
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try { return await fetch(target, { ...init, headers, redirect: 'manual', signal: init.signal || controller.signal }); }
+    finally { if (timer) clearTimeout(timer); }
+  };
+  let upstream = await run(await ensurePiholeSession(svc, serviceKey));
+  if (upstream.status === 401) {
+    try { await upstream.arrayBuffer(); } catch { /* drain */ }
+    upstream = await run(await ensurePiholeSession(svc, serviceKey, true));
+  }
+  return upstream;
+}
+
+async function forwardPihole(svc, serviceKey, subPath, req, res) {
+  // The login route is handled here; never let the browser call it.
+  if (/^api\/auth(\/|$)/i.test(subPath)) return res.status(403).json({ error: 'Pi-hole sign-in is handled by the server' });
+  const incomingQs = (req.originalUrl.split('?')[1]) || '';
+  const target = buildTargetUrl(svc, subPath, incomingQs);
+  const method = req.method.toUpperCase();
+  const controller = new AbortController();
+  const headers = combinedHeaders(svc, {});
+  if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
+  if (req.headers.accept) headers.accept = req.headers.accept;
+  const init = { method, headers, signal: controller.signal };
+  if (!['GET', 'HEAD'].includes(method) && req.body && req.body.length) init.body = req.body;
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const upstream = await piholeFetch(svc, serviceKey, target, init);
+    clearTimeout(timer);
+    res.status(upstream.status);
+    const ct = upstream.headers.get('content-type');
+    if (ct) res.set('content-type', ct);
+    await pipeUpstream(upstream, res, controller, svc, serviceKey);
+  } catch (err) {
+    clearTimeout(timer);
+    if (res.headersSent) { if (!res.writableEnded) res.destroy(err); return; }
+    const reason = classifyUpstreamError(err);
+    res.status(err.name === 'AbortError' ? 504 : 502).json({ error: reason, detail: reason, service: svc.label });
+  }
+}
+
+async function pingPihole(svc, serviceKey, started) {
+  try {
+    const target = new URL(`${trimSlash(svc.baseUrl)}/api/info/version`);
+    const upstream = await piholeFetch(svc, serviceKey, target, { method: 'GET', headers: combinedHeaders(svc, { accept: 'application/json' }) }, 8000);
+    const data = await upstream.json().catch(() => null);
+    const v = data && data.version && data.version.core && data.version.core.local && data.version.core.local.version;
+    return { ok: upstream.ok, status: upstream.status, ms: Date.now() - started, version: v || undefined, error: upstream.ok ? undefined : upstream.status === 401 ? 'Auth / access denied' : `HTTP ${upstream.status}` };
+  } catch (error) {
+    return { ok: false, status: 0, ms: Date.now() - started, error: classifyUpstreamError(error) };
+  }
+}
+
 export function _resetFloodSessions() { floodSession.clear(); floodPending.clear(); }
 export function _floodSessionSnapshot() { return new Map(floodSession); }
 export function _setFloodSession(key, cookie) { floodSession.set(key, cookie); }
@@ -533,6 +650,12 @@ async function forward(svc, serviceKey, subPath, req, res) {
   if (svc.type === 'transmission') return forwardTransmission(svc, serviceKey, subPath, req, res);
   if (svc.type === 'deluge') return forwardDeluge(svc, serviceKey, subPath, req, res);
   if (svc.type === 'flood') return forwardFlood(svc, serviceKey, subPath, req, res);
+  if (svc.type === 'pihole') return forwardPihole(svc, serviceKey, subPath, req, res);
+  // Portainer starts read-only: nothing that could start, stop, change or
+  // remove a container (or anything else) is forwarded, whatever the role.
+  if (svc.type === 'portainer' && !['GET', 'HEAD'].includes(req.method.toUpperCase())) {
+    return res.status(405).json({ error: 'Portainer is read-only in Arr Command Center' });
+  }
   const incomingQs = (req.originalUrl.split('?')[1]) || '';
   const target = buildTargetUrl(svc, subPath, incomingQs);
   const { headers: authHeaders } = authFor(svc);
@@ -601,6 +724,13 @@ const HEALTH_PATH = {
   audiobookshelf: 'status',
   autobrr: 'api/config',
   maintainerr: 'api/app/status',
+  portainer: 'api/system/status',
+  glances: 'api/4/version',
+  adguard: 'control/status',
+  syncthing: 'rest/system/version',
+  navidrome: 'rest/ping.view',
+  pulsarr: 'v1/approval/stats',
+  whisparr: 'api/v3/system/status',
   indexer: 'api?t=caps&o=json',
 };
 
@@ -677,7 +807,7 @@ export async function serviceRequest(svc, path, { method = 'POST', body, timeout
 
 async function pingTransmission(svc, serviceKey, started) {
   try {
-    const target = new URL(`${trimSlash(svc.baseUrl)}/transmission/rpc`);
+    const target = new URL(`${trimSlash(svc.baseUrl)}${safeRpcPath(svc.rpcPath)}`);
     const { headers } = authFor(svc);
     const upstream = await transmissionFetch(svc, serviceKey, target, {
       method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json', ...headers },
@@ -760,6 +890,7 @@ export async function pingService(svc, serviceKey) {
   if (svc.type === 'nzbget') return pingNzbget(svc, started);
   if (svc.type === 'flood') return pingFlood(svc, key, started);
   if (svc.type === 'tdarr') return pingTdarr(svc, started);
+  if (svc.type === 'pihole') return pingPihole(svc, key, started);
   try {
     const path = HEALTH_PATH[svc.type] || '';
     const [p, q] = path.split('?');
@@ -770,13 +901,17 @@ export async function pingService(svc, serviceKey) {
     const upstream = await fetch(target, { headers: { accept: 'application/json', ...headers }, signal: controller.signal });
     clearTimeout(timeout);
     const ms = Date.now() - started;
-    let version;
+    let version; let subsonicError;
     try {
       let data = await upstream.json();
       // Maintainerr's /api/app/status returns a JSON-encoded string.
       if (typeof data === 'string') { try { data = JSON.parse(data); } catch { /* plain string */ } }
-      version = data.version || data.Version || data.serverVersion || data.settings?.version || data.data?.bazarr_version || undefined;
+      const sub = data && data['subsonic-response'];
+      if (sub && sub.status !== 'ok') { subsonicError = (sub.error && sub.error.message) || 'Subsonic error'; }
+      if (typeof data === 'string' && svc.type === 'glances') data = { version: data };
+      version = data.version || data.Version || data.serverVersion || data.settings?.version || data.data?.bazarr_version || (sub && (sub.serverVersion || sub.version)) || undefined;
     } catch { /* non-json */ }
+    if (subsonicError) return { ok: false, status: upstream.status, ms, error: subsonicError };
     const error = upstream.ok ? undefined
       : (upstream.status === 401 || upstream.status === 403) ? 'Auth / access denied'
       : (upstream.status >= 300 && upstream.status < 400)
@@ -800,8 +935,17 @@ export function hasDotSegment(subPath) {
   return p.split('/').some((seg) => seg === '.' || seg === '..');
 }
 
-export function createProxyRouter(cfg) {
+// `authorize(req, svc, subPath)` may reject a request before it is forwarded;
+// it returns null to allow, or { status, error } to refuse (roles).
+export function createProxyRouter(cfg, { authorize } = {}) {
   const router = express.Router();
+  const refused = (req, res, svc, subPath) => {
+    if (!authorize) return false;
+    const denial = authorize(req, svc, subPath);
+    if (!denial) return false;
+    res.status(denial.status || 403).json({ error: denial.error, role: denial.role });
+    return true;
+  };
 
   // Raw body so we can forward any payload untouched.
   router.use(express.raw({ type: '*/*', limit: '25mb' }));
@@ -820,6 +964,7 @@ export function createProxyRouter(cfg) {
     // the service's base path, e.g. from https://host/sonarr to /radarr on a
     // shared reverse proxy, carrying Sonarr's injected credentials with it.
     if (hasDotSegment(subPath)) return res.status(400).json({ error: 'Invalid path' });
+    if (refused(req, res, svc, subPath)) return;
     await forward(svc, req.params.service, subPath, req, res);
   });
 
@@ -829,6 +974,7 @@ export function createProxyRouter(cfg) {
     if (!svc || svc.enabled === false) {
       return res.status(404).json({ error: `Unknown or disabled service: ${req.params.service}` });
     }
+    if (refused(req, res, svc, '')) return;
     await forward(svc, req.params.service, '', req, res);
   });
 

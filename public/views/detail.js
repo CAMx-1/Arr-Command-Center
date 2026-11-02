@@ -1,4 +1,5 @@
-import { h, mount, spinner, empty, openModal, closeModal, fmtBytes, copyable } from '../lib/ui.js';
+import { h, mount, spinner, empty, openModal, closeModal, fmtBytes, copyable, toast } from '../lib/ui.js';
+import { loadSubtitleStatus, bazarrServices } from '../lib/bazarrStatus.js';
 import { cachedGet } from '../lib/cache.js';
 import { quickAddControls, seerrResolver, idResolver } from '../lib/quickAdd.js';
 import { openInArr } from '../app.js';
@@ -163,7 +164,7 @@ function arrInfoRow(label, value) {
   );
 }
 
-export function openArrFileInfo(label, isTv, item, arr) {
+export function openArrFileInfo(label, isTv, item, arr, ctx) {
   const stats = item.statistics || {};
   const hasFile = isTv ? (stats.episodeFileCount > 0) : item.hasFile;
   const size = isTv ? stats.sizeOnDisk : item.sizeOnDisk;
@@ -188,6 +189,11 @@ export function openArrFileInfo(label, isTv, item, arr) {
     filesEl = h('div', { style: { marginTop: '16px' } }, h('div', { class: 'section-title', style: { margin: '0 0 8px' } }, 'Files'), spinner());
     body.appendChild(filesEl);
   }
+  // Subtitle status from Bazarr (when one is configured).
+  const subsEl = ctx && item.id && bazarrServices(ctx.state && ctx.state.services).length
+    ? h('div', { style: { marginTop: '16px' } }, h('div', { class: 'section-title', style: { margin: '0 0 8px' } }, 'Subtitles'), spinner())
+    : null;
+  if (subsEl) body.appendChild(subsEl);
   openModal({
     title: `${item.title}${item.year ? ` (${item.year})` : ''}`,
     body,
@@ -195,6 +201,7 @@ export function openArrFileInfo(label, isTv, item, arr) {
       h('button', { class: 'btn', onclick: closeModal }, 'Close'),
     ),
   });
+  if (subsEl) hydrateSubtitles(subsEl, ctx, isTv, item.id);
   if (filesEl) {
     cachedGet(`arr:${item.id}:episodefile`, () => arr.get(`episodefile?seriesId=${item.id}`), 120000)
       .then((files) => {
@@ -207,6 +214,42 @@ export function openArrFileInfo(label, isTv, item, arr) {
       })
       .catch(() => { mount(filesEl, h('div', { class: 'section-title', style: { margin: '0 0 8px' } }, 'Files'), h('div', { class: 'dim' }, 'Could not load files')); });
   }
+}
+
+const langPills = (langs, cls) => langs.map((l) => h('span', { class: `pill ${cls}` }, l));
+
+async function hydrateSubtitles(el, ctx, isTv, id) {
+  const head = (text) => h('div', { class: 'section-title', style: { margin: '0 0 8px' } }, text);
+  const found = await loadSubtitleStatus(ctx.api, ctx.state.services, { isTv, id });
+  if (!found) { mount(el, head('Subtitles'), h('div', { class: 'dim' }, 'Not found in Bazarr')); return; }
+  const { svc, bz, status } = found;
+  const run = async (btn, paths, done) => {
+    btn.disabled = true;
+    try { for (const p of paths) await bz.patch(p); toast(done, 'success'); hydrateSubtitles(el, ctx, isTv, id); }
+    catch (e) { toast(e.message || 'Search failed', 'error'); btn.disabled = false; }
+  };
+  const searchBtn = (label, paths, done) => { const b = h('button', { class: 'btn sm primary', onclick: () => run(b, paths, done) }, label); return b; };
+  const source = h('span', { class: 'dim', style: { fontSize: '12px' } }, ` · ${svc.label}`);
+  if (!isTv) {
+    mount(el, head('Subtitles'),
+      h('div', { class: 'meta-line' },
+        status.have.length ? h('span', { class: 'dim' }, 'Have:') : null, ...langPills(status.have, 'ok'),
+        status.missing.length ? h('span', { class: 'dim' }, 'Missing:') : null, ...langPills(status.missing, 'warn'),
+        !status.have.length && !status.missing.length ? h('span', { class: 'dim' }, 'No subtitle languages wanted') : null,
+        source),
+      status.searchPaths.length ? h('div', { style: { marginTop: '8px' } }, searchBtn('Search missing subtitles', status.searchPaths, 'Subtitle search finished')) : null);
+    return;
+  }
+  const rows = status.missing.slice(0, 50).map((m) => h('div', { class: 'row' },
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title', style: { fontSize: '13px' } }, m.label),
+      h('div', { class: 'meta-line' }, h('span', { class: 'dim' }, 'Missing:'), ...langPills(m.langs, 'warn'))),
+    h('div', { class: 'row-actions' }, searchBtn('Search', m.searchPaths, 'Subtitle search finished'))));
+  mount(el, head(`Subtitles · ${status.complete}/${status.episodes} episodes complete`),
+    h('div', { class: 'meta-line' }, status.have.length ? h('span', { class: 'dim' }, 'Languages on disk:') : null, ...langPills(status.have, 'ok'), source),
+    rows.length ? h('div', { class: 'list', style: { maxHeight: '300px', overflowY: 'auto', marginTop: '8px' } }, ...rows) : h('div', { class: 'dim', style: { marginTop: '6px' } }, 'Every episode has its subtitles'),
+    status.missing.length > 50 ? h('div', { class: 'dim' }, `+${status.missing.length - 50} more`) : null,
+    status.searchAllPath ? h('div', { style: { marginTop: '8px' } }, searchBtn(`Search all ${status.missing.length} missing`, [status.searchAllPath], 'Series subtitle search finished')) : null);
 }
 
 function episodeFileRow(f) {

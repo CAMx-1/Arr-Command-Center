@@ -7,8 +7,12 @@
     "password": "change-me",
     "plex": {
       "enabled": false,
-      "allowedUsers": ["your-plex-username-or-email"],
+      "allowedUsers": [
+        "your-plex-username-or-email"
+      ],
       "allowAnyPlexUser": false,
+      "roles": {},
+      "defaultRole": "guest",
       "secureCookies": false,
       "product": "Arr Command Center",
       "sessionDays": 30
@@ -160,6 +164,63 @@
       "baseUrl": "https://prowlarr.example.com",
       "apiKey": "YOUR_PROWLARR_API_KEY",
       "_comment": "Set \"sample\": true (and omit baseUrl/apiKey) to render built-in demo data instead of a live server."
+    },
+    "portainer": {
+      "label": "Portainer",
+      "type": "portainer",
+      "enabled": false,
+      "baseUrl": "https://portainer:9443",
+      "apiKey": "ptr_your-access-token"
+    },
+    "glances": {
+      "label": "Glances",
+      "type": "glances",
+      "enabled": false,
+      "baseUrl": "http://nas:61208"
+    },
+    "pihole": {
+      "label": "Pi-hole",
+      "type": "pihole",
+      "enabled": false,
+      "baseUrl": "http://pihole",
+      "password": "your-pihole-app-password"
+    },
+    "adguard": {
+      "label": "AdGuard Home",
+      "type": "adguard",
+      "enabled": false,
+      "baseUrl": "http://adguard:3000",
+      "username": "admin",
+      "password": "your-password"
+    },
+    "syncthing": {
+      "label": "Syncthing",
+      "type": "syncthing",
+      "enabled": false,
+      "baseUrl": "http://nas:8384",
+      "apiKey": "your-syncthing-api-key"
+    },
+    "navidrome": {
+      "label": "Navidrome",
+      "type": "navidrome",
+      "enabled": false,
+      "baseUrl": "http://navidrome:4533",
+      "username": "your-user",
+      "password": "your-password"
+    },
+    "pulsarr": {
+      "label": "Pulsarr",
+      "type": "pulsarr",
+      "enabled": false,
+      "baseUrl": "http://pulsarr:3003",
+      "apiKey": "your-pulsarr-api-key"
+    },
+    "whisparr": {
+      "label": "Whisparr",
+      "type": "whisparr",
+      "enabled": false,
+      "baseUrl": "http://whisparr:6969",
+      "apiKey": "your-whisparr-api-key"
     }
   },
   "system": {

@@ -34,6 +34,9 @@ export const MOCK_PORTS = {
   prowlarr: 19696,
 };
 
+import { INTEGRATION_MOCK_PORTS, makePortainer, makeGlances, makePihole, makeAdguard, makeSyncthing, makeNavidrome, makePulsarr } from './integrationMocks.js';
+Object.assign(MOCK_PORTS, INTEGRATION_MOCK_PORTS);
+
 const cfSeen = {}; // service -> last seen CF headers
 
 function recordCf(name, req) {
@@ -201,7 +204,7 @@ function makeSonarr(opts = {}) {
   let rootFolders = [{ id: 1, path: 'C:\\Media\\TV', freeSpace: 0, accessible: false, unmappedFolders: [] }, { id: 2, path: '/data/tv', freeSpace: 1649267441664, accessible: true, unmappedFolders: [] }];
   app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
   app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 500000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
-  app.get('/api/v3/qualityprofile', (req, res) => res.json([{ id: 1, name: 'HD-1080p' }, { id: 2, name: 'Ultra-HD' }, { id: 3, name: 'Any' }]));
+  app.get('/api/v3/qualityprofile', (req, res) => res.json(MOCK_QUALITY_PROFILES));
   // Stable fake 'added' dates (days ago derived from id) for cleanup/age features.
   app.get('/api/v3/series', (req, res) => res.json(series.map((x) => (x.added ? x : { ...x, added: new Date(Date.now() - (120 + x.id * 97) * 86400000).toISOString() }))));
   app.get('/api/v3/queue', (req, res) => res.json({ page: 1, pageSize: 20, totalRecords: queue.length, records: queue }));
@@ -211,6 +214,8 @@ function makeSonarr(opts = {}) {
     res.json([
       { id: 9001, seriesId: 1, title: 'Cold Harbor', seasonNumber: 2, episodeNumber: 10, airDateUtc: new Date(now + 86400000).toISOString(), hasFile: false, monitored: true, series: { title: 'Severance' } },
       { id: 9002, seriesId: 2, title: 'Next', seasonNumber: 3, episodeNumber: 1, airDateUtc: new Date(now + 3 * 86400000).toISOString(), hasFile: false, monitored: true, series: { title: 'The Bear' } },
+      // A streaming-style full-season drop: eight episodes on one day.
+      ...Array.from({ length: 8 }, (_, i) => ({ id: 9100 + i, seriesId: 3, title: `Chapter ${i + 1}`, seasonNumber: 3, episodeNumber: i + 1, airDateUtc: new Date(now + 2 * 86400000 + i * 60000).toISOString(), hasFile: false, monitored: true, series: { title: 'Foundation' } })),
     ]);
   });
   app.get('/api/v3/series/lookup', (req, res) => {
@@ -258,6 +263,7 @@ function makeSonarr(opts = {}) {
   let tags = [{ id: 1, label: 'anime' }, { id: 2, label: 'kids' }];
   app.get('/api/v3/tag', (req, res) => res.json(tags));
   app.post('/api/v3/tag', (req, res) => { const t = { id: (tags.reduce((mx, x) => Math.max(mx, x.id), 0) || 0) + 1, label: String((req.body && req.body.label) || 'tag') }; tags.push(t); res.status(201).json(t); });
+  mountArrLibraryExtras(app, 'series', { getTags: () => tags, setTags: (t) => { tags = t; }, getItems: () => series });
   app.get('/api/v3/rename', (req, res) => res.json([
     { episodeFileId: 501, seriesId: Number(req.query.seriesId) || 1, existingPath: 'Season 02/severance.s02e10.1080p.web.mkv', newPath: 'Season 02/Severance - S02E10 - Cold Harbor [WEBDL-1080p].mkv' },
   ]));
@@ -283,6 +289,66 @@ function makeSonarr(opts = {}) {
     { id: 7101, seriesId: 3, seasonNumber: 2, episodeNumber: 1, title: 'In Seldon\u2019s Shadow', airDateUtc: new Date(Date.now() - 5 * 86400000).toISOString(), series: { title: 'Foundation' } },
   ] }));
   return app;
+}
+
+// Shared Sonarr/Radarr extras: tag usage/rename/delete, custom formats and a
+// paged blocklist.
+const q = (id, name) => ({ quality: { id, name }, allowed: true, items: [] });
+const MOCK_QUALITY_PROFILES = [
+  { id: 1, name: 'HD-1080p', upgradeAllowed: true, cutoff: 7, minFormatScore: 0, cutoffFormatScore: 100, minUpgradeFormatScore: 1,
+    items: [q(4, 'HDTV-720p'), q(5, 'WEBDL-720p'), q(9, 'HDTV-1080p'), q(3, 'WEBDL-1080p'), q(7, 'Bluray-1080p')],
+    formatItems: [{ format: 1, name: 'x265', score: 50 }, { format: 2, name: 'HDR', score: 0 }, { format: 3, name: 'Bad release group', score: -1000 }] },
+  { id: 2, name: 'Ultra-HD', upgradeAllowed: true, cutoff: 19, minFormatScore: 10, cutoffFormatScore: 200, minUpgradeFormatScore: 10,
+    items: [q(18, 'WEBDL-2160p'), q(19, 'Bluray-2160p')],
+    formatItems: [{ format: 1, name: 'x265', score: 25 }, { format: 2, name: 'HDR', score: 150 }, { format: 3, name: 'Bad release group', score: -1000 }] },
+  { id: 3, name: 'Any', upgradeAllowed: false, cutoff: 1, minFormatScore: 0, cutoffFormatScore: 0, items: [q(1, 'SDTV'), q(3, 'WEBDL-1080p')], formatItems: [] },
+];
+const MOCK_CUSTOM_FORMATS = [
+  { id: 1, name: 'x265', includeCustomFormatWhenRenaming: false, specifications: [{ name: 'x265/HEVC', implementation: 'ReleaseTitleSpecification', negate: false, required: true, fields: [{ name: 'value', value: '[xh][ .]?265|\\bHEVC(\\b|\\d)' }] }] },
+  { id: 2, name: 'HDR', includeCustomFormatWhenRenaming: true, specifications: [{ name: 'HDR', implementation: 'ReleaseTitleSpecification', negate: false, required: false, fields: [{ name: 'value', value: '\\bHDR(\\b|\\d)' }] }, { name: 'Not SDR', implementation: 'SourceSpecification', negate: true, required: false, fields: [] }] },
+  { id: 3, name: 'Bad release group', includeCustomFormatWhenRenaming: false, specifications: [{ name: 'Groups', implementation: 'ReleaseGroupSpecification', negate: false, required: false, fields: [{ name: 'value', value: '^(YIFY|aXXo)$' }] }] },
+];
+function mountArrLibraryExtras(app, kind, state) {
+  const idKey = kind === 'series' ? 'seriesIds' : 'movieIds';
+  app.get('/api/v3/tag/detail', (req, res) => res.json(state.getTags().map((t) => ({
+    ...t, delayProfileIds: [], importListIds: [], notificationIds: [], restrictionIds: [], indexerIds: [], downloadClientIds: [], autoTagIds: [],
+    [idKey]: state.getItems().filter((x) => (x.tags || []).includes(t.id)).map((x) => x.id),
+  }))));
+  app.put('/api/v3/tag/:id', (req, res) => {
+    const id = Number(req.params.id);
+    const label = String((req.body && req.body.label) || '').trim().toLowerCase();
+    if (!label) return res.status(400).json([{ propertyName: 'Label', errorMessage: "'Label' must not be empty." }]);
+    const t = state.getTags().find((x) => x.id === id);
+    if (!t) return res.status(404).json({ message: 'NotFound' });
+    t.label = label;
+    res.status(202).json(t);
+  });
+  app.delete('/api/v3/tag/:id', (req, res) => {
+    const id = Number(req.params.id);
+    state.setTags(state.getTags().filter((x) => x.id !== id));
+    for (const x of state.getItems()) if (Array.isArray(x.tags)) x.tags = x.tags.filter((t) => t !== id);
+    res.json({});
+  });
+  app.get('/api/v3/customformat', (req, res) => res.json(MOCK_CUSTOM_FORMATS));
+  const titles = kind === 'series'
+    ? ['The.Bear.S03E05.1080p.WEB.h264-BADGRP', 'Severance.S02E09.720p.HDTV.x264-LOL', 'Foundation.S02E01.2160p.WEB.H265-FAKE']
+    : ['Furiosa.2024.1080p.CAM.x264-YIFY', 'Oppenheimer.2023.2160p.WEB.H265-FAKE', 'Dune.Part.Two.2024.720p.HDTS-aXXo'];
+  let blocklist = Array.from({ length: 27 }, (_, i) => ({
+    id: i + 1, sourceTitle: `${titles[i % 3]}.${i + 1}`, protocol: i % 2 ? 'usenet' : 'torrent', indexer: i % 2 ? 'NZBGeek' : 'TorrentLeech',
+    date: new Date(Date.now() - i * 3600000).toISOString(), message: i % 3 ? 'Manually marked as failed' : 'Download failed: unpack error',
+    quality: { quality: { name: i % 3 === 2 ? 'WEBDL-2160p' : 'WEBDL-1080p' } },
+  }));
+  app.get('/api/v3/blocklist', (req, res) => {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.min(200, Math.max(1, Number(req.query.pageSize) || 20));
+    res.json({ page, pageSize, totalRecords: blocklist.length, records: blocklist.slice((page - 1) * pageSize, page * pageSize) });
+  });
+  app.delete('/api/v3/blocklist/bulk', (req, res) => {
+    const ids = new Set(((req.body && req.body.ids) || []).map(Number));
+    blocklist = blocklist.filter((b) => !ids.has(b.id));
+    res.json({});
+  });
+  app.delete('/api/v3/blocklist/:id', (req, res) => { blocklist = blocklist.filter((b) => b.id !== Number(req.params.id)); res.json({}); });
 }
 
 // ---------------- Radarr ----------------
@@ -320,7 +386,7 @@ function makeRadarr(opts = {}) {
   ];
   app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
   app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 900000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
-  app.get('/api/v3/qualityprofile', (req, res) => res.json([{ id: 1, name: 'HD-1080p' }, { id: 2, name: 'Ultra-HD' }, { id: 3, name: 'Any' }]));
+  app.get('/api/v3/qualityprofile', (req, res) => res.json(MOCK_QUALITY_PROFILES));
   app.get('/api/v3/movie', (req, res) => res.json(movies.map((x) => (x.added ? x : { ...x, added: new Date(Date.now() - (90 + (x.id % 40) * 23) * 86400000).toISOString() }))));
   app.get('/api/v3/calendar', (req, res) => res.json([
     { id: 1, title: 'Furiosa', year: 2024, digitalRelease: new Date(Date.now() + 5 * 86400000).toISOString(), hasFile: false, images: [] },
@@ -367,6 +433,7 @@ function makeRadarr(opts = {}) {
   let tags = [{ id: 1, label: '4k' }, { id: 2, label: 'kids' }];
   app.get('/api/v3/tag', (req, res) => res.json(tags));
   app.post('/api/v3/tag', (req, res) => { const t = { id: (tags.reduce((mx, x) => Math.max(mx, x.id), 0) || 0) + 1, label: String((req.body && req.body.label) || 'tag') }; tags.push(t); res.status(201).json(t); });
+  mountArrLibraryExtras(app, 'movie', { getTags: () => tags, setTags: (t) => { tags = t; }, getItems: () => movies });
   app.get('/api/v3/rename', (req, res) => res.json([
     { movieFileId: 601, movieId: Number(req.query.movieId) || 1, existingPath: 'furiosa.2024.2160p.mkv', newPath: 'Furiosa A Mad Max Saga (2024) [Bluray-2160p].mkv' },
   ]));
@@ -745,8 +812,29 @@ function makeBazarr() {
   app.get('/api/system/health', (req, res) => res.json({ data: [] }));
   app.get('/api/badges', (req, res) => res.json(badges()));
 
-  app.get('/api/series', (req, res) => res.json({ data: series, total: series.length }));
-  app.get('/api/movies', (req, res) => res.json({ data: movies, total: movies.length }));
+  // Like Bazarr, ?seriesid[]= / ?radarrid[]= filter to specific items.
+  const ids = (v) => [].concat(v ?? []).map(Number).filter(Number.isFinite);
+  app.get('/api/series', (req, res) => { const want = ids(req.query['seriesid[]'] ?? req.query.seriesid); const data = want.length ? series.filter((x) => want.includes(x.sonarrSeriesId)) : series; res.json({ data, total: data.length }); });
+  app.get('/api/movies', (req, res) => { const want = ids(req.query['radarrid[]'] ?? req.query.radarrid); const data = want.length ? movies.filter((x) => want.includes(x.radarrId)) : movies; res.json({ data, total: data.length }); });
+  // Episodes of a series: those still wanted carry missing_subtitles; the rest
+  // of the season count as complete in English.
+  app.get('/api/episodes', (req, res) => {
+    const want = ids(req.query['seriesid[]'] ?? req.query.seriesid);
+    if (!want.length) return res.status(404).json({ message: 'Series or Episode ID not provided' });
+    const data = [];
+    for (const s of series.filter((x) => want.includes(x.sonarrSeriesId))) {
+      const total = Math.min(Number(s.episodeFileCount) || 6, 12);
+      for (let n = 1; n <= total; n += 1) {
+        const epId = s.sonarrSeriesId * 1000 + n;
+        data.push({ sonarrSeriesId: s.sonarrSeriesId, sonarrEpisodeId: epId, title: `Episode ${n}`, season: 1, episode: n, monitored: true, subtitles: [have('en', `${s.path}/S01E${n}.en.srt`)], missing_subtitles: [] });
+      }
+      for (const w of wantedEpisodes.filter((x) => x.sonarrSeriesId === s.sonarrSeriesId)) {
+        const [season, episode] = String(w.episode_number || '1x1').split('x').map(Number);
+        data.push({ sonarrSeriesId: s.sonarrSeriesId, sonarrEpisodeId: w.sonarrEpisodeId, title: w.episodeTitle, season, episode, monitored: true, subtitles: [], missing_subtitles: w.missing_subtitles });
+      }
+    }
+    res.json({ data, total: data.length });
+  });
 
   app.get('/api/episodes/wanted', (req, res) => res.json({ data: wantedEpisodes, total: wantedEpisodes.length }));
   app.get('/api/movies/wanted', (req, res) => res.json({ data: wantedMovies, total: wantedMovies.length }));
@@ -1404,6 +1492,14 @@ export function startMockServices() {
     ['autobrr', makeAutobrr(), MOCK_PORTS.autobrr],
     ['maintainerr', makeMaintainerr(), MOCK_PORTS.maintainerr],
     ['tdarr', makeTdarr(), MOCK_PORTS.tdarr],
+    ['portainer', makePortainer(), MOCK_PORTS.portainer],
+    ['glances', makeGlances(), MOCK_PORTS.glances],
+    ['pihole', makePihole(), MOCK_PORTS.pihole],
+    ['adguard', makeAdguard(), MOCK_PORTS.adguard],
+    ['syncthing', makeSyncthing(), MOCK_PORTS.syncthing],
+    ['navidrome', makeNavidrome(), MOCK_PORTS.navidrome],
+    ['pulsarr', makePulsarr(), MOCK_PORTS.pulsarr],
+    ['whisparr', makeSonarr({ instanceName: 'Whisparr (mock)' }), MOCK_PORTS.whisparr],
   ];
   const servers = [];
   for (const [name, app, port] of defs) {

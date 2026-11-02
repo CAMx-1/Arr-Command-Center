@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as store from './store.js';
 import { writeFileAtomic } from './store.js';
+import { createRoleDirectory } from './roles.js';
 
 const PLEX_API = 'https://plex.tv/api/v2';
 const COOKIE = 'acc_session';
@@ -60,24 +61,27 @@ export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root,
   const enabled = !!pcfg.enabled;
   const product = pcfg.product || 'Arr Command Center';
   const allowed = (pcfg.allowedUsers || []).map((u) => String(u).toLowerCase().trim()).filter(Boolean);
+  const roles = createRoleDirectory(cfg, authStore);
   const ttlSeconds = (pcfg.sessionDays || 30) * 86400;
   const secureCookies = !!pcfg.secureCookies || process.env.SECURE_COOKIES === 'true';
   const allowAny = !!pcfg.allowAnyPlexUser || process.env.PLEX_ALLOW_ANY === 'true';
 
   // Fail-closed by default: an empty allowlist denies all logins unless the
   // operator explicitly opts into open access.
-  if (enabled && !allowed.length && !allowAny) {
+  const managedCount = () => { const l = typeof authStore.get === 'function' ? authStore.get('plexUsers', []) : []; return Array.isArray(l) ? l.length : 0; };
+  if (enabled && !allowed.length && !allowAny && !managedCount()) {
     console.warn('[auth] Plex auth is ENABLED but the allowlist is EMPTY and allowAnyPlexUser is false — all logins will be DENIED. Add auth.plex.allowedUsers, or set auth.plex.allowAnyPlexUser: true to allow any Plex account.');
   } else if (enabled && allowAny && !allowed.length) {
     console.warn('[auth] Plex auth is ENABLED with allowAnyPlexUser=true — ANY Plex account can sign in. Set auth.plex.allowedUsers to restrict access.');
+    if (!managedCount()) console.warn('[auth] No admin is listed, so every signed-in Plex user is an admin. Add yourself as an admin in Settings → Users & roles (or auth.plex.allowedUsers) to apply roles.');
   }
 
   const state = loadState(root, dataDir);
   const clientId = pcfg.clientId || state.clientId;
   const secret = process.env.SESSION_SECRET || pcfg.sessionSecret || state.sessionSecret;
 
-  function sign(username) {
-    const payload = Buffer.from(JSON.stringify({ u: username, exp: Math.floor(Date.now() / 1000) + ttlSeconds })).toString('base64url');
+  function sign(username, email) {
+    const payload = Buffer.from(JSON.stringify({ u: username, ...(email ? { e: email } : {}), exp: Math.floor(Date.now() / 1000) + ttlSeconds })).toString('base64url');
     const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
     return `${payload}.${sig}`;
   }
@@ -90,9 +94,9 @@ export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root,
     const a = Buffer.from(sig); const b = Buffer.from(expected);
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
     try {
-      const { u, exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
+      const { u, e, exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
       if (!exp || exp < Math.floor(Date.now() / 1000)) return null;
-      return u;
+      return u ? { username: u, email: e || '' } : null;
     } catch { return null; }
   }
 
@@ -115,11 +119,16 @@ export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root,
     return parts.join('; ');
   }
 
-  function isAllowed(user) {
-    if (!allowed.length) return allowAny; // empty allowlist: fail closed unless allowAnyPlexUser
-    const uname = String(user.username || '').toLowerCase();
-    const email = String(user.email || '').toLowerCase();
-    return allowed.includes(uname) || allowed.includes(email);
+  // Allowed = has a role (config allowlist, a Settings-managed user, or
+  // allowAnyPlexUser). Empty lists fail closed unless allowAnyPlexUser.
+  function isAllowed(user) { return roles.isAllowed(user.username, user.email); }
+  // Re-checked on every request, so removing a user or changing a role takes
+  // effect immediately instead of when the session cookie expires.
+  function sessionUser(req) {
+    const s = verify(getCookie(req, COOKIE));
+    if (!s) return null;
+    const role = roles.lookup(s.username, s.email);
+    return role ? { ...s, role } : null;
   }
 
   // ---- Router: /api/auth/* ----
@@ -127,7 +136,8 @@ export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root,
   router.use(express.json());
 
   router.get('/me', (req, res) => {
-    res.json({ enabled, user: enabled ? (verify(getCookie(req, COOKIE)) || null) : null });
+    const s = enabled ? sessionUser(req) : null;
+    res.json({ enabled, user: s ? s.username : null, role: enabled ? (s ? s.role : null) : 'admin' });
   });
 
   router.post('/plex/pin', async (req, res) => {
@@ -186,7 +196,7 @@ export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root,
           ua: req.headers['user-agent'] || '',
         });
       } catch { /* best effort */ }
-      res.setHeader('Set-Cookie', sessionCookie(sign(uname), ttlSeconds));
+      res.setHeader('Set-Cookie', sessionCookie(sign(uname, user.username ? user.email : ''), ttlSeconds));
       res.json({ authorized: true, user: { username: user.username, email: user.email, thumb: user.thumb } });
     } catch (e) {
       res.status(502).json({ authorized: false, error: 'Plex request failed: ' + e.message });
@@ -210,8 +220,8 @@ export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root,
     // out of search-engine indexes and Safe Browsing crawls.
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
 
-    const user = verify(getCookie(req, COOKIE));
-    if (user) { req.plexUser = user; return next(); }
+    const user = sessionUser(req);
+    if (user) { req.plexUser = user.username; req.plexRole = user.role; return next(); }
     if (p.startsWith('/api/')) return res.status(401).json({ error: 'Authentication required' });
     // Serve the login page with a 401 so crawlers treat it as protected and
     // don't index it as a public "deceptive login" page. No WWW-Authenticate
@@ -219,5 +229,12 @@ export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root,
     return res.status(401).sendFile(path.join(publicDir, 'login.html'));
   }
 
-  return { enabled, router, middleware, verify, getCookie: (req) => verify(getCookie(req, COOKIE)) };
+  return {
+    enabled, router, middleware, verify, roles,
+    getCookie: (req) => { const s = verify(getCookie(req, COOKIE)); return s ? s.username : null; },
+    // Role for a request that passed the gate. Without Plex sign-in there is a
+    // single operator (or Basic auth), so everyone is an admin.
+    roleOf: (req) => (enabled ? (req.plexRole || null) : 'admin'),
+    _sign: sign,
+  };
 }

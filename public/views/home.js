@@ -1,5 +1,6 @@
 import { showcaseName } from '../lib/showcase.js';
 import { listenarrStats } from './listenarr.js';
+import { collapseSeasonDrops } from '../lib/seasonDrops.js';
 import { tautulliDecision } from '../lib/playbackDecision.js';
 import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast, openModal, confirmModal } from '../lib/ui.js';
 import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
@@ -689,14 +690,14 @@ export async function fetchUpcomingItems(ctx, start, end) {
     try {
       if (svc.type === 'sonarr') {
         const eps = await ctx.api.arr(svc.key).get(`calendar?start=${s}&end=${e}&includeSeries=true`);
-        for (const ep of (eps || [])) if (ep.airDateUtc) items.push({ when: ep.airDateUtc, title: `${(ep.series && ep.series.title) || 'Unknown'} · S${pad2(ep.seasonNumber)}E${pad2(ep.episodeNumber)}`, filterTitle: (ep.series && ep.series.title) || '', sub: ep.title || '', svc });
+        for (const ep of (eps || [])) if (ep.airDateUtc) items.push({ when: ep.airDateUtc, title: `${(ep.series && ep.series.title) || 'Unknown'} · S${pad2(ep.seasonNumber)}E${pad2(ep.episodeNumber)}`, filterTitle: (ep.series && ep.series.title) || '', sub: ep.title || '', svc, episode: { seriesId: ep.seriesId, seriesTitle: (ep.series && ep.series.title) || '', seasonNumber: ep.seasonNumber, episodeNumber: ep.episodeNumber } });
       } else {
         const movies = await ctx.api.arr(svc.key).get(`calendar?start=${s}&end=${e}`);
         for (const m of (movies || [])) { const when = m.digitalRelease || m.physicalRelease || m.inCinemas; if (when) items.push({ when, title: `${m.title}${m.year ? ` (${m.year})` : ''}`, filterTitle: m.title || '', sub: 'Release', svc }); }
       }
     } catch { /* ignore per-service */ }
   }));
-  return items;
+  return collapseSeasonDrops(items);
 }
 
 // Merged upcoming calendar across all configured Sonarr + Radarr instances.
