@@ -1182,13 +1182,15 @@ async function hydrateNotifications(ctx) {
   render();
 }
 
-const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex', 'portainer', 'glances', 'pihole', 'adguard', 'syncthing', 'navidrome', 'pulsarr', 'whisparr'];
+const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex', 'portainer', 'glances', 'pihole', 'adguard', 'syncthing', 'navidrome', 'pulsarr', 'whisparr', 'truenas', 'unraid'];
 // Where to find the API key / what auth each newer integration expects.
 const SERVICE_KEY_HINTS = {
   autobrr: 'Autobrr → Settings → API keys (sent as X-API-Token).',
   listenarr: 'Listenarr → Settings → General → API key (default port 4545). Listenarr is pre-1.0 beta, so some screens may change.',
   audiobookshelf: 'Audiobookshelf → Settings → API Keys (v2.26+), or your user API token.',
   tdarr: 'Only needed if Tdarr server auth is enabled (Tools → API Keys).',
+  truenas: 'TrueNAS 25.04+ → your user → API Keys. Use an https:// URL: TrueNAS revokes keys sent over plain http. A read-only service account is enough.',
+  unraid: 'Unraid 7.2+ → Settings → Management Access → API Keys. A key with the Viewer role is enough.',
   portainer: 'Portainer → My account → Access tokens (sent as X-API-Key). Arr Command Center only reads from Portainer.',
   syncthing: 'Syncthing → Actions → Settings → General → API Key.',
   pulsarr: 'Pulsarr → System → API keys (sent as X-API-Key).',

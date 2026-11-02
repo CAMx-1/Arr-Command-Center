@@ -10,7 +10,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, publicConfig, localFallbackConfig, ALLOWED_SERVICE_TYPES, saveServiceToDisk, removeServiceFromDisk, isInsecureExposure, buildServiceUpdate } from './config.js';
-import { createProxyRouter, pingService, serviceRequest, serviceGet } from './proxy.js';
+import { createProxyRouter, pingService, serviceRequest, serviceGet, liveClientFetch } from './proxy.js';
 import { startMockServices } from './mock/mockServices.js';
 import { createPlexAuth } from './plexAuth.js';
 import * as store from './store.js';
@@ -28,6 +28,7 @@ import { createActionTokens } from './actionTokens.js';
 import { safeEqual, createAuthLimiter } from './authGuard.js';
 import { createRoleGuard, mountUserRoutes } from './roleRoutes.js';
 import { createLiveHub } from './live.js';
+import { truenasOverview } from './truenas.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -519,7 +520,19 @@ app.get('/api/plex/image', async (req, res) => {
 app.use('/api/proxy', createProxyRouter(cfg, { authorize: roleGuard.proxy }));
 
 // Live updates (Server-Sent Events) for download queues and now-playing.
-const liveHub = createLiveHub({ getService: (key) => cfg.services[key], fetchJson: (svc, p) => serviceGet(svc, p, { timeout: 8000 }) });
+const liveHub = createLiveHub({ getService: (key) => cfg.services[key], fetchJson: (svc, p) => serviceGet(svc, p, { timeout: 8000 }), fetchClient: (svc, key) => liveClientFetch(svc, key) });
+app.get('/api/live', liveHub.multiHandler(roleGuard.read));
+
+// TrueNAS: WebSocket JSON-RPC, so the server makes the calls and returns one
+// read-only overview (pools, disks, apps, alerts). Reading is allowed for
+// every role, like any other dashboard read.
+app.get('/api/truenas/:service', async (req, res) => {
+  const svc = cfg.services[req.params.service];
+  if (!svc || svc.enabled === false || svc.type !== 'truenas') return res.status(404).json({ error: 'Unknown TrueNAS service' });
+  res.set('Cache-Control', 'no-store');
+  try { res.json(await truenasOverview(svc, { allowInsecure: !!(cfg.mock && svc.demoAllowInsecure) })); }
+  catch (e) { res.status(e.status === 401 ? 401 : 502).json({ error: e.message }); }
+});
 app.get('/api/live/:service', liveHub.handler(roleGuard.read));
 
 // ---- Add / edit / remove a service (writes config.json). Behind auth. ----

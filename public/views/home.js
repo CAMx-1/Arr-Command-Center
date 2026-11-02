@@ -1,6 +1,7 @@
 import { showcaseName } from '../lib/showcase.js';
 import { listenarrStats } from './listenarr.js';
 import { collapseSeasonDrops } from '../lib/seasonDrops.js';
+import { liveRefreshMany } from '../lib/live.js';
 import { tautulliDecision } from '../lib/playbackDecision.js';
 import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast, openModal, confirmModal } from '../lib/ui.js';
 import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
@@ -105,6 +106,16 @@ export async function renderHome(root, ctx) {
   hydrateLinks(workspaceCtx);
   hydrateStreams(widgetCtx('streams'));
   hydrateSystem(workspaceCtx);
+  // Live updates: when a shown service's queue or sessions change, refresh its
+  // hex stats and the activity feed (and streams for media services) at once,
+  // instead of waiting for the 30-second refresh.
+  const MEDIA = new Set(['tautulli', 'jellyfin', 'emby']);
+  liveRefreshMany(root, shown, (keys) => {
+    const changed = shown.filter((svc) => keys.has(svc.key));
+    for (const svc of changed) hydrateCardStats(svc, workspaceCtx);
+    if (changed.length) hydrateOperations(workspaceCtx, true);
+    if (changed.some((svc) => MEDIA.has(svc.type))) hydrateStreams(widgetCtx('streams'));
+  });
   if (ctx.params.focus) requestAnimationFrame(() => document.querySelector(`.widget-${CSS.escape(ctx.params.focus)}`)?.scrollIntoView({ block: 'start' }));
 }
 

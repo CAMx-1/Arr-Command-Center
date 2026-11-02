@@ -42,6 +42,13 @@ export function portainerClient(api, key) {
     status: () => get('system/status'),
     environments: async () => normalizePortainerEnvironments(await get('endpoints')),
     containers: async (envId) => normalizePortainerContainers(await get(`endpoints/${encodeURIComponent(envId)}/docker/containers/json?all=1`)),
+    // action: start | stop | restart. Docker answers 304 when it's already in
+    // that state, which is fine.
+    async containerAction(envId, containerId, action) {
+      if (!['start', 'stop', 'restart'].includes(action)) throw new Error('Unsupported action');
+      try { await api.proxy(key, `api/endpoints/${encodeURIComponent(envId)}/docker/containers/${encodeURIComponent(containerId)}/${action}`, { method: 'POST' }); }
+      catch (e) { if (e.status !== 304) throw e; }
+    },
   };
 }
 
@@ -218,3 +225,78 @@ export function pulsarrClient(api, key) {
 export const PULSARR_STATUS = {
   pending_approval: ['Needs approval', 'warn'], pending: ['Pending', 'muted'], requested: ['Requested', 'info'], grabbed: ['Grabbed', 'info'], notified: ['Available', 'ok'],
 };
+
+// -------------------------------------------------------------------- TrueNAS
+// The server talks to TrueNAS over its WebSocket API and returns one overview.
+export function truenasClient(key, fetchImpl = (...a) => fetch(...a)) {
+  return {
+    async overview() {
+      const r = await fetchImpl(`/api/truenas/${encodeURIComponent(key)}`, { cache: 'no-store' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      return data;
+    },
+  };
+}
+
+// --------------------------------------------------------------------- Unraid
+export const UNRAID_QUERY = `query Overview {
+  info { os { hostname uptime } versions { core { unraid } } }
+  metrics { cpu { percentTotal } memory { total used percentTotal } }
+  array {
+    state
+    capacity { kilobytes { free used total } }
+    parityCheckStatus { status running paused progress errors date speed }
+    parities { name device size status temp numErrors rotational }
+    disks { name device size status temp numErrors fsSize fsUsed fsFree rotational }
+    caches { name device size status temp numErrors fsSize fsUsed fsFree rotational }
+  }
+  docker { containers { id names image state status autoStart isUpdateAvailable } }
+  vms { domains { id name state } }
+  notifications { overview { unread { info warning alert total } } }
+}`;
+
+const big = (v) => (v == null ? null : Number(v));
+const diskOut = (d, role) => ({
+  name: d.name || d.device || '?', device: d.device || '', role, status: d.status || 'UNKNOWN',
+  ok: d.status === 'DISK_OK', standby: d.status === 'DISK_OK' && d.temp == null && d.rotational !== false,
+  temp: d.temp == null ? null : Number(d.temp), errors: big(d.numErrors) || 0,
+  size: (big(d.size) || 0) * 1024, fsSize: big(d.fsSize) == null ? null : big(d.fsSize) * 1024,
+  fsUsed: big(d.fsUsed) == null ? null : big(d.fsUsed) * 1024,
+});
+
+export function normalizeUnraid(data = {}) {
+  const a = data.array || {};
+  const kb = (a.capacity && a.capacity.kilobytes) || {};
+  const total = Number(kb.total) * 1024 || 0;
+  const used = Number(kb.used) * 1024 || 0;
+  const pc = a.parityCheckStatus || {};
+  const unread = (data.notifications && data.notifications.overview && data.notifications.overview.unread) || {};
+  return {
+    hostname: (data.info && data.info.os && data.info.os.hostname) || '',
+    version: (data.info && data.info.versions && data.info.versions.core && data.info.versions.core.unraid) || '',
+    uptime: (data.info && data.info.os && data.info.os.uptime) || '',
+    cpu: data.metrics && data.metrics.cpu ? Number(data.metrics.cpu.percentTotal) : null,
+    mem: data.metrics && data.metrics.memory ? Number(data.metrics.memory.percentTotal) : null,
+    state: a.state || 'UNKNOWN', started: a.state === 'STARTED',
+    total, used, percent: total ? Math.round((used / total) * 1000) / 10 : 0,
+    parityCheck: { status: pc.status || '', running: !!pc.running, paused: !!pc.paused, progress: Number(pc.progress) || 0, errors: Number(pc.errors) || 0, date: pc.date || null, speed: pc.speed || '' },
+    disks: [...(a.parities || []).map((d) => diskOut(d, 'parity')), ...(a.disks || []).map((d) => diskOut(d, 'data')), ...(a.caches || []).map((d) => diskOut(d, 'cache'))],
+    containers: ((data.docker && data.docker.containers) || []).map((c) => ({
+      id: c.id, name: String((c.names || [])[0] || c.id).replace(/^\//, ''), image: c.image || '',
+      state: String(c.state || '').toLowerCase(), status: c.status || '', autoStart: !!c.autoStart, update: !!c.isUpdateAvailable,
+    })).sort((x, y) => x.name.localeCompare(y.name)),
+    vms: ((data.vms && data.vms.domains) || []).map((v) => ({ id: v.id, name: v.name || v.id, state: String(v.state || '').toLowerCase() })),
+    alerts: { warning: Number(unread.warning) || 0, alert: Number(unread.alert) || 0, total: Number(unread.total) || 0 },
+  };
+}
+
+export function unraidClient(api, key) {
+  return {
+    async overview() {
+      const r = await api.proxy(key, 'graphql', { method: 'POST', body: { query: UNRAID_QUERY } });
+      if (r && Array.isArray(r.errors) && r.errors.length && !r.data) throw new Error(r.errors[0].message || 'Unraid API error');
+      return normalizeUnraid((r && r.data) || {});
+    },
+  };
+}

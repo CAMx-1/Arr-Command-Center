@@ -53,6 +53,16 @@
     try { return (localStorage.getItem(SERVER_KEY) || '').replace(/\/+$/, ''); } catch (e) { return ''; }
   }
 
+  // Native ServerAccess plugin: lets the WebView stay on the server origin the
+  // user entered (Capacitor's allowNavigation list can't know it in advance).
+  function allowServerOrigin(value) {
+    try {
+      var sa = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ServerAccess;
+      if (sa && typeof sa.setServer === 'function') return sa.setServer({ origin: value }).catch(function () {});
+    } catch (e) { /* ignore */ }
+    return Promise.resolve();
+  }
+
   function preferencesPlugin() {
     try { return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Preferences; } catch (e) { return null; }
   }
@@ -121,12 +131,13 @@
     base = value;
     try { localStorage.setItem(SERVER_KEY, value); } catch (e) { /* ignore */ }
     var prefs = preferencesPlugin();
-    if (prefs && typeof prefs.set === 'function') return prefs.set({ key: SERVER_KEY, value: value }).catch(function () {});
-    return Promise.resolve();
+    var saved = (prefs && typeof prefs.set === 'function') ? prefs.set({ key: SERVER_KEY, value: value }).catch(function () {}) : Promise.resolve();
+    return Promise.all([saved, allowServerOrigin(value)]);
   };
   window.accClearServerBase = function () {
     base = '';
     try { localStorage.removeItem(SERVER_KEY); } catch (e) { /* ignore */ }
+    try { var sa = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ServerAccess; if (sa && sa.clearServer) sa.clearServer().catch(function () {}); } catch (e) { /* ignore */ }
     var prefs = preferencesPlugin();
     if (prefs && typeof prefs.remove === 'function') return prefs.remove({ key: SERVER_KEY }).catch(function () {});
     return Promise.resolve();
@@ -138,6 +149,11 @@
   window.accGoToServer = function (url) {
     var b = String(url || base || '').replace(/\/+$/, '');
     if (!b) return;
+    // Make sure the native side allows this origin before leaving the shell
+    // (covers servers saved by older builds, before ServerAccess existed).
+    return allowServerOrigin(b).then(function () { go(b); });
+  };
+  function go(b) {
     // WKWebView may preserve the last server document across an app reinstall or
     // rebuild. Give every native launch a unique document URL so it cannot
     // restore an old HTML/module graph after the server has been updated.

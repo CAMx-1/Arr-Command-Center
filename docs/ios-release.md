@@ -48,7 +48,7 @@ Validate the archive in Xcode Organizer before upload. The repository does not s
 
 - `PrivacyInfo.xcprivacy` declares no tracking or collected data and the app's preferences access.
 - Diagnostic export is user-initiated and redacts query credentials, bearer/basic authorization, and Cloudflare Access secrets.
-- ATS exceptions are scoped to local networking and WebView content because the app connects to user-supplied self-hosted HTTP/HTTPS servers.
+- ATS uses `NSAllowsArbitraryLoads` because the app connects to user-supplied self-hosted servers, which are often plain HTTP on LAN hostnames (for example `nas.lan`, `sonarr.home.arpa` or a Tailscale name). Local-only mode makes those requests natively, and narrower keys (`NSAllowsLocalNetworking`) only cover IP addresses and `.local` names. For App Review: "Arr Command Center connects to media servers the user runs at home; many only offer HTTP on the local network. The app warns when a server address uses HTTP."
 - App Review note: Arr Command Center is a client for user-owned self-hosted services; users may intentionally connect to private LAN hosts or private certificates.
 - Local-only mode stores service credentials on the device. Server mode is recommended because upstream secrets stay on the companion server.
 

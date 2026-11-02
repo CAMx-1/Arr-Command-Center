@@ -19,6 +19,7 @@ final class AppBridgeViewController: CAPBridgeViewController {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(AppLockPlugin())
         bridge?.registerPluginInstance(QuickActionsPlugin())
+        bridge?.registerPluginInstance(ServerAccessPlugin())
     }
 
     override func viewDidLoad() {

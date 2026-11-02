@@ -1,3 +1,4 @@
+import { roleAllows } from './roleUi.js';
 // Tiny DOM + UI helper library (no framework, no build step).
 
 // Hyperscript: h('div', {class:'x', onclick:fn}, child1, child2)
@@ -171,7 +172,7 @@ export function closeModal() {
 export function confirmModal({ title, message, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false, onConfirm }) {
   const footer = h('div', { style: { display: 'flex', gap: '10px' } },
     h('button', { class: 'btn', onclick: closeModal }, cancelLabel),
-    h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, onclick: () => { closeModal(); onConfirm(); } }, confirmLabel),
+    h('button', { class: `btn confirm-btn ${danger ? 'danger' : 'primary'}`, onclick: () => { closeModal(); onConfirm(); } }, confirmLabel),
   );
   openModal({ title, body: h('p', { style: { margin: 0, lineHeight: '1.6' } }, message), footer });
 }
@@ -433,7 +434,9 @@ export function tabs(body, tabsDef, storageKey, options = {}) {
 // Any `_applyPoster` hook a caller attached to the row (e.g. SABnzbd's lazy
 // poster loader) is forwarded through the wrapper so existing behavior is kept.
 let _openReveal = null; // { close } of the currently revealed row (single-open)
-export function swipeToAction(row, onAction, { threshold = 64, revealWidth = 108, label = 'Remove' } = {}) {
+export function swipeToAction(row, onAction, { threshold = 64, revealWidth = 108, label = 'Remove', needs = 'delete' } = {}) {
+  // No swipe-to-remove for roles that can't remove.
+  if (!roleAllows(needs)) return row;
   if (typeof window === 'undefined' || !('ontouchstart' in window)) return row;
 
   const btn = h('button', { type: 'button', class: 'swipe-remove', tabindex: '-1', 'aria-label': label }, label);

@@ -5,6 +5,7 @@ import { statCard } from './downloadClient.js';
 import { liveRefresh } from '../lib/live.js';
 import {
   portainerClient, glancesClient, piholeClient, adguardClient, syncthingClient, navidromeClient, pulsarrClient, PULSARR_STATUS,
+  truenasClient, unraidClient,
 } from '../lib/integrations.js';
 import { currentRole } from '../lib/usersRoles.js';
 
@@ -40,7 +41,7 @@ function mountTabs(root, ctx, defs) {
 // ==================================================================== Portainer
 export async function renderPortainer(root, ctx) {
   const client = portainerClient(ctx.api, ctx.service.key);
-  ctx.setActions(h('span', { class: 'pill muted', title: 'Arr Command Center only reads from Portainer' }, 'Read-only'));
+  ctx.setActions(isAdmin(ctx) ? null : h('span', { class: 'pill muted', title: 'Only admins can start, stop or restart containers' }, 'View only'));
   mountTabs(root, ctx, [
     { id: 'containers', label: 'Containers', render: (c) => portainerContainers(c, client, ctx) },
     { id: 'environments', label: 'Environments', render: (c) => portainerEnvironments(c, client) },
@@ -65,10 +66,35 @@ function portainerEnvironments(root, client) {
   }, 30000);
 }
 
+// The ACC server itself may run as one of these containers; stopping it
+// would cut off this page, so say so in the confirmation.
+const CONTAINER_ACTIONS = {
+  start: { label: 'Start', done: 'started', cls: 'primary' },
+  restart: { label: 'Restart', done: 'restarted', cls: '' },
+  stop: { label: 'Stop', done: 'stopped', cls: 'danger' },
+};
+function containerActions(c, envId, client, reload) {
+  const running = c.state === 'running' || c.state === 'restarting';
+  const acts = running ? ['restart', 'stop'] : ['start'];
+  return h('div', { class: 'row-actions' }, ...acts.map((a) => {
+    const info = CONTAINER_ACTIONS[a];
+    return h('button', { class: `btn sm ${info.cls} confirm-btn`, onclick: () => confirmModal({
+      title: `${info.label} ${c.name}?`,
+      message: a === 'start' ? `Start the ${c.name} container.` : `${info.label} the ${c.name} container${c.stack ? ` (stack ${c.stack})` : ''}. Anything using it will be interrupted${a === 'stop' ? ' until it is started again' : ' briefly'}. If Arr Command Center runs in this container, this page will lose its connection.`,
+      confirmLabel: info.label, danger: a !== 'start',
+      onConfirm: async () => {
+        try { await client.containerAction(envId, c.id, a); toast(`${c.name} ${info.done}`, 'success'); reload(); }
+        catch (e) { toast(e.message, 'error'); }
+      },
+    }) }, info.label);
+  }));
+}
+
 function portainerContainers(root, client, ctx) {
   let envId = ctx.params.env || '';
   let filter = ctx.params.state || 'all';
-  tabLoader(root, 'containers', async (wrap) => {
+  const admin = isAdmin(ctx);
+  tabLoader(root, 'containers', async (wrap, reload) => {
     const envs = await client.environments();
     if (!envs.length) return mount(wrap, empty('', 'No environments', 'Add an environment in Portainer first.'));
     if (!envs.some((e) => String(e.id) === String(envId))) envId = String((envs.find((e) => e.up) || envs[0]).id);
@@ -90,7 +116,8 @@ function portainerContainers(root, client, ctx) {
             h('span', { class: `pill ${c.state === 'running' ? (c.health === 'unhealthy' ? 'down' : 'ok') : c.state === 'restarting' ? 'warn' : 'muted'}` }, c.health === 'unhealthy' ? 'unhealthy' : c.state),
             h('span', { class: 'dim' }, c.status),
             h('span', { class: 'dim', style: { wordBreak: 'break-all' } }, c.image),
-            ...c.ports.slice(0, 3).map((p) => h('span', { class: 'pill muted' }, p))))));
+            ...c.ports.slice(0, 3).map((p) => h('span', { class: 'pill muted' }, p)))),
+        admin ? containerActions(c, envId, client, reload) : null));
     }
     mount(wrap,
       statRow(statCard('Running', String(counts.running), 'ok'), statCard('Stopped', String(counts.stopped)), statCard('Unhealthy', String(counts.unhealthy), counts.unhealthy ? 'warn' : null), statCard('Total', String(all.length))),
@@ -319,4 +346,120 @@ function pulsarrRecent(root, client) {
           h('div', { class: 'meta-line' }, h('span', { class: `pill ${cls}` }, label), h('span', { class: 'pill muted' }, r.contentType === 'show' ? 'TV' : 'Movie'), h('span', {}, r.userName), r.createdAt ? h('span', { class: 'dim' }, fmtRelative(r.createdAt)) : null)));
     })));
   }, 30000);
+}
+
+// ====================================================================== TrueNAS
+const tempPill = (t) => (t == null ? h('span', { class: 'dim' }, '—') : h('span', { class: `pill ${t >= 55 ? 'down' : t >= 45 ? 'warn' : 'ok'}` }, `${t}°C`));
+const fmtUptime = (s) => { const d = Math.floor(s / 86400); const hrs = Math.floor((s % 86400) / 3600); return d ? `${d}d ${hrs}h` : `${hrs}h ${Math.floor((s % 3600) / 60)}m`; };
+
+export async function renderTruenas(root, ctx) {
+  const client = truenasClient(ctx.service.key);
+  ctx.setActions(h('span', { class: 'pill muted', title: 'Arr Command Center only reads from TrueNAS' }, 'Read-only'));
+  let cache = null;
+  const data = async (fresh) => { if (fresh || !cache) cache = await client.overview(); return cache; };
+  mountTabs(root, ctx, [
+    { id: 'pools', label: 'Pools', render: (c) => tabLoader(c, 'pools', async (wrap) => truenasPools(wrap, await data(true)), 30000) },
+    { id: 'disks', label: 'Disks', render: (c) => tabLoader(c, 'disks', async (wrap) => truenasDisks(wrap, await data(true)), 60000) },
+    { id: 'apps', label: 'Apps', render: (c) => tabLoader(c, 'apps', async (wrap) => truenasApps(wrap, await data(true)), 30000) },
+    { id: 'alerts', label: 'Alerts', render: (c) => tabLoader(c, 'alerts', async (wrap) => truenasAlerts(wrap, await data(true)), 60000) },
+  ]);
+}
+
+function truenasPools(wrap, d) {
+  const unhealthy = d.pools.filter((p) => !p.healthy || p.status !== 'ONLINE').length;
+  mount(wrap,
+    statRow(statCard('Pools', String(d.pools.length)), statCard('Unhealthy', String(unhealthy), unhealthy ? 'warn' : 'ok'), statCard('Alerts', String(d.alerts.length), d.alerts.length ? 'warn' : null), statCard('Uptime', fmtUptime(d.uptimeSeconds))),
+    h('div', { class: 'meta-line', style: { margin: '6px 0 12px' } }, d.hostname ? h('span', {}, d.hostname) : null, d.version ? h('span', { class: 'dim' }, d.version) : null, d.load ? h('span', { class: 'dim' }, `load ${d.load.map((x) => x.toFixed(2)).join(' ')}`) : null),
+    d.pools.length ? h('div', { class: 'list' }, ...d.pools.map((p) => h('div', { class: 'row' },
+      h('div', { class: 'row-main' },
+        h('div', { class: 'row-title', style: { fontSize: '14px' } }, p.name),
+        h('div', { class: 'meta-line' },
+          h('span', { class: `pill ${p.healthy && p.status === 'ONLINE' ? 'ok' : 'down'}` }, p.status),
+          h('span', {}, `${fmtBytes(p.free)} free of ${fmtBytes(p.size)}`), h('span', { class: `pill ${level(p.percent)}` }, `${Math.round(p.percent)}%`),
+          p.scan && p.scan.state === 'SCANNING' ? h('span', { class: 'pill info' }, `${p.scan.kind.toLowerCase()} ${Math.floor(p.scan.percent)}%`) : null,
+          p.scan && p.scan.errors ? h('span', { class: 'pill down' }, `${p.scan.errors} scan errors`) : null),
+        bar(p.percent))))) : empty('', 'No pools', 'Create a pool in TrueNAS first.'));
+}
+
+function truenasDisks(wrap, d) {
+  mount(wrap, d.disks.length ? h('div', { class: 'list' }, ...d.disks.map((x) => h('div', { class: 'row' },
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title', style: { fontSize: '14px' } }, x.name, x.pool ? h('span', { class: 'pill muted', style: { marginLeft: '8px' } }, x.pool) : null),
+      h('div', { class: 'meta-line' }, h('span', {}, fmtBytes(x.size)), h('span', { class: 'dim' }, x.model), x.type ? h('span', { class: 'dim' }, x.type) : null, h('span', { class: 'dim' }, x.serial))),
+    tempPill(x.temp)))) : empty('', 'No disks', 'TrueNAS reported no disks.'));
+}
+
+function truenasApps(wrap, d) {
+  if (!d.apps.length) return mount(wrap, empty('', 'No apps', 'Install apps in TrueNAS to see them here.'));
+  const running = d.apps.filter((a) => a.state === 'RUNNING').length;
+  mount(wrap,
+    statRow(statCard('Running', String(running), 'ok'), statCard('Stopped', String(d.apps.length - running)), statCard('Updates', String(d.apps.filter((a) => a.upgrade).length), 'info')),
+    h('div', { class: 'list', style: { marginTop: '10px' } }, ...d.apps.map((a) => h('div', { class: 'row' },
+      h('div', { class: 'row-main' },
+        h('div', { class: 'row-title', style: { fontSize: '14px' } }, a.name),
+        h('div', { class: 'meta-line' }, h('span', { class: `pill ${a.state === 'RUNNING' ? 'ok' : a.state === 'DEPLOYING' ? 'info' : a.state === 'CRASHED' ? 'down' : 'muted'}` }, a.state.toLowerCase()), a.version ? h('span', { class: 'dim' }, a.version) : null, a.upgrade ? h('span', { class: 'pill info' }, 'update available') : null))))));
+}
+
+function truenasAlerts(wrap, d) {
+  if (!d.alerts.length) return mount(wrap, empty('', 'No alerts', 'TrueNAS has nothing to report.'));
+  mount(wrap, h('div', { class: 'list' }, ...d.alerts.map((a) => h('div', { class: 'row' },
+    h('span', { class: `pill ${/CRIT|ERROR|ALERT|EMERG/.test(a.level) ? 'down' : /WARN/.test(a.level) ? 'warn' : 'info'}` }, a.level.toLowerCase()),
+    h('div', { class: 'row-main' }, h('div', { style: { fontSize: '13px' } }, a.text))))));
+}
+
+// ======================================================================= Unraid
+const UNRAID_DISK = { DISK_OK: ['OK', 'ok'], DISK_NP: ['Not installed', 'muted'], DISK_NP_MISSING: ['Missing', 'down'], DISK_INVALID: ['Invalid', 'down'], DISK_WRONG: ['Wrong disk', 'down'], DISK_DSBL: ['Disabled', 'down'], DISK_NP_DSBL: ['Disabled', 'down'], DISK_DSBL_NEW: ['New, disabled', 'warn'], DISK_NEW: ['New', 'info'] };
+
+export async function renderUnraid(root, ctx) {
+  const client = unraidClient(ctx.api, ctx.service.key);
+  ctx.setActions(h('span', { class: 'pill muted', title: 'Arr Command Center only reads from Unraid' }, 'Read-only'));
+  mountTabs(root, ctx, [
+    { id: 'array', label: 'Array', render: (c) => tabLoader(c, 'array', async (wrap) => unraidArray(wrap, await client.overview()), 15000) },
+    { id: 'docker', label: 'Docker', render: (c) => tabLoader(c, 'containers', async (wrap) => unraidDocker(wrap, await client.overview()), 15000) },
+    { id: 'vms', label: 'VMs', render: (c) => tabLoader(c, 'VMs', async (wrap) => unraidVms(wrap, await client.overview()), 30000) },
+  ]);
+}
+
+function unraidArray(wrap, u) {
+  const bad = u.disks.filter((d) => d.status !== 'DISK_OK' && d.status !== 'DISK_NP').length;
+  const pc = u.parityCheck;
+  const groups = ['parity', 'data', 'cache'].map((role) => [role, u.disks.filter((d) => d.role === role && d.status !== 'DISK_NP')]).filter(([, l]) => l.length);
+  mount(wrap,
+    statRow(statCard('Array', u.started ? 'Started' : u.state.toLowerCase().replace(/_/g, ' '), u.started ? 'ok' : 'warn'), statCard('Used', `${Math.round(u.percent)}%`, u.percent > 90 ? 'warn' : 'info'), statCard('Disk problems', String(bad), bad ? 'warn' : 'ok'), u.cpu != null ? statCard('CPU', `${Math.round(u.cpu)}%`) : null),
+    h('div', { class: 'meta-line', style: { margin: '6px 0 12px' } },
+      u.hostname ? h('span', {}, u.hostname) : null, u.version ? h('span', { class: 'dim' }, `Unraid ${u.version}`) : null,
+      h('span', { class: 'dim' }, `${fmtBytes(u.total - u.used)} free of ${fmtBytes(u.total)}`),
+      pc.running ? h('span', { class: 'pill info' }, `Parity check ${pc.progress}%${pc.paused ? ' (paused)' : ''}`) : pc.date ? h('span', { class: 'dim' }, `Last parity check ${fmtRelative(pc.date)}${pc.errors ? `, ${pc.errors} errors` : ''}`) : null,
+      u.alerts.alert || u.alerts.warning ? h('span', { class: 'pill warn' }, `${u.alerts.alert + u.alerts.warning} unread warnings`) : null),
+    ...groups.flatMap(([role, list]) => [section(role === 'data' ? 'Data disks' : role === 'parity' ? 'Parity' : 'Cache / pools'), h('div', { class: 'list' }, ...list.map((d) => {
+      const [label, cls] = UNRAID_DISK[d.status] || [d.status, 'muted'];
+      const p = d.fsSize ? (d.fsUsed / d.fsSize) * 100 : null;
+      return h('div', { class: 'row' },
+        h('div', { class: 'row-main' },
+          h('div', { class: 'row-title', style: { fontSize: '14px' } }, d.name, d.device ? h('span', { class: 'dim', style: { marginLeft: '8px', fontSize: '12px' } }, d.device) : null),
+          h('div', { class: 'meta-line' },
+            h('span', { class: `pill ${cls}` }, label),
+            p != null ? h('span', {}, `${fmtBytes(d.fsSize - d.fsUsed)} free of ${fmtBytes(d.fsSize)}`) : h('span', {}, fmtBytes(d.size)),
+            d.errors ? h('span', { class: 'pill down' }, `${d.errors} errors`) : null),
+          p != null ? bar(p) : null),
+        d.temp == null ? h('span', { class: 'pill muted', title: 'Spun down, or no sensor' }, d.standby ? 'standby' : '—') : tempPill(d.temp));
+    }))]));
+}
+
+function unraidDocker(wrap, u) {
+  if (!u.containers.length) return mount(wrap, empty('', 'No containers', 'Docker is stopped or has no containers.'));
+  const running = u.containers.filter((c) => c.state === 'running').length;
+  mount(wrap,
+    statRow(statCard('Running', String(running), 'ok'), statCard('Stopped', String(u.containers.length - running)), statCard('Updates', String(u.containers.filter((c) => c.update).length), 'info')),
+    h('div', { class: 'list', style: { marginTop: '10px' } }, ...u.containers.map((c) => h('div', { class: 'row' },
+      h('div', { class: 'row-main' },
+        h('div', { class: 'row-title', style: { fontSize: '14px' } }, c.name),
+        h('div', { class: 'meta-line' }, h('span', { class: `pill ${c.state === 'running' ? 'ok' : c.state === 'paused' ? 'warn' : 'muted'}` }, c.state), h('span', { class: 'dim' }, c.status), h('span', { class: 'dim', style: { wordBreak: 'break-all' } }, c.image), c.update ? h('span', { class: 'pill info' }, 'update available') : null, c.autoStart ? null : h('span', { class: 'dim' }, 'no autostart')))))));
+}
+
+function unraidVms(wrap, u) {
+  if (!u.vms.length) return mount(wrap, empty('', 'No VMs', 'VMs are off or none are defined.'));
+  mount(wrap, h('div', { class: 'list' }, ...u.vms.map((v) => h('div', { class: 'row' },
+    h('div', { class: 'row-main' }, h('div', { class: 'row-title', style: { fontSize: '14px' } }, v.name)),
+    h('span', { class: `pill ${v.state === 'running' ? 'ok' : v.state === 'paused' || v.state === 'pmsuspended' ? 'warn' : v.state === 'crashed' ? 'down' : 'muted'}` }, v.state)))));
 }

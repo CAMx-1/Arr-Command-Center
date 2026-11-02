@@ -182,7 +182,7 @@ function requestListRow(r, seerr, ctx, pipe) {
       h('div', { class: 'req-progress-slot', dataset: { reqId: String(r.id) } }, progressEl(prog)),
     ),
     r.status === 1 ? h('div', { class: 'row-actions' },
-      h('button', { class: 'btn sm primary', onclick: (e) => { e.stopPropagation(); act(seerr, ctx, r.id, 'approve'); } }, '✓ Approve'),
+      h('button', { dataset: { needs: 'admin' }, class: 'btn sm primary', onclick: (e) => { e.stopPropagation(); act(seerr, ctx, r.id, 'approve'); } }, '✓ Approve'),
       h('button', { class: 'btn sm danger', onclick: (e) => { e.stopPropagation(); act(seerr, ctx, r.id, 'decline'); } }, '× Decline'),
     ) : null,
   );
@@ -230,7 +230,7 @@ async function tabRequests(root, seerr, ctx, filter) {
       let actions = null;
       if (r.status === 1) {
         actions = h('div', { class: 'row-actions' },
-          h('button', { class: 'btn sm primary', title: 'Approve', onclick: (e) => { e.stopPropagation(); act(seerr, ctx, r.id, 'approve'); } }, '✓'),
+          h('button', { dataset: { needs: 'admin' }, class: 'btn sm primary', title: 'Approve', onclick: (e) => { e.stopPropagation(); act(seerr, ctx, r.id, 'approve'); } }, '✓'),
           h('button', { class: 'btn sm danger', title: 'Decline', onclick: (e) => { e.stopPropagation(); act(seerr, ctx, r.id, 'decline'); } }, '×'),
         );
       }
@@ -394,7 +394,7 @@ function discoverHex(r, seerr, ctx) {
   if (r.voteAverage) pills.push({ label: `★ ${r.voteAverage.toFixed(1)}`, cls: 'ok' });
   const canRequest = !st || st === 1 || (isTv && st === 4);
   const actions = canRequest ? h('div', { class: 'row-actions' },
-    h('button', { class: 'btn sm primary', onclick: async (e) => {
+    h('button', { dataset: { needs: 'write' }, class: 'btn sm primary', onclick: async (e) => {
       e.stopPropagation();
       if (isTv) return openSeasonModal(seerr, ctx, r, title);
       return openMovieRequestModal(seerr, ctx, r, title);
@@ -447,7 +447,7 @@ function discoverActions(r, seerr, ctx, isTv, title) {
   const nodes = [];
   if (info) nodes.push(h('span', { class: `pill ${info.cls}` }, info.label));
   if (canRequest) {
-    nodes.push(h('button', { class: 'btn sm primary', onclick: async (e) => {
+    nodes.push(h('button', { dataset: { needs: 'write' }, class: 'btn sm primary', onclick: async (e) => {
       e.stopPropagation();
       if (isTv) return openSeasonModal(seerr, ctx, r, title);
       return openMovieRequestModal(seerr, ctx, r, title);

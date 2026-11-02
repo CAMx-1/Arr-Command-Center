@@ -37,9 +37,12 @@
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsArbitraryLoadsInWebContent</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
+		<!-- Self-hosted services are often plain http on a LAN hostname
+		     (nas.lan, sonarr.home.arpa, Tailscale names). Local-only mode calls
+		     them natively, so ATS must allow http for any host. On iOS this key
+		     is ignored if NSAllowsArbitraryLoadsInWebContent or
+		     NSAllowsLocalNetworking is also present, so it stands alone. -->
+		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
 	<key>NSFaceIDUsageDescription</key>

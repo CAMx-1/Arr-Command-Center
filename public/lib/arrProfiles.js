@@ -65,3 +65,85 @@ export function tagUsage(tags = []) {
     return { id: t.id, label: t.label, total, summary: parts.join(', ') };
   }).sort((a, b) => a.label.localeCompare(b.label));
 }
+
+// ---------------------------------------------------------------- editing
+// Rows the editor shows, best first: one per top-level item (a quality or a
+// group), with the id Sonarr/Radarr use for the cutoff.
+export function profileRows(profile = {}) {
+  return (profile.items || []).map((item, index) => {
+    const isGroup = !!(item.items && item.items.length);
+    return {
+      index,
+      cutoffId: isGroup ? item.id : item.quality && item.quality.id,
+      name: isGroup ? (item.name || item.items.map((q) => q.quality && q.quality.name).join('/')) : (item.quality && item.quality.name) || 'Unknown',
+      allowed: !!item.allowed,
+      group: isGroup,
+    };
+  }).reverse();
+}
+
+// edits: { name?, upgradeAllowed?, cutoff?, allowed?: { [index]: bool },
+//          minFormatScore?, cutoffFormatScore?, minUpgradeFormatScore?,
+//          scores?: { [formatId]: number } }
+// Returns a new profile object ready to PUT, or throws with a reason.
+export function applyProfileEdits(profile, edits = {}) {
+  const next = JSON.parse(JSON.stringify(profile || {}));
+  if (edits.name !== undefined) {
+    const name = String(edits.name).trim();
+    if (!name) throw new Error('Profile name is required');
+    next.name = name.slice(0, 100);
+  }
+  if (edits.upgradeAllowed !== undefined) next.upgradeAllowed = !!edits.upgradeAllowed;
+  for (const [index, on] of Object.entries(edits.allowed || {})) {
+    const item = next.items && next.items[Number(index)];
+    if (!item) continue;
+    item.allowed = !!on;
+    if (item.items) for (const q of item.items) q.allowed = !!on;
+  }
+  const rows = profileRows(next);
+  if (!rows.some((r) => r.allowed)) throw new Error('Allow at least one quality');
+  if (edits.cutoff !== undefined) next.cutoff = Number(edits.cutoff);
+  if (!rows.some((r) => r.allowed && r.cutoffId === next.cutoff)) {
+    // Sonarr/Radarr reject a cutoff that isn't allowed; use the best allowed.
+    next.cutoff = rows.find((r) => r.allowed).cutoffId;
+  }
+  for (const field of ['minFormatScore', 'cutoffFormatScore', 'minUpgradeFormatScore']) {
+    if (edits[field] === undefined || edits[field] === '') continue;
+    const n = Number(edits[field]);
+    if (!Number.isInteger(n)) throw new Error(`${field} must be a whole number`);
+    next[field] = n;
+  }
+  for (const [formatId, score] of Object.entries(edits.scores || {})) {
+    const n = Number(score);
+    if (!Number.isInteger(n)) throw new Error('Format scores must be whole numbers');
+    const fi = (next.formatItems || []).find((f) => String(f.format) === String(formatId));
+    if (fi) fi.score = n;
+    else (next.formatItems = next.formatItems || []).push({ format: Number(formatId), score: n });
+  }
+  return next;
+}
+
+// edits: { name?, includeCustomFormatWhenRenaming?, specs?: { [index]: { negate?, required?, value? } } }
+export function applyFormatEdits(format, edits = {}) {
+  const next = JSON.parse(JSON.stringify(format || {}));
+  if (edits.name !== undefined) {
+    const name = String(edits.name).trim();
+    if (!name) throw new Error('Format name is required');
+    next.name = name.slice(0, 100);
+  }
+  if (edits.includeCustomFormatWhenRenaming !== undefined) next.includeCustomFormatWhenRenaming = !!edits.includeCustomFormatWhenRenaming;
+  for (const [index, change] of Object.entries(edits.specs || {})) {
+    const spec = next.specifications && next.specifications[Number(index)];
+    if (!spec) continue;
+    if (change.negate !== undefined) spec.negate = !!change.negate;
+    if (change.required !== undefined) spec.required = !!change.required;
+    if (change.value !== undefined) {
+      const field = (spec.fields || []).find((f) => f && f.name === 'value');
+      if (field) {
+        // Patterns are .NET regular expressions; Sonarr/Radarr validate them.
+        field.value = typeof field.value === 'number' ? Number(change.value) : String(change.value);
+      }
+    }
+  }
+  return next;
+}

@@ -7,7 +7,7 @@
 import { autoRefresh } from './ui.js';
 import { isLocalMode } from './connections.js';
 
-export const LIVE_TYPES = new Set(['sonarr', 'radarr', 'whisparr', 'lidarr', 'readarr', 'sabnzbd', 'tautulli', 'jellyfin', 'emby']);
+export const LIVE_TYPES = new Set(['sonarr', 'radarr', 'whisparr', 'lidarr', 'readarr', 'sabnzbd', 'tautulli', 'jellyfin', 'emby', 'qbittorrent', 'transmission', 'deluge', 'flood', 'nzbget']);
 const SAFETY_POLL_MS = 60000;
 const MIN_GAP_MS = 750;
 
@@ -63,5 +63,34 @@ export function liveRefresh(sentinel, service, fallbackMs, fn) {
   document.addEventListener('visibilitychange', onVisible);
   // Tear down when the view is replaced.
   const watch = setInterval(() => { if (!alive()) { clearInterval(watch); stop(); } }, 5000);
+  return { stop };
+}
+
+// One stream for several services (Home). Calls `fn` (throttled) when any of
+// them changes. Without live support nothing happens: Home has its own timer.
+export function liveRefreshMany(sentinel, services, fn, { minGapMs = 2000 } = {}) {
+  const list = (services || []).filter((s) => liveAvailable(s));
+  if (!list.length) return null;
+  const es = new EventSource(`/api/live?services=${list.map((s) => encodeURIComponent(s.key)).join(',')}`);
+  let last = 0;
+  let pending = null;
+  let changed = new Set();
+  const run = () => {
+    const wait = minGapMs - (Date.now() - last);
+    if (wait > 0) { if (!pending) pending = setTimeout(() => { pending = null; run(); }, wait); return; }
+    last = Date.now();
+    const keys = changed; changed = new Set();
+    Promise.resolve(fn(keys)).catch(() => {});
+  };
+  let failures = 0;
+  es.addEventListener('ready', () => { failures = 0; });
+  es.addEventListener('change', (e) => {
+    if (!sentinel || !sentinel.isConnected) return stop();
+    try { const k = JSON.parse(e.data).service; if (k) changed.add(k); } catch { /* ignore */ }
+    run();
+  });
+  es.onerror = () => { failures += 1; if (failures >= 3 || !sentinel || !sentinel.isConnected) stop(); };
+  function stop() { es.close(); if (pending) clearTimeout(pending); clearInterval(watch); }
+  const watch = setInterval(() => { if (!sentinel || !sentinel.isConnected) stop(); }, 5000);
   return { stop };
 }

@@ -39,7 +39,7 @@ store (`data/store.json`).
 
 ## Next — full *arr task coverage (via API)
 - [x] **Manual import** — "Fix import" on stuck Sonarr/Radarr queue items (re-map series/episodes/movie + quality, reprocess, import, command tracking).
-- [~] **Quality profiles / custom formats / release profiles** management (view done; edit still in Sonarr/Radarr).
+- [x] **Quality profiles / custom formats** view + edit (release profiles still in Sonarr/Radarr).
 - [ ] **Indexer management** (Prowlarr live: add/edit/test/sync, app sync).
 - [ ] **Download client settings**, remote path mappings.
 - [x] **Tags** management (usage, rename, delete) and per‑item tag editing.

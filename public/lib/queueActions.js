@@ -123,7 +123,8 @@ export function queueActionList(client, kind, record, { onDone, getRow } = {}) {
   return [
     queueImportAction(client, kind, record, { reload: onDone }),
     { label: 'Remove…', title: 'Remove, optionally blocklist and search again', variant: 'danger', primary: !stuck, onClick: (e) => { e?.stopPropagation?.(); openRemoveQueueDialog(client, record, { onDone, rowEl: rowOf(e) }); } },
-    { label: 'Blocklist & search', title: 'Blocklist this release and search for a replacement', onClick: (e) => {
+    // Removes the queue item (DELETE with blocklist), so it needs delete rights.
+    { label: 'Blocklist & search', needs: 'delete', title: 'Blocklist this release and search for a replacement', onClick: (e) => {
       e?.stopPropagation?.();
       removeWithUndo(client, record, { removeFromClient: true, blocklist: true, search: true }, { onDone, rowEl: rowOf(e) });
     } },

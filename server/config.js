@@ -33,7 +33,7 @@ export function loadDotEnv() {
   }
 }
 
-const SERVICE_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex', 'portainer', 'glances', 'pihole', 'adguard', 'syncthing', 'navidrome', 'pulsarr', 'whisparr'];
+const SERVICE_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex', 'portainer', 'glances', 'pihole', 'adguard', 'syncthing', 'navidrome', 'pulsarr', 'whisparr', 'truenas', 'unraid'];
 export const ALLOWED_SERVICE_TYPES = SERVICE_TYPES;
 export const CONFIG_PATH = path.join(ROOT, 'config.json');
 
@@ -209,6 +209,9 @@ export function buildServiceUpdate(key, service, prev = {}, { isHttpUrl = defaul
     } catch (error) { return { error: error.message }; }
   }
 
+  if (clean.type === 'truenas' && clean.baseUrl && !/^https:\/\//i.test(clean.baseUrl)) {
+    return { error: 'TrueNAS needs an https:// URL: it revokes API keys sent over plain http' };
+  }
   if (clean.type === 'deluge' && !clean.password) return { error: 'Deluge Web password is required' };
   if (clean.type === 'nzbget' && (!clean.username || !clean.password)) return { error: 'NZBGet ControlUsername and ControlPassword are required' };
   if (clean.type === 'transmission' && (!!clean.username !== !!clean.password)) return { error: 'Enter both Transmission username and password, or leave both blank' };
@@ -297,6 +300,10 @@ function buildMockConfig() {
       navidrome: mkLogin('Navidrome', 'navidrome', MOCK_PORTS.navidrome, 'admin', 'mock-navidrome'),
       pulsarr: mk('pulsarr', 'Pulsarr', 'pulsarr', MOCK_PORTS.pulsarr),
       whisparr: mk('whisparr', 'Whisparr', 'whisparr', MOCK_PORTS.whisparr),
+      unraid: mk('unraid', 'Unraid', 'unraid', MOCK_PORTS.unraid),
+      // Real TrueNAS needs https (it revokes keys sent over http); the demo
+      // mock is plain ws on localhost, allowed only in demo mode.
+      truenas: { ...mk('truenas', 'TrueNAS', 'truenas', MOCK_PORTS.truenas), demoAllowInsecure: true },
       jellyfin: mk('jellyfin', 'Jellyfin', 'jellyfin', MOCK_PORTS.jellyfin),
       emby: mk('emby', 'Emby', 'emby', MOCK_PORTS.emby),
       // Public Usenet indexer (e.g. NZBGeek) — Newznab-compatible API, no custom headers.

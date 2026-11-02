@@ -119,11 +119,11 @@ function statCard(label, value, cls) {
 function queueControls(q, sab, ctx) {
   const paused = q.paused || q.status === 'Paused';
   return [
-    h('button', { class: 'btn', onclick: async () => {
+    h('button', { dataset: { needs: 'write' }, class: 'btn', onclick: async () => {
       try { await sab({ mode: paused ? 'resume' : 'pause' }); toast(paused ? 'Resumed' : 'Paused', 'success'); ctx.reload(); }
       catch (e) { toast(e.message, 'error'); }
     } }, paused ? 'Resume' : 'Pause'),
-    h('button', { class: 'btn', onclick: () => openSpeedModal(q, sab, ctx) }, `Speed: ${q.speedlimit || 100}%`),
+    h('button', { dataset: { needs: 'write' }, class: 'btn', onclick: () => openSpeedModal(q, sab, ctx) }, `Speed: ${q.speedlimit || 100}%`),
   ];
 }
 

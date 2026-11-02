@@ -28,7 +28,7 @@ import { renderIndexer } from './views/indexer.js';
 import { renderPlex } from './views/plex.js';
 import { renderMediaServer } from './views/mediaServer.js';
 import { renderAutobrr, renderMaintainerr, renderTdarr, renderAudiobookshelf } from './views/extraServices.js';
-import { renderPortainer, renderGlances, renderPihole, renderAdguard, renderSyncthing, renderNavidrome, renderPulsarr } from './views/integrations.js';
+import { renderPortainer, renderGlances, renderPihole, renderAdguard, renderSyncthing, renderNavidrome, renderPulsarr, renderTruenas, renderUnraid } from './views/integrations.js';
 import { renderEmbed } from './views/embed.js';
 import { renderSettings } from './views/settings.js';
 import { renderCalendar } from './views/calendar.js';
@@ -77,15 +77,17 @@ export const SERVICE_META = {
   plex: { logo: '/icons/plex.svg', emoji: '▶', renderer: renderPlex },
   jellyfin: { logo: '/icons/jellyfin.svg', emoji: '▶', renderer: renderMediaServer },
   emby: { logo: '/icons/emby.svg', emoji: '▶', renderer: renderMediaServer },
-  portainer: { emoji: '🐳', renderer: renderPortainer },
-  glances: { emoji: '📈', renderer: renderGlances },
-  pihole: { emoji: '🛡', renderer: renderPihole },
-  adguard: { emoji: '🛡', renderer: renderAdguard },
-  syncthing: { emoji: '🔄', renderer: renderSyncthing },
-  navidrome: { emoji: '🎶', renderer: renderNavidrome },
-  pulsarr: { emoji: '📝', renderer: renderPulsarr },
+  portainer: { logo: '/icons/portainer.svg', emoji: '🐳', renderer: renderPortainer },
+  glances: { logo: '/icons/glances.svg', emoji: '📈', renderer: renderGlances },
+  pihole: { logo: '/icons/pihole.svg', emoji: '🛡', renderer: renderPihole },
+  adguard: { logo: '/icons/adguard.svg', emoji: '🛡', renderer: renderAdguard },
+  syncthing: { logo: '/icons/syncthing.svg', emoji: '🔄', renderer: renderSyncthing },
+  navidrome: { logo: '/icons/navidrome.svg', emoji: '🎶', renderer: renderNavidrome },
+  pulsarr: { logo: '/icons/pulsarr.svg', emoji: '📝', renderer: renderPulsarr },
+  truenas: { logo: '/icons/truenas.svg', emoji: '🗄', renderer: renderTruenas },
+  unraid: { logo: '/icons/unraid.svg', emoji: '🗄', renderer: renderUnraid },
   // Whisparr v2 speaks the Sonarr v3 API, so it uses the Sonarr screens.
-  whisparr: { logo: '/icons/sonarr.svg', emoji: '', renderer: renderSonarr },
+  whisparr: { logo: '/icons/whisparr.svg', emoji: '', renderer: renderSonarr },
 };
 
 const state = {
@@ -504,6 +506,8 @@ const QUICK_ACTIONS = {
   glances: [['overview', 'Overview'], ['sensors', 'Temperatures'], ['containers', 'Containers']],
   syncthing: [['folders', 'Folders'], ['devices', 'Devices']],
   pulsarr: [['approvals', 'Approvals'], ['recent', 'Recent requests']],
+  truenas: [['pools', 'Pools'], ['disks', 'Disks'], ['apps', 'Apps'], ['alerts', 'Alerts']],
+  unraid: [['array', 'Array'], ['docker', 'Docker'], ['vms', 'VMs']],
   whisparr: [['series', 'Library'], ['calendar', 'Calendar'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['history', 'History']],
 };
 
@@ -970,7 +974,12 @@ function openShortcutsHelp() {
   });
 }
 
-function openSearch({ query = '', type = 'all' } = {}) {
+export const SEARCH_FILTERS = ['all', 'movie', 'tv'];
+
+function openSearch(options = {}) {
+  // Search always opens on All unless a valid filter is asked for (deep links).
+  const query = typeof options.query === 'string' ? options.query : '';
+  const type = SEARCH_FILTERS.includes(options.type) ? options.type : 'all';
   const input = h('input', { class: 'input', type: 'search', name: 'query', enterkeyhint: 'search', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Search libraries & discover new titles…' });
   const results = h('div', { class: 'list search-results', 'aria-live': 'polite' });
   let typeFilter = 'all';
@@ -1556,7 +1565,8 @@ async function init() {
   // Global controls
   document.getElementById('menu-toggle').addEventListener('click', () => setSidebar(!els.sidebar.classList.contains('open')));
   if (els.notifBtn) els.notifBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleNotif(); });
-  if (els.searchBtn) els.searchBtn.addEventListener('click', openSearch);
+  // Wrapped so the click event isn't taken as search options (event.type is "click").
+  if (els.searchBtn) els.searchBtn.addEventListener('click', () => openSearch());
   // Close the notifications panel on outside click.
   document.addEventListener('click', (e) => {
     if (notifOpen && !document.getElementById('notif-wrap').contains(e.target)) toggleNotif(false);

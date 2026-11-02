@@ -1,7 +1,8 @@
 // Shared "System" + "Wanted" tabs for Sonarr/Radarr — health checks, disk space,
 // system status, maintenance commands, and the missing/wanted list.
 import { h, mount, skeletonList, empty, toast, fmtBytes, pct, timeEl, openModal, closeModal, confirmModal } from '../lib/ui.js';
-import { profileSummary, formatSpecSummary, tagUsage } from '../lib/arrProfiles.js';
+import { profileSummary, formatSpecSummary, tagUsage, profileRows, applyProfileEdits, applyFormatEdits } from '../lib/arrProfiles.js';
+import { roleAllows } from '../lib/roleUi.js';
 import { openPathFix } from '../lib/pathFix.js';
 import { openDuplicates } from '../lib/duplicates.js';
 
@@ -76,13 +77,53 @@ export async function tabSystem(root, arr, ctx, kind) {
       h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Tags'),
       tagsSection(tags, arr, reload, kind),
       h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Quality profiles'),
-      profilesSection(profiles, formats),
+      profilesSection(profiles, formats, arr, reload),
       h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Custom formats'),
-      formatsSection(formats, profiles),
+      formatsSection(formats, profiles, arr, reload),
     );
   } catch (err) {
     mount(root, empty('', 'Failed to load system info', err.message, { label: 'Retry', onClick: () => tabSystem(root, arr, ctx, kind) }));
   }
+}
+
+// Custom format editor: name, rename flag, and each condition's value,
+// negate and required.
+function editFormat(format, arr, reload) {
+  const name = h('input', { class: 'input', value: format.name || '' });
+  const rename = h('input', { type: 'checkbox', checked: format.includeCustomFormatWhenRenaming ? 'checked' : null });
+  const specs = {};
+  const specRows = (format.specifications || []).map((sp, i) => {
+    const value = (sp.fields || []).find((f) => f && f.name === 'value');
+    const valueInput = value ? h('input', { class: 'input mono', value: value.value == null ? '' : String(value.value), spellcheck: 'false', autocapitalize: 'off' }) : null;
+    const negate = h('input', { type: 'checkbox', checked: sp.negate ? 'checked' : null });
+    const required = h('input', { type: 'checkbox', checked: sp.required ? 'checked' : null });
+    const sync = () => { specs[i] = { negate: negate.checked, required: required.checked, ...(valueInput ? { value: valueInput.value } : {}) }; };
+    [negate, required].forEach((el) => el.addEventListener('change', sync));
+    if (valueInput) valueInput.addEventListener('input', sync);
+    return h('div', { class: 'row', style: { flexDirection: 'column', alignItems: 'stretch', gap: '6px' } },
+      h('div', { class: 'row-title', style: { fontSize: '13px' } }, formatSpecSummary({ ...sp, negate: false, required: false }).label),
+      valueInput,
+      h('div', { class: 'meta-line' }, h('label', {}, negate, ' Negate'), h('label', {}, required, ' Required')));
+  });
+  const save = async (btn) => {
+    let next;
+    try { next = applyFormatEdits(format, { name: name.value, includeCustomFormatWhenRenaming: rename.checked, specs }); }
+    catch (e) { toast(e.message, 'error'); return; }
+    btn.disabled = true;
+    try { await arr.put(`customformat/${format.id}`, next); toast(`Saved ${next.name}`, 'success'); closeModal(); reload(); }
+    catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+  };
+  const saveBtn = h('button', { class: 'btn primary', onclick: () => save(saveBtn) }, 'Save');
+  openModal({
+    title: `Edit ${format.name}`, wide: true,
+    body: h('div', { class: 'pw-form' },
+      h('label', { class: 'pw-field' }, h('span', { class: 'pw-field-label' }, 'Name'), name),
+      h('label', { class: 'pw-field' }, h('span', { class: 'pw-field-label' }, 'Include in renaming'), h('span', { class: 'pw-toggle' }, rename)),
+      h('div', { class: 'section-title', style: { margin: '12px 0 6px' } }, 'Conditions'),
+      h('div', { class: 'list' }, ...specRows),
+      h('p', { class: 'dim settings-copy' }, 'Values are .NET regular expressions where the condition matches text; Sonarr/Radarr check them when you save. Add or remove conditions in Sonarr/Radarr.')),
+    footer: h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', width: '100%' } }, h('button', { class: 'btn', onclick: closeModal }, 'Cancel'), saveBtn),
+  });
 }
 
 function infoRow(label, value) {
@@ -145,12 +186,12 @@ function blocklistSection(first, arr, reload) {
 
 // Quality profiles (read-only): allowed qualities, cutoff, upgrades and the
 // custom format scores. Tap a profile for the full breakdown.
-function profilesSection(profiles, formats) {
+function profilesSection(profiles, formats, arr, reload) {
   const list = profiles || [];
   if (!list.length) return h('div', { class: 'dim' }, 'No quality profiles.');
   return h('div', { class: 'list' }, ...list.map((p) => {
     const sum = profileSummary(p, formats);
-    return h('div', { class: 'row clickable', role: 'button', tabindex: '0', onclick: () => openProfile(sum) },
+    return h('div', { class: 'row clickable', role: 'button', tabindex: '0', onclick: () => openProfile(sum, p, formats, arr, reload) },
       h('div', { class: 'row-main' },
         h('div', { class: 'row-title', style: { fontSize: '14px' } }, p.name),
         h('div', { class: 'meta-line', style: { marginTop: '2px' } },
@@ -164,7 +205,8 @@ function profilesSection(profiles, formats) {
   }));
 }
 
-function openProfile(sum) {
+function openProfile(sum, profile, formats, arr, reload) {
+  const canEdit = roleAllows('admin');
   const sec = (t) => h('div', { class: 'section-title', style: { margin: '14px 0 6px' } }, t);
   openModal({
     title: sum.name,
@@ -179,12 +221,73 @@ function openProfile(sum) {
       sum.scored.length
         ? h('div', { class: 'list' }, ...sum.scored.map((f) => h('div', { class: 'row' }, h('div', { class: 'row-main' }, h('div', { class: 'row-title', style: { fontSize: '13px' } }, f.name)), h('span', { class: `pill ${f.score > 0 ? 'ok' : 'down'}` }, f.score > 0 ? `+${f.score}` : String(f.score)))))
         : h('div', { class: 'dim' }, 'No custom formats are scored in this profile.'),
-      h('p', { class: 'dim settings-copy' }, 'Edit profiles in Sonarr/Radarr itself; this view is read-only.')),
-    footer: h('button', { class: 'btn', onclick: closeModal }, 'Close'),
+      canEdit ? null : h('p', { class: 'dim settings-copy' }, 'Only admins can edit profiles.')),
+    footer: h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', width: '100%' } },
+      h('button', { class: 'btn', onclick: closeModal }, 'Close'),
+      canEdit ? h('button', { class: 'btn primary', onclick: () => editProfile(profile, formats, arr, reload) }, 'Edit') : null),
   });
 }
 
-function formatsSection(formats, profiles) {
+// Profile editor: name, upgrades, allowed qualities, cutoff, format scores.
+function editProfile(profile, formats, arr, reload) {
+  const rows = profileRows(profile);
+  const allowed = {};
+  const name = h('input', { class: 'input', value: profile.name || '' });
+  const upgrades = h('input', { type: 'checkbox', checked: profile.upgradeAllowed ? 'checked' : null });
+  const cutoff = h('select', { class: 'input' });
+  const paintCutoff = () => {
+    const current = Number(cutoff.value || profile.cutoff);
+    mount(cutoff, ...rows.filter((r) => (allowed[r.index] ?? r.allowed)).map((r) => h('option', { value: String(r.cutoffId), selected: r.cutoffId === current ? 'selected' : null }, r.name)));
+  };
+  const qualityList = h('div', { class: 'list' }, ...rows.map((r) => {
+    const box = h('input', { type: 'checkbox', checked: r.allowed ? 'checked' : null, 'aria-label': `Allow ${r.name}` });
+    box.addEventListener('change', () => { allowed[r.index] = box.checked; paintCutoff(); });
+    return h('label', { class: 'row', style: { cursor: 'pointer' } }, box, h('div', { class: 'row-main' }, h('div', { class: 'row-title', style: { fontSize: '13px' } }, r.name, r.group ? h('span', { class: 'pill muted', style: { marginLeft: '6px' } }, 'group') : null)));
+  }));
+  paintCutoff();
+  const num = (v) => h('input', { class: 'input', type: 'number', step: '1', value: String(v ?? 0), style: { maxWidth: '120px' } });
+  const minScore = num(profile.minFormatScore);
+  const cutoffScore = num(profile.cutoffFormatScore);
+  const minUpgrade = num(profile.minUpgradeFormatScore ?? 1);
+  const scoreInputs = (formats || []).map((f) => {
+    const fi = (profile.formatItems || []).find((x) => x.format === f.id);
+    return [f, num(fi ? fi.score : 0)];
+  });
+  const field = (label, control) => h('label', { class: 'pw-field' }, h('span', { class: 'pw-field-label' }, label), control);
+  const save = async (btn) => {
+    let next;
+    try {
+      next = applyProfileEdits(profile, {
+        name: name.value, upgradeAllowed: upgrades.checked, allowed, cutoff: cutoff.value,
+        minFormatScore: minScore.value, cutoffFormatScore: cutoffScore.value, minUpgradeFormatScore: minUpgrade.value,
+        scores: Object.fromEntries(scoreInputs.map(([f, input]) => [f.id, input.value])),
+      });
+    } catch (e) { toast(e.message, 'error'); return; }
+    btn.disabled = true;
+    try { await arr.put(`qualityprofile/${profile.id}`, next); toast(`Saved ${next.name}`, 'success'); closeModal(); reload(); }
+    catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+  };
+  const saveBtn = h('button', { class: 'btn primary', onclick: () => save(saveBtn) }, 'Save');
+  openModal({
+    title: `Edit ${profile.name}`, wide: true,
+    body: h('div', { class: 'pw-form' },
+      field('Name', name),
+      field('Upgrades allowed', h('span', { class: 'pw-toggle' }, upgrades)),
+      field('Upgrade until', cutoff),
+      h('div', { class: 'section-title', style: { margin: '12px 0 6px' } }, 'Allowed qualities (best first)'),
+      qualityList,
+      h('div', { class: 'section-title', style: { margin: '12px 0 6px' } }, 'Custom format scores'),
+      field('Minimum format score', minScore),
+      field('Upgrade until format score', cutoffScore),
+      field('Minimum score increment', minUpgrade),
+      ...scoreInputs.map(([f, input]) => field(f.name, input)),
+      h('p', { class: 'dim settings-copy' }, 'Quality order and groups are kept as they are; change those in Sonarr/Radarr.')),
+    footer: h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', width: '100%' } }, h('button', { class: 'btn', onclick: closeModal }, 'Cancel'), saveBtn),
+  });
+}
+
+function formatsSection(formats, profiles, arr, reload) {
+  const canEdit = roleAllows('admin');
   const list = formats || [];
   if (!list.length) return h('div', { class: 'dim' }, 'No custom formats.');
   return h('div', { class: 'list' }, ...list.map((f) => {
@@ -200,6 +303,7 @@ function formatsSection(formats, profiles) {
           usedBy.length ? h('span', { class: 'dim' }, `Scored in: ${usedBy.join(', ')}`) : h('span', { class: 'dim' }, 'Not scored in any profile'),
         ),
       ),
+      canEdit ? h('div', { class: 'row-actions' }, h('button', { class: 'btn sm', onclick: () => editFormat(f, arr, reload) }, 'Edit')) : null,
     );
   }));
 }

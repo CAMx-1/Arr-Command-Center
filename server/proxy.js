@@ -18,6 +18,7 @@ import { secretsFor, isTextual, createRedactor } from './redact.js';
 const fetch = (url, init = {}) => globalThis.fetch(url, { redirect: 'manual', ...init });
 import { mergeProtectedHeaders } from '../public/lib/customHeaders.js';
 import { safeRpcPath, transmissionSubPath } from '../public/lib/transmissionPath.js';
+import { pingTruenas } from './truenas.js';
 
 function trimSlash(u) {
   return String(u || '').replace(/\/+$/, '');
@@ -53,6 +54,23 @@ function cfHeaders(svc) {
 
 function combinedHeaders(svc, generated = {}) {
   return mergeProtectedHeaders(svc.customHeaders, generated, cfHeaders(svc));
+}
+
+export const PORTAINER_ACTION_RE = /^api\/endpoints\/\d+\/docker\/containers\/[A-Za-z0-9_.-]{1,128}\/(start|stop|restart)$/;
+export function isPortainerContainerAction(method, subPath) {
+  return String(method).toUpperCase() === 'POST' && PORTAINER_ACTION_RE.test(String(subPath || '').replace(/^\/+/, ''));
+}
+
+// A GraphQL request that only reads: POST /graphql whose document has no
+// mutation or subscription operation.
+export function isUnraidQuery(method, subPath, body) {
+  if (String(method).toUpperCase() !== 'POST' || String(subPath || '').replace(/^\/+|\/+$/g, '') !== 'graphql') return false;
+  let doc;
+  try { doc = JSON.parse(Buffer.isBuffer(body) ? body.toString('utf8') : String(body || '')); } catch { return false; }
+  const q = doc && typeof doc.query === 'string' ? doc.query : '';
+  if (!q) return false;
+  const stripped = q.replace(/#[^\n]*/g, '').replace(/"(?:\\.|[^"\\])*"/g, '""');
+  return !/\b(mutation|subscription)\b/i.test(stripped);
 }
 
 export function subsonicAuth(svc, salt = randomBytes(8).toString('hex')) {
@@ -102,6 +120,9 @@ function authFor(svc) {
     if (svc.apiKey) headers.Authorization = `Bearer ${svc.apiKey}`;
   } else if (type === 'tdarr') {
     // Only required when Tdarr server auth is enabled.
+    if (svc.apiKey) headers['x-api-key'] = svc.apiKey;
+  } else if (type === 'unraid') {
+    // Unraid API (7.2+, GraphQL): Settings → Management Access → API Keys.
     if (svc.apiKey) headers['x-api-key'] = svc.apiKey;
   } else if (type === 'portainer') {
     // Portainer access token (My account → Access tokens).
@@ -497,6 +518,24 @@ async function forwardPihole(svc, serviceKey, subPath, req, res) {
   }
 }
 
+async function pingUnraid(svc, started) {
+  try {
+    const { headers } = authFor(svc);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    let r;
+    try {
+      r = await fetch(`${trimSlash(svc.baseUrl)}/graphql`, { method: 'POST', redirect: 'manual', signal: controller.signal, headers: { ...headers, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ query: '{ online info { versions { core { unraid } } } }' }) });
+    } finally { clearTimeout(timer); }
+    const data = await r.json().catch(() => null);
+    const err = data && data.errors && data.errors[0] && data.errors[0].message;
+    const ok = r.ok && !err && data && data.data && data.data.online === true;
+    return { ok, status: r.status, ms: Date.now() - started, version: data?.data?.info?.versions?.core?.unraid || undefined, error: ok ? undefined : (r.status === 401 || /unauth|forbidden|api key/i.test(err || '')) ? 'Auth / access denied' : err || `HTTP ${r.status}` };
+  } catch (error) {
+    return { ok: false, status: 0, ms: Date.now() - started, error: classifyUpstreamError(error) };
+  }
+}
+
 async function pingPihole(svc, serviceKey, started) {
   try {
     const target = new URL(`${trimSlash(svc.baseUrl)}/api/info/version`);
@@ -651,10 +690,18 @@ async function forward(svc, serviceKey, subPath, req, res) {
   if (svc.type === 'deluge') return forwardDeluge(svc, serviceKey, subPath, req, res);
   if (svc.type === 'flood') return forwardFlood(svc, serviceKey, subPath, req, res);
   if (svc.type === 'pihole') return forwardPihole(svc, serviceKey, subPath, req, res);
-  // Portainer starts read-only: nothing that could start, stop, change or
-  // remove a container (or anything else) is forwarded, whatever the role.
-  if (svc.type === 'portainer' && !['GET', 'HEAD'].includes(req.method.toUpperCase())) {
-    return res.status(405).json({ error: 'Portainer is read-only in Arr Command Center' });
+  // Unraid is read-only here: only GraphQL queries are forwarded.
+  if (svc.type === 'unraid' && !isUnraidQuery(req.method, subPath, req.body)) {
+    return res.status(405).json({ error: 'Only read queries are allowed for Unraid' });
+  }
+  // TrueNAS speaks WebSocket JSON-RPC; the app uses /api/truenas/<key> instead.
+  if (svc.type === 'truenas') return res.status(404).json({ error: 'Use /api/truenas/<service> for TrueNAS' });
+  // Portainer: reads, plus start / stop / restart of a container. Nothing else
+  // that could change or remove anything (create, delete, exec, update,
+  // stacks, settings) is forwarded, whatever the role. Roles make the allowed
+  // actions admin-only.
+  if (svc.type === 'portainer' && !['GET', 'HEAD'].includes(req.method.toUpperCase()) && !isPortainerContainerAction(req.method, subPath)) {
+    return res.status(405).json({ error: 'Only start, stop and restart are allowed for Portainer' });
   }
   const incomingQs = (req.originalUrl.split('?')[1]) || '';
   const target = buildTargetUrl(svc, subPath, incomingQs);
@@ -891,6 +938,8 @@ export async function pingService(svc, serviceKey) {
   if (svc.type === 'flood') return pingFlood(svc, key, started);
   if (svc.type === 'tdarr') return pingTdarr(svc, started);
   if (svc.type === 'pihole') return pingPihole(svc, key, started);
+  if (svc.type === 'truenas') return pingTruenas(svc, { allowInsecure: !!svc.demoAllowInsecure });
+  if (svc.type === 'unraid') return pingUnraid(svc, started);
   try {
     const path = HEALTH_PATH[svc.type] || '';
     const [p, q] = path.split('?');
@@ -920,6 +969,58 @@ export async function pingService(svc, serviceKey) {
     return { ok: upstream.ok, status: upstream.status, ms, version, error };
   } catch (err) {
     return { ok: false, status: 0, ms: Date.now() - started, error: classifyUpstreamError(err) };
+  }
+}
+
+// Server-side read of a download client's active list for live updates
+// (server/live.js). Uses the same sessions/auth as the proxy for each client.
+export async function liveClientFetch(svc, serviceKey) {
+  const base = trimSlash(svc.baseUrl);
+  const json = async (response) => {
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  };
+  const withTimeout = async (fn, ms = 8000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try { return await fn(controller.signal); } finally { clearTimeout(timer); }
+  };
+  switch (svc.type) {
+    case 'qbittorrent': {
+      const run = (sid) => withTimeout((signal) => {
+        const headers = combinedHeaders(svc, { Referer: base, Origin: base, accept: 'application/json' });
+        if (svc.apiKey) headers.Authorization = `Bearer ${svc.apiKey}`;
+        else if (sid) headers.Cookie = `SID=${sid}`;
+        return fetch(`${base}/api/v2/torrents/info`, { headers, redirect: 'manual', signal });
+      });
+      let sid = svc.apiKey ? '' : await ensureQbitSid(svc, serviceKey);
+      let r = await run(sid);
+      if (!svc.apiKey && (r.status === 401 || r.status === 403)) { sid = await ensureQbitSid(svc, serviceKey, true); r = await run(sid); }
+      return json(r);
+    }
+    case 'transmission': {
+      const target = new URL(`${base}${safeRpcPath(svc.rpcPath)}`);
+      const { headers } = authFor(svc);
+      const r = await transmissionFetch(svc, serviceKey, target, {
+        method: 'POST', redirect: 'manual',
+        headers: { ...headers, accept: 'application/json', 'content-type': 'application/json' },
+        body: JSON.stringify({ method: 'torrent-get', arguments: { fields: ['id', 'status', 'percentDone', 'error', 'rateDownload', 'rateUpload'] } }),
+      }, 8000);
+      return json(r);
+    }
+    case 'deluge':
+      return delugeRpc(svc, serviceKey, 'web.update_ui', [['state', 'progress', 'download_payload_rate', 'upload_payload_rate'], {}]);
+    case 'flood': {
+      const r = await floodFetch(svc, serviceKey, new URL(`${base}/api/torrents`), { method: 'GET', headers: combinedHeaders(svc, { accept: 'application/json' }) }, 8000);
+      return json(r);
+    }
+    case 'nzbget': {
+      const { headers } = authFor(svc);
+      const r = await withTimeout((signal) => fetch(`${base}/jsonrpc`, { method: 'POST', redirect: 'manual', signal, headers: { ...headers, accept: 'application/json', 'content-type': 'application/json' }, body: JSON.stringify({ method: 'listgroups', params: [0], id: 1 }) }));
+      return json(r);
+    }
+    default:
+      throw new Error(`No live fetch for ${svc.type}`);
   }
 }
 

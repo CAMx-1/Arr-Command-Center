@@ -1,3 +1,4 @@
+import { liveRefresh } from '../lib/live.js';
 import { h, mount, tabs, skeletonList, empty, toast, fmtBytes, pct, openModal, closeModal, autoRefresh } from '../lib/ui.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
@@ -68,7 +69,7 @@ async function renderTab(root, adapter, ctx, tab) {
     }
   };
   await load(false);
-  autoRefresh(wrap, 5000, () => load(true));
+  liveRefresh(wrap, ctx.service, 5000, () => load(true));
 }
 
 function statsHeader(adapter, session = {}, items = []) {
@@ -95,8 +96,8 @@ function globalControls(adapter, ctx, session) {
     catch (error) { toast(error.message, 'error'); }
   };
   return [
-    h('button', { class: 'btn', onclick: () => act(session.paused ? adapter.resumeAll : adapter.pauseAll, session.paused ? 'Resumed all' : 'Paused all') }, session.paused ? 'Resume all' : 'Pause all'),
-    adapter.capabilities.speed ? h('button', { class: 'btn', onclick: () => openSpeedModal(adapter, ctx, session) }, 'Speed limits') : null,
+    h('button', { dataset: { needs: 'write' }, class: 'btn', onclick: () => act(session.paused ? adapter.resumeAll : adapter.pauseAll, session.paused ? 'Resumed all' : 'Paused all') }, session.paused ? 'Resume all' : 'Pause all'),
+    adapter.capabilities.speed ? h('button', { dataset: { needs: 'write' }, class: 'btn', onclick: () => openSpeedModal(adapter, ctx, session) }, 'Speed limits') : null,
   ];
 }
 
@@ -120,7 +121,7 @@ function itemActions(item, adapter, ctx, stopPropagation = false) {
   const buttons = [];
   if (adapter.capabilities.pauseItem && !item.history && (item.canPause || item.canResume)) {
     const resume = item.canResume;
-    buttons.push(h('button', { class: 'btn sm', title: resume ? 'Resume' : 'Pause', onclick: wrap(async () => {
+    buttons.push(h('button', { dataset: { needs: 'write' }, class: 'btn sm', title: resume ? 'Resume' : 'Pause', onclick: wrap(async () => {
       try { await (resume ? adapter.resumeItem(item) : adapter.pauseItem(item)); toast(resume ? 'Resumed' : 'Paused', 'success'); ctx.reload(); }
       catch (error) { toast(error.message, 'error'); }
     }) }, resume ? '▶' : '⏸'));

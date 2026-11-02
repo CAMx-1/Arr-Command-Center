@@ -14,6 +14,7 @@
 // viewport resizes without re-rendering.
 
 import { h, registerOverlay, closeOverlay } from './ui.js';
+import { filterActions } from './roleUi.js';
 
 const MOBILE_QUERY = '(max-width: 720px)';
 
@@ -68,7 +69,8 @@ export function actionButton(action, { size = 'sm' } = {}) {
 //   opts.size       : forwarded to actionButton ('sm' | 'md')
 //   opts.sheetTitle : title shown at the top of the mobile bottom-sheet
 export function actionGroup(actions, opts = {}) {
-  const list = (actions || []).filter(Boolean);
+  // Drop actions the signed-in role can't use (the server would refuse them).
+  const list = filterActions(actions);
   const group = h('div', { class: 'row-actions action-group' });
   if (!list.length) return group;
 

@@ -4,7 +4,7 @@ A single, locally-hosted web dashboard to view and manage your whole media stack
 **Sonarr**, **Radarr**, **Lidarr**, **Bindery** (with legacy **Readarr** fallback), **Overseerr/Seerr**, **SABnzbd**,
 **qBittorrent**, **Transmission**, **Deluge**, **NZBGet**, **Flood**, **Tautulli**, **Bazarr**, **Prowlarr**, **Plex**, **Jellyfin**, **Emby**,
 **Audiobookshelf**, **Autobrr**, **Maintainerr**, **Tdarr**, **Portainer** (read-only), **Glances**, **Pi-hole**,
-**AdGuard Home**, **Syncthing**, **Navidrome**, **Pulsarr**, **Whisparr**, and any Newznab **indexer** — from one place.
+**AdGuard Home**, **Syncthing**, **Navidrome**, **Pulsarr**, **Whisparr**, **TrueNAS**, **Unraid**, and any Newznab **indexer** — from one place.
 
 Built as a self-hosted replacement for the now-discontinued **LunaSea** iOS app. Because
 it's a responsive web app, it works from your phone's browser (and you can "Add to Home
@@ -449,9 +449,18 @@ internal traffic typically bypasses Cloudflare Access — in that case just omit
 ## Features
 
 **Newer integrations** (server mode only; not available in the iOS local-only mode yet)
-- **Portainer** — environments and containers grouped by stack, with health. Read-only:
-  the proxy refuses every write, and container inspect/logs are admin-only because they
-  can contain secrets. Auth: a Portainer access token.
+- **Portainer** — environments and containers grouped by stack, with health. Admins can
+  start, stop and restart a container (with a confirmation); the proxy refuses every other
+  write (create, delete, exec, stacks, settings). Container inspect/logs are admin-only
+  because they can contain secrets. Auth: a Portainer access token.
+- **TrueNAS** (25.04+) — pools with health, space and scrubs; disks with temperatures;
+  apps with update status; alerts. Read-only, over TrueNAS's JSON-RPC WebSocket API (its
+  REST API is removed in TrueNAS 26). Needs an `https://` URL because TrueNAS revokes API
+  keys sent over plain http; for a self-signed certificate start the server with
+  `NODE_EXTRA_CA_CERTS=/path/to/ca.pem`.
+- **Unraid** (7.2+ API) — array state, capacity, parity check, every disk with status,
+  errors and temperature (standby when spun down), Docker containers and VMs. Read-only:
+  only GraphQL queries are forwarded. Auth: an API key (the Viewer role is enough).
 - **Glances** (API v4) — CPU, memory, load, disks, temperatures from the `sensors` plugin,
   and containers. Optional Basic auth if Glances runs with `--password`.
 - **Pi-hole v6** — queries, blocked %, top domains and clients; admins can pause blocking.
@@ -463,10 +472,19 @@ internal traffic typically bypasses Cloudflare Access — in that case just omit
 - **Pulsarr** — approval queue (admins approve or reject) and recent watchlist requests.
 - **Whisparr v2** — uses the Sonarr screens, since it speaks the Sonarr v3 API.
 
-**Live updates** — Sonarr/Radarr/Lidarr/Readarr/Whisparr queues, SABnzbd, Tautulli and
-Jellyfin/Emby now-playing update over Server-Sent Events (`/api/live/<service>`): the server
-polls once for every viewer and only signals real changes. Other views, and the iOS
-local-only mode, keep polling.
+**Live updates** — Sonarr/Radarr/Lidarr/Readarr/Whisparr queues, SABnzbd, qBittorrent,
+Transmission, Deluge, Flood, NZBGet, Tautulli and Jellyfin/Emby now-playing update over
+Server-Sent Events (`/api/live/<service>`), and Home uses one combined stream
+(`/api/live?services=…`) for its tiles and activity feed. The server polls once for every
+viewer and only signals visible changes. The iOS local-only mode keeps polling.
+
+**Quality profiles and custom formats** — admins can edit a profile's name, upgrades,
+allowed qualities, cutoff and format scores, and a custom format's name, rename flag and
+each condition's value, negate and required (System tab). Reordering qualities and adding
+or removing conditions still happen in Sonarr/Radarr.
+
+**Roles in the UI** — users and guests don't see buttons they can't use (deletes for users;
+any change for guests). The server still enforces every rule.
 
 **Unified dashboard**
 - **Overview** — live status of every service, versions, quick stats, and a filterable

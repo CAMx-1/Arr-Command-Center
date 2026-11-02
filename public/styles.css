@@ -1621,3 +1621,15 @@ html[data-black] .hex-cell.hex-system .hex-face { background: linear-gradient(16
 @media (max-width: 720px) {
   .has-window-controls #topbar { padding-left: max(14px, env(safe-area-inset-left), calc(var(--acc-wc-left) + 8px)); }
 }
+
+/* ---------- Roles (Sign in with Plex) ----------
+   html[data-role] is set from /api/config. The server refuses these actions
+   anyway; hiding them avoids buttons that can only fail. Confirmation buttons
+   (e.g. "Sign out") are kept. */
+:is([data-role="user"], [data-role="guest"]) :is(#view, #topbar-actions, #modal-root) .btn.danger:not(.confirm-btn),
+:is([data-role="user"], [data-role="guest"]) .tag-x { display: none !important; }
+[data-role="guest"] #topbar-actions .btn.primary,
+[data-role="guest"] #view .row-actions .btn.primary,
+[data-role="guest"] #view [title="Bulk select"] { display: none !important; }
+[data-role="guest"] [data-needs="write"],
+:is([data-role="user"], [data-role="guest"]) :is([data-needs="delete"], [data-needs="admin"]) { display: none !important; }

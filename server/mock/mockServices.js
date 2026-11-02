@@ -34,7 +34,7 @@ export const MOCK_PORTS = {
   prowlarr: 19696,
 };
 
-import { INTEGRATION_MOCK_PORTS, makePortainer, makeGlances, makePihole, makeAdguard, makeSyncthing, makeNavidrome, makePulsarr } from './integrationMocks.js';
+import { INTEGRATION_MOCK_PORTS, makePortainer, makeGlances, makePihole, makeAdguard, makeSyncthing, makeNavidrome, makePulsarr, makeUnraid, makeTruenasServer } from './integrationMocks.js';
 Object.assign(MOCK_PORTS, INTEGRATION_MOCK_PORTS);
 
 const cfSeen = {}; // service -> last seen CF headers
@@ -204,7 +204,7 @@ function makeSonarr(opts = {}) {
   let rootFolders = [{ id: 1, path: 'C:\\Media\\TV', freeSpace: 0, accessible: false, unmappedFolders: [] }, { id: 2, path: '/data/tv', freeSpace: 1649267441664, accessible: true, unmappedFolders: [] }];
   app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
   app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 500000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
-  app.get('/api/v3/qualityprofile', (req, res) => res.json(MOCK_QUALITY_PROFILES));
+  app.get('/api/v3/qualityprofile', (req, res) => res.json(app.locals.profiles || MOCK_QUALITY_PROFILES));
   // Stable fake 'added' dates (days ago derived from id) for cleanup/age features.
   app.get('/api/v3/series', (req, res) => res.json(series.map((x) => (x.added ? x : { ...x, added: new Date(Date.now() - (120 + x.id * 97) * 86400000).toISOString() }))));
   app.get('/api/v3/queue', (req, res) => res.json({ page: 1, pageSize: 20, totalRecords: queue.length, records: queue }));
@@ -329,7 +329,33 @@ function mountArrLibraryExtras(app, kind, state) {
     for (const x of state.getItems()) if (Array.isArray(x.tags)) x.tags = x.tags.filter((t) => t !== id);
     res.json({});
   });
-  app.get('/api/v3/customformat', (req, res) => res.json(MOCK_CUSTOM_FORMATS));
+  // Per-instance copies so edits in one mock don't leak into another.
+  app.locals.profiles = structuredClone(MOCK_QUALITY_PROFILES);
+  app.locals.formats = structuredClone(MOCK_CUSTOM_FORMATS);
+  app.get('/api/v3/customformat', (req, res) => res.json(app.locals.formats));
+  app.put('/api/v3/qualityprofile/:id', (req, res) => {
+    const id = Number(req.params.id);
+    const i = app.locals.profiles.findIndex((p) => p.id === id);
+    if (i < 0) return res.status(404).json({ message: 'NotFound' });
+    const body = req.body || {};
+    const allowedIds = [];
+    for (const it of body.items || []) if (it.allowed) allowedIds.push(it.items && it.items.length ? it.id : it.quality && it.quality.id);
+    const errors = [];
+    if (!String(body.name || '').trim()) errors.push({ propertyName: 'Name', errorMessage: "'Name' must not be empty." });
+    if (!allowedIds.length) errors.push({ propertyName: 'Items', errorMessage: 'Must contain at least one allowed quality' });
+    else if (!allowedIds.includes(body.cutoff)) errors.push({ propertyName: 'Cutoff', errorMessage: 'Cutoff must be an allowed quality or group' });
+    if (errors.length) return res.status(400).json(errors);
+    app.locals.profiles[i] = { ...body, id };
+    res.status(202).json(app.locals.profiles[i]);
+  });
+  app.put('/api/v3/customformat/:id', (req, res) => {
+    const id = Number(req.params.id);
+    const i = app.locals.formats.findIndex((f) => f.id === id);
+    if (i < 0) return res.status(404).json({ message: 'NotFound' });
+    if (!String((req.body && req.body.name) || '').trim()) return res.status(400).json([{ propertyName: 'Name', errorMessage: "'Name' must not be empty." }]);
+    app.locals.formats[i] = { ...req.body, id };
+    res.status(202).json(app.locals.formats[i]);
+  });
   const titles = kind === 'series'
     ? ['The.Bear.S03E05.1080p.WEB.h264-BADGRP', 'Severance.S02E09.720p.HDTV.x264-LOL', 'Foundation.S02E01.2160p.WEB.H265-FAKE']
     : ['Furiosa.2024.1080p.CAM.x264-YIFY', 'Oppenheimer.2023.2160p.WEB.H265-FAKE', 'Dune.Part.Two.2024.720p.HDTS-aXXo'];
@@ -386,7 +412,7 @@ function makeRadarr(opts = {}) {
   ];
   app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
   app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 900000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
-  app.get('/api/v3/qualityprofile', (req, res) => res.json(MOCK_QUALITY_PROFILES));
+  app.get('/api/v3/qualityprofile', (req, res) => res.json(app.locals.profiles || MOCK_QUALITY_PROFILES));
   app.get('/api/v3/movie', (req, res) => res.json(movies.map((x) => (x.added ? x : { ...x, added: new Date(Date.now() - (90 + (x.id % 40) * 23) * 86400000).toISOString() }))));
   app.get('/api/v3/calendar', (req, res) => res.json([
     { id: 1, title: 'Furiosa', year: 2024, digitalRelease: new Date(Date.now() + 5 * 86400000).toISOString(), hasFile: false, images: [] },
@@ -1500,6 +1526,8 @@ export function startMockServices() {
     ['navidrome', makeNavidrome(), MOCK_PORTS.navidrome],
     ['pulsarr', makePulsarr(), MOCK_PORTS.pulsarr],
     ['whisparr', makeSonarr({ instanceName: 'Whisparr (mock)' }), MOCK_PORTS.whisparr],
+    ['unraid', makeUnraid(), MOCK_PORTS.unraid],
+    ['truenas', makeTruenasServer(), MOCK_PORTS.truenas],
   ];
   const servers = [];
   for (const [name, app, port] of defs) {
@@ -1512,4 +1540,4 @@ export function startMockServices() {
 }
 
 // Exposed for tests (in-process, ephemeral ports).
-export { makeSonarr as _makeSonarrMock, makeRadarr as _makeRadarrMock, makeBazarr as _makeBazarrMock };
+export { makeSonarr as _makeSonarrMock, makeRadarr as _makeRadarrMock, makeBazarr as _makeBazarrMock, makeQbittorrent as _makeQbittorrentMock, makeTransmission as _makeTransmissionMock, makeDeluge as _makeDelugeMock, makeNzbget as _makeNzbgetMock, makeFlood as _makeFloodMock };

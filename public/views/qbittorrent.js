@@ -1,3 +1,4 @@
+import { liveRefresh } from '../lib/live.js';
 import { h, mount, tabs, spinner, skeletonList, empty, toast, fmtBytes, pct, openModal, closeModal } from '../lib/ui.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
@@ -55,9 +56,18 @@ function notConfigured(svc) {
   );
 }
 
-async function tabTorrents(root, qb, ctx, filter) {
-  const svcKey = ctx.service.key;
+// Each tab gets its own container: the tab body is reused, so a refresh loop
+// tied to the container stops as soon as another tab replaces it.
+async function tabTorrents(body, qb, ctx, filter) {
+  const root = h('div', {});
+  mount(body, root);
   mount(root, skeletonList());
+  await renderTorrents(root, qb, ctx, filter, false);
+  liveRefresh(root, ctx.service, 5000, () => renderTorrents(root, qb, ctx, filter, true));
+}
+
+async function renderTorrents(root, qb, ctx, filter, silent) {
+  const svcKey = ctx.service.key;
   try {
     const [info, torrents] = await Promise.all([
       qb.get('transfer/info').catch(() => ({})),
@@ -65,7 +75,7 @@ async function tabTorrents(root, qb, ctx, filter) {
     ]);
     const all = Array.isArray(torrents) ? torrents : [];
     const list = filter === 'completed' ? all.filter((t) => (t.progress || 0) >= 1) : all.filter((t) => (t.progress || 0) < 1);
-    ctx.setActions(viewToggle(svcKey, ctx.reload), ...globalControls(qb, ctx, info || {}));
+    if (!silent) ctx.setActions(viewToggle(svcKey, ctx.reload), ...globalControls(qb, ctx, info || {}));
     const header = statsHeader(info || {}, all);
     const title = filter === 'completed' ? 'Completed' : 'Downloading';
     if (!list.length) {
@@ -77,7 +87,7 @@ async function tabTorrents(root, qb, ctx, filter) {
     const view = hex ? hive(els, root.clientWidth) : h('div', { class: 'list' }, ...els);
     mount(root, header, h('div', { class: 'section-title' }, title), view);
   } catch (err) {
-    mount(root, empty('', 'Failed to load torrents', err.message, { label: 'Retry', onClick: () => tabTorrents(root, qb, ctx, filter) }));
+    if (!silent) mount(root, empty('', 'Failed to load torrents', err.message, { label: 'Retry', onClick: () => renderTorrents(root, qb, ctx, filter, false) }));
   }
 }
 
@@ -112,9 +122,9 @@ function globalControls(qb, ctx, info) {
     catch (e) { toast(e.message, 'error'); }
   };
   return [
-    h('button', { class: 'btn', onclick: () => act('torrents/start', { hashes: 'all' }, 'Resumed all') }, 'Resume all'),
-    h('button', { class: 'btn', onclick: () => act('torrents/stop', { hashes: 'all' }, 'Paused all') }, 'Pause all'),
-    h('button', { class: 'btn', onclick: () => openSpeedModal(qb, ctx, info) }, 'Speed limits'),
+    h('button', { dataset: { needs: 'write' }, class: 'btn', onclick: () => act('torrents/start', { hashes: 'all' }, 'Resumed all') }, 'Resume all'),
+    h('button', { dataset: { needs: 'write' }, class: 'btn', onclick: () => act('torrents/stop', { hashes: 'all' }, 'Paused all') }, 'Pause all'),
+    h('button', { dataset: { needs: 'write' }, class: 'btn', onclick: () => openSpeedModal(qb, ctx, info) }, 'Speed limits'),
   ];
 }
 
@@ -158,7 +168,7 @@ function torrentRow(t, qb, ctx) {
       h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })),
     ),
     h('div', { class: 'row-actions' },
-      h('button', { class: 'btn sm', title: paused ? 'Resume' : 'Pause', onclick: async () => {
+      h('button', { dataset: { needs: 'write' }, class: 'btn sm', title: paused ? 'Resume' : 'Pause', onclick: async () => {
         try { await qb.post(paused ? 'torrents/start' : 'torrents/stop', { hashes: t.hash }); toast(paused ? 'Resumed' : 'Paused', 'success'); ctx.reload(); }
         catch (e) { toast(e.message, 'error'); }
       } }, paused ? '▶' : '⏸'),
@@ -172,7 +182,7 @@ function torrentHex(t, qb, ctx) {
   const paused = isPaused(t.state);
   const prog = (t.progress || 0) * 100;
   const actions = h('div', { class: 'row-actions' },
-    h('button', { class: 'btn sm', title: paused ? 'Resume' : 'Pause', onclick: async (e) => {
+    h('button', { dataset: { needs: 'write' }, class: 'btn sm', title: paused ? 'Resume' : 'Pause', onclick: async (e) => {
       e.stopPropagation();
       try { await qb.post(paused ? 'torrents/start' : 'torrents/stop', { hashes: t.hash }); toast(paused ? 'Resumed' : 'Paused', 'success'); ctx.reload(); }
       catch (err) { toast(err.message, 'error'); }

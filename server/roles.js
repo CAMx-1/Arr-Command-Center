@@ -8,8 +8,9 @@
 // Who may sign in, and with which role:
 //   1. A UI-managed entry in the data store ("plexUsers") wins.
 //   2. Otherwise an entry in config.json auth.plex.allowedUsers is an admin,
-//      unless auth.plex.roles[<user>] says otherwise. This keeps every
-//      existing deployment's users at full access.
+//      unless auth.plex.roles[<user>] says otherwise; a user listed only in
+//      auth.plex.roles may sign in with that role. This keeps every existing
+//      deployment's users at full access.
 //   3. Otherwise, with allowAnyPlexUser, anyone gets auth.plex.defaultRole
 //      (default guest).
 // With allowAnyPlexUser and no users listed anywhere, signed-in users are
@@ -47,8 +48,9 @@ export function createRoleDirectory(cfg, store = {}) {
     throw httpError(500, 'User storage is not available');
   };
   const pcfg = (cfg.auth && cfg.auth.plex) || {};
-  const configUsers = () => (pcfg.allowedUsers || []).map(norm).filter(Boolean);
-  const configRoles = () => Object.fromEntries(Object.entries(pcfg.roles || {}).map(([k, v]) => [norm(k), v]).filter(([, v]) => validRole(v)));
+  const configRoles = () => Object.fromEntries(Object.entries(pcfg.roles || {}).map(([k, v]) => [norm(k), v]).filter(([k, v]) => k && validRole(v)));
+  // Anyone in allowedUsers or in roles may sign in.
+  const configUsers = () => [...new Set([...(pcfg.allowedUsers || []).map(norm).filter(Boolean), ...Object.keys(configRoles())])];
   const allowAny = () => !!pcfg.allowAnyPlexUser || process.env.PLEX_ALLOW_ANY === 'true';
   const defaultRole = () => (validRole(pcfg.defaultRole) ? pcfg.defaultRole : 'guest');
   const managed = () => {
@@ -290,6 +292,18 @@ export function classifyProxyRequest(type, method, subPath, query = {}, body = n
     }
     case 'glances':
       return read ? 'read' : 'admin';
+    case 'unraid': {
+      // Only queries reach Unraid (the proxy refuses mutations).
+      const doc = jsonBody(body) || {};
+      const q = typeof doc.query === 'string' ? doc.query.replace(/#[^\n]*/g, '') : '';
+      if (m === 'POST' && lower.replace(/\/+$/, '') === 'graphql' && q && !/\b(mutation|subscription)\b/i.test(q)) {
+        // API keys and SSO settings are admin-only even to read.
+        return /\b(apiKeys?|apiKeyPossible|getApiKeyCreationFormSchema|config|ssoSettings|oidc)\b/.test(q) ? 'admin' : 'read';
+      }
+      return 'admin';
+    }
+    case 'truenas':
+      return 'admin';
     case 'pihole': {
       // Settings, sessions, backups and logs are admin-only; turning blocking
       // off (or any other change) is an admin action too.

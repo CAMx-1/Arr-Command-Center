@@ -3,9 +3,10 @@
 // real service does and returns the response shapes the app reads.
 import express from 'express';
 import crypto from 'node:crypto';
+import http from 'node:http';
 
 export const INTEGRATION_MOCK_PORTS = {
-  portainer: 19443, glances: 16120, pihole: 18053, adguard: 13000, syncthing: 18384, navidrome: 14533, pulsarr: 13003, whisparr: 16969,
+  truenas: 16443, unraid: 18088, portainer: 19443, glances: 16120, pihole: 18053, adguard: 13000, syncthing: 18384, navidrome: 14533, pulsarr: 13003, whisparr: 16969,
 };
 export const MOCK_KEY = 'MOCK_API_KEY';
 const basic = (req) => {
@@ -46,6 +47,18 @@ export function makePortainer() {
     res.json(req.query.all === '1' || req.query.all === 'true' ? list : list.filter((x) => x.State === 'running'));
   });
   app.get('/api/endpoints/:id/docker/containers/:cid/json', (req, res) => res.json({ Config: { Env: ['PUID=1000', 'SECRET=hunter2'] } }));
+  // Docker returns 204 on success and 304 when already in that state.
+  app.post('/api/endpoints/:id/docker/containers/:cid/:action', (req, res) => {
+    if (!['start', 'stop', 'restart'].includes(req.params.action)) return res.status(404).json({ message: 'Not found' });
+    const c = (containers[req.params.id] || []).find((x) => x.Id === req.params.cid || x.Id.startsWith(req.params.cid));
+    if (!c) return res.status(404).json({ message: 'No such container' });
+    const { action } = req.params;
+    if ((action === 'start' && c.State === 'running') || (action === 'stop' && c.State !== 'running')) return res.status(304).end();
+    if (action === 'stop') { c.State = 'exited'; c.Status = 'Exited (0) Less than a second ago'; } else { c.State = 'running'; c.Status = 'Up Less than a second'; }
+    app._actions.push(`${action}:${c.Names[0].slice(1)}`);
+    res.status(204).end();
+  });
+  app._actions = [];
   app.all('/api/{*rest}', (req, res) => res.status(req.method === 'GET' ? 404 : 204).json({}));
   return app;
 }
@@ -224,4 +237,114 @@ export function makePulsarr() {
     { id: 202, source: 'watchlist', title: 'Wicked', key: 'plex://movie/8', contentType: 'movie', guids: [], thumb: null, status: 'grabbed', userId: 3, userName: 'friend', createdAt: new Date(now - 2 * 86400000).toISOString() },
   ].slice(0, Number(req.query.limit) || 10) }));
   return app;
+}
+
+// -------------------------------------------------------------------- Unraid
+export function makeUnraid() {
+  const app = express();
+  app.use(express.json());
+  app.post('/graphql', (req, res) => {
+    if (req.headers['x-api-key'] !== MOCK_KEY) return res.status(401).json({ errors: [{ message: 'Unauthorized: invalid API key' }] });
+    const q = String((req.body && req.body.query) || '');
+    if (/\bmutation\b/.test(q)) return res.json({ errors: [{ message: 'mock: mutations are not expected' }] });
+    const TB = 1e9; // KiB per ~1 TiB, near enough for a demo
+    const disk = (name, device, sizeTB, usedPct, temp, extra = {}) => ({ name, device, size: Math.round(sizeTB * TB), status: 'DISK_OK', temp, numErrors: 0, rotational: true, fsSize: Math.round(sizeTB * TB), fsUsed: Math.round(sizeTB * TB * usedPct), fsFree: Math.round(sizeTB * TB * (1 - usedPct)), ...extra });
+    res.json({ data: {
+      online: true,
+      info: { os: { hostname: 'tower', uptime: new Date(Date.now() - 9 * 86400000).toISOString() }, versions: { core: { unraid: '7.2.3' } } },
+      metrics: { cpu: { percentTotal: 14.2 }, memory: { total: 34359738368, used: 17179869184, percentTotal: 50 } },
+      array: {
+        state: 'STARTED',
+        capacity: { kilobytes: { total: String(36 * TB), used: String(27.4 * TB), free: String(8.6 * TB) } },
+        parityCheckStatus: { status: 'COMPLETED', running: false, paused: false, progress: 100, errors: 0, date: new Date(Date.now() - 6 * 86400000).toISOString(), speed: '182 MB/s' },
+        parities: [{ name: 'parity', device: 'sdb', size: 18 * TB, status: 'DISK_OK', temp: 36, numErrors: 0, rotational: true }],
+        disks: [disk('disk1', 'sdc', 18, 0.81, 35), disk('disk2', 'sdd', 18, 0.71, null), { ...disk('disk3', 'sde', 12, 0.2, null), status: 'DISK_DSBL', numErrors: 128 }],
+        caches: [{ ...disk('cache', 'nvme0n1', 1, 0.42, 44), rotational: false }],
+      },
+      docker: { containers: [
+        { id: 'c1', names: ['/plex'], image: 'plexinc/pms-docker', state: 'RUNNING', status: 'Up 9 days', autoStart: true, isUpdateAvailable: false },
+        { id: 'c2', names: ['/sonarr'], image: 'lscr.io/linuxserver/sonarr', state: 'RUNNING', status: 'Up 9 days', autoStart: true, isUpdateAvailable: true },
+        { id: 'c3', names: ['/handbrake'], image: 'jlesage/handbrake', state: 'EXITED', status: 'Exited (0) 2 days ago', autoStart: false, isUpdateAvailable: false },
+      ] },
+      vms: { domains: [{ id: 'v1', name: 'Windows 11', state: 'SHUTOFF' }, { id: 'v2', name: 'Home Assistant', state: 'RUNNING' }] },
+      notifications: { overview: { unread: { info: 3, warning: 1, alert: 1, total: 5 } } },
+    } });
+  });
+  return app;
+}
+
+// ------------------------------------------------------------------- TrueNAS
+// A tiny WebSocket JSON-RPC server (RFC 6455 text frames only) so the demo
+// and tests don't need a WebSocket library.
+export function makeTruenasServer({ apiKey = MOCK_KEY } = {}) {
+  const server = http.createServer((req, res) => { res.statusCode = 426; res.end('Upgrade Required'); });
+  const calls = [];
+  server.calls = calls;
+  server.on('upgrade', (req, socket) => {
+    if (req.url !== '/api/current') { socket.end('HTTP/1.1 404 Not Found\r\n\r\n'); return; }
+    const accept = crypto.createHash('sha1').update(`${req.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    let authed = false;
+    let buf = Buffer.alloc(0);
+    const send = (obj) => {
+      const data = Buffer.from(JSON.stringify(obj));
+      const head = data.length < 126 ? Buffer.from([0x81, data.length])
+        : data.length < 65536 ? Buffer.from([0x81, 126, data.length >> 8, data.length & 255])
+          : (() => { const b = Buffer.alloc(10); b[0] = 0x81; b[1] = 127; b.writeBigUInt64BE(BigInt(data.length), 2); return b; })();
+      socket.write(Buffer.concat([head, data]));
+    };
+    const handle = (msg) => {
+      const { id, method, params = [] } = msg;
+      calls.push(method);
+      const ok = (result) => send({ jsonrpc: '2.0', id, result });
+      if (method === 'auth.login_with_api_key') { authed = params[0] === apiKey; return ok(authed); }
+      if (!authed) return send({ jsonrpc: '2.0', id, error: { code: -32001, message: 'Not authenticated' } });
+      const TB = 1099511627776;
+      const results = {
+        'system.info': { version: '25.10.1', hostname: 'truenas', uptime_seconds: 1209600, physmem: 68719476736, cores: 8, loadavg: [0.41, 0.52, 0.48] },
+        'pool.query': [
+          { name: 'tank', status: 'ONLINE', healthy: true, size: 40 * TB, allocated: 31 * TB, free: 9 * TB, scan: { function: 'SCRUB', state: 'FINISHED', percentage: 100, errors: 0 } },
+          { name: 'fast', status: 'DEGRADED', healthy: false, size: 2 * TB, allocated: 0.6 * TB, free: 1.4 * TB, scan: null },
+        ],
+        'disk.query': [
+          { name: 'sda', model: 'WDC WD200EDGZ', serial: 'WD-1', size: 20 * TB, type: 'HDD', pool: 'tank' },
+          { name: 'sdb', model: 'WDC WD200EDGZ', serial: 'WD-2', size: 20 * TB, type: 'HDD', pool: 'tank' },
+          { name: 'nvme0n1', model: 'Samsung 990 PRO', serial: 'S-1', size: 2 * TB, type: 'SSD', pool: 'fast' },
+          { name: 'sdc', model: 'Spare', serial: 'SP-1', size: 20 * TB, type: 'HDD', pool: null },
+        ],
+        'disk.temperatures': { sda: 37, sdb: 39, nvme0n1: 58, sdc: null },
+        'app.query': [
+          { name: 'jellyfin', state: 'RUNNING', human_version: '10.11.2_1.2.3', upgrade_available: true },
+          { name: 'nextcloud', state: 'STOPPED', human_version: '31.0.1_2.0.0', upgrade_available: false },
+          { name: 'immich', state: 'CRASHED', human_version: '1.120.0_1.0.0', upgrade_available: false },
+        ],
+        'alert.list': [
+          { level: 'CRITICAL', formatted: 'Pool <b>fast</b> state is DEGRADED: One or more devices has been removed.', dismissed: false },
+          { level: 'INFO', formatted: 'Old alert', dismissed: true },
+        ],
+      };
+      if (method in results) return ok(results[method]);
+      send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Method ${method} not found` } });
+    };
+    socket.on('data', (chunk) => {
+      buf = Buffer.concat([buf, chunk]);
+      while (buf.length >= 2) {
+        const op = buf[0] & 0x0f;
+        let len = buf[1] & 0x7f; let off = 2;
+        if (len === 126) { if (buf.length < 4) return; len = buf.readUInt16BE(2); off = 4; }
+        else if (len === 127) { if (buf.length < 10) return; len = Number(buf.readBigUInt64BE(2)); off = 10; }
+        const masked = (buf[1] & 0x80) !== 0;
+        const total = off + (masked ? 4 : 0) + len;
+        if (buf.length < total) return;
+        const mask = masked ? buf.subarray(off, off + 4) : null;
+        const payload = Buffer.from(buf.subarray(off + (masked ? 4 : 0), total));
+        if (mask) for (let i = 0; i < payload.length; i += 1) payload[i] ^= mask[i % 4];
+        buf = buf.subarray(total);
+        if (op === 0x8) { socket.end(Buffer.from([0x88, 0])); return; }
+        if (op === 0x1) { try { handle(JSON.parse(payload.toString())); } catch { /* ignore */ } }
+      }
+    });
+    socket.on('error', () => {});
+  });
+  return server;
 }

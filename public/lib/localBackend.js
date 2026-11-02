@@ -249,7 +249,9 @@ export function classifyLocalPath(pathname) {
     || pathname === '/api/diagnostics'
     || pathname.startsWith('/api/plex/')
     || pathname.startsWith('/api/push/')
-    || pathname.startsWith('/api/automation')) return 'server-only';
+    || pathname.startsWith('/api/automation')
+    || pathname.startsWith('/api/truenas/')
+    || pathname === '/api/live' || pathname.startsWith('/api/live/')) return 'server-only';
   return 'passthrough';
 }
 

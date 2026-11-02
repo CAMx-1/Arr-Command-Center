@@ -221,6 +221,20 @@
       "enabled": false,
       "baseUrl": "http://whisparr:6969",
       "apiKey": "your-whisparr-api-key"
+    },
+    "truenas": {
+      "label": "TrueNAS",
+      "type": "truenas",
+      "enabled": false,
+      "baseUrl": "https://truenas.local",
+      "apiKey": "your-truenas-api-key"
+    },
+    "unraid": {
+      "label": "Unraid",
+      "type": "unraid",
+      "enabled": false,
+      "baseUrl": "http://tower",
+      "apiKey": "your-unraid-api-key"
     }
   },
   "system": {
