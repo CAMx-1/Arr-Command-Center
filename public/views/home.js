@@ -2,6 +2,7 @@ import { showcaseName } from '../lib/showcase.js';
 import { listenarrStats } from './listenarr.js';
 import { collapseSeasonDrops } from '../lib/seasonDrops.js';
 import { liveRefreshMany } from '../lib/live.js';
+import { integrationStats } from '../lib/integrationStats.js';
 import { tautulliDecision } from '../lib/playbackDecision.js';
 import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast, openModal, confirmModal } from '../lib/ui.js';
 import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
@@ -1045,9 +1046,9 @@ async function hydrateCardStats(svc, ctx) {
   const el = document.getElementById(`stats-${svc.key}`);
   if (!el) return;
   try {
-    if (svc.type === 'sonarr' || svc.type === 'radarr') {
+    if (svc.type === 'sonarr' || svc.type === 'radarr' || svc.type === 'whisparr') {
       const arr = api.arr(svc.key);
-      const path = svc.type === 'sonarr' ? 'series' : 'movie';
+      const path = svc.type === 'radarr' ? 'movie' : 'series';
       // Shares (and persists) the library cache with the Sonarr/Radarr views
       // and Search, so the count shows instantly on relaunch.
       const [items, queue] = await Promise.all([
@@ -1056,7 +1057,7 @@ async function hydrateCardStats(svc, ctx) {
       ]);
       const count = Array.isArray(items) ? items.length : 0;
       const q = (queue && queue.records) ? queue.records.length : 0;
-      mount(el, stat(count, svc.type === 'sonarr' ? 'Series' : 'Movies'), stat(q, 'Queue'));
+      mount(el, stat(count, svc.type === 'radarr' ? 'Movies' : 'Series'), stat(q, 'Queue'));
     } else if (svc.type === 'lidarr' || svc.type === 'readarr' || svc.type === 'bindery') {
       const manager = createBookServiceClient(api, svc);
       const [items, queue] = await Promise.all([
@@ -1125,6 +1126,9 @@ async function hydrateCardStats(svc, ctx) {
       const data = await adapter.load(svc.type === 'nzbget' ? 'queue' : 'active');
       const dl = Number(data.session?.dlSpeed) || 0;
       mount(el, stat(data.session?.activeCount || 0, 'Active'), stat(dl > 0 ? `${fmtBytes(dl)}/s` : '0', 'Down'));
+    } else if (integrationStats[svc.type]) {
+      const [a, b] = await integrationStats[svc.type](api, svc.key);
+      mount(el, stat(a[0], a[1]), stat(b[0], b[1]));
     } else if (svc.type === 'jellyfin' || svc.type === 'emby') {
       const media = mediaServerFor(api, svc);
       const [sessions, libraries] = await Promise.all([media.sessions(), media.libraries()]);

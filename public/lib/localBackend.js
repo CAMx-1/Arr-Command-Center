@@ -256,6 +256,19 @@ export function classifyLocalPath(pathname) {
 }
 
 // Per-type health endpoint for status pings.
+const PORTAINER_ACTION = /^api\/endpoints\/\d+\/docker\/containers\/[A-Za-z0-9_.-]{1,128}\/(start|stop|restart)$/;
+export function localWriteBlock(type, method, subPath, body) {
+  const m = String(method || 'GET').toUpperCase();
+  if (m === 'GET' || m === 'HEAD') return null;
+  if (type === 'portainer' && !(m === 'POST' && PORTAINER_ACTION.test(subPath))) return 'Only start, stop and restart are allowed for Portainer';
+  if (type === 'unraid') {
+    let q = '';
+    try { q = JSON.parse(typeof body === 'string' ? body : '').query || ''; } catch { q = ''; }
+    if (m !== 'POST' || subPath.replace(/\/+$/, '') !== 'graphql' || !q || /\b(mutation|subscription)\b/i.test(q.replace(/#[^\n]*/g, '').replace(/"(?:\\.|[^"\\])*"/g, '""'))) return 'Only read queries are allowed for Unraid';
+  }
+  return null;
+}
+
 export function statusPath(type) {
   switch (type) {
     case 'lidarr': case 'readarr': case 'bindery': return 'api/v1/system/status';
@@ -276,6 +289,12 @@ export function statusPath(type) {
     case 'deluge': return 'json';
     case 'nzbget': return 'jsonrpc';
     case 'indexer': return 'api?t=caps&o=json';
+    case 'portainer': return 'api/system/status';
+    case 'glances': return 'api/4/version';
+    case 'adguard': return 'control/status';
+    case 'syncthing': return 'rest/system/version';
+    case 'pulsarr': return 'v1/approval/stats';
+    case 'unraid': return 'graphql';
     default: return 'api/v3/system/status'; // sonarr / radarr
   }
 }
@@ -293,7 +312,9 @@ async function pingConnection(conn) {
         ? { method: 'POST', body: JSON.stringify({ method: 'web.connected', params: [], id: 1 }) }
         : conn.type === 'nzbget'
           ? { method: 'POST', body: JSON.stringify({ method: 'version', params: [], id: 1 }) }
-          : {};
+          : conn.type === 'unraid'
+            ? { method: 'POST', body: JSON.stringify({ query: '{ online info { versions { core { unraid } } } }' }) }
+            : {};
     let r; let used;
     for (const request of requests) {
       const opts = { ...rpc, headers: { accept: 'application/json', ...request.headers } };
@@ -309,7 +330,9 @@ async function pingConnection(conn) {
     try {
       data = await r.clone().json();
       if (typeof data === 'string') { try { data = JSON.parse(data); } catch { /* plain string */ } }
-      version = data && (data.serverVersion || data.version || data.arguments?.version || (conn.type === 'nzbget' ? data.result : undefined) || data.data?.version);
+      if (typeof data === 'string' && conn.type === 'glances') data = { version: data };
+      if (conn.type === 'unraid') { if (!data || !data.data || data.data.online !== true) rpcError = (data && data.errors && data.errors[0] && data.errors[0].message) || 'Unraid API error'; else data = { version: data.data.info && data.data.info.versions && data.data.info.versions.core && data.data.info.versions.core.unraid }; }
+      version = data && (data.serverVersion || data.version || data.Version || data.arguments?.version || (conn.type === 'nzbget' ? data.result : undefined) || data.data?.version);
       if (conn.type === 'transmission' && data.result !== 'success') rpcError = data.result || 'Transmission RPC error';
       if (conn.type === 'deluge' && (data.error || data.result !== true)) rpcError = data.error?.message || 'Deluge Web is not connected to a daemon';
       if (conn.type === 'nzbget' && data.error) rpcError = data.error.message || 'NZBGet RPC error';
@@ -354,6 +377,10 @@ async function handleLocal(u, input, init) {
     const key = pathname.split('/')[3];
     const c = conns[key];
     if (!c) return json({ error: `No local connection for “${key}”. Add it in Settings.` }, 502);
+    // Same write limits as the server proxy: Portainer only start/stop/restart,
+    // Unraid only GraphQL queries.
+    const blocked = localWriteBlock(c.type, reqMethod(input, init), pathname.split('/').slice(4).join('/'), (init && init.body) || (typeof input === 'object' && input && input.body) || null);
+    if (blocked) return json({ error: blocked }, 405);
     const requests = await reachableCandidates(
       buildDirectRequestCandidates(pathname + u.search, c, { preferredBaseUrl: activeBases.get(key) }),
       { policy: c.connectionPolicy },

@@ -147,3 +147,35 @@ export function applyFormatEdits(format, edits = {}) {
   }
   return next;
 }
+
+// Move the quality/group at display row `rowIndex` (best first) up or down.
+// Sonarr/Radarr store items worst first, so the stored order is reversed.
+export function moveProfileItem(profile, rowIndex, delta) {
+  const next = JSON.parse(JSON.stringify(profile || {}));
+  const items = next.items || [];
+  const n = items.length;
+  const from = n - 1 - rowIndex;
+  const to = from - delta; // up in the list = later in storage
+  if (from < 0 || from >= n || to < 0 || to >= n) return next;
+  const [it] = items.splice(from, 1);
+  items.splice(to, 0, it);
+  return next;
+}
+
+// Remove a condition (a format needs at least one) or duplicate one.
+export function removeFormatSpec(format, index) {
+  const next = JSON.parse(JSON.stringify(format || {}));
+  if ((next.specifications || []).length <= 1) throw new Error('A custom format needs at least one condition');
+  next.specifications.splice(index, 1);
+  return next;
+}
+export function duplicateFormatSpec(format, index) {
+  const next = JSON.parse(JSON.stringify(format || {}));
+  const spec = (next.specifications || [])[index];
+  if (!spec) return next;
+  const copy = JSON.parse(JSON.stringify(spec));
+  delete copy.id;
+  copy.name = `${spec.name || 'Condition'} (copy)`;
+  next.specifications.splice(index + 1, 0, copy);
+  return next;
+}

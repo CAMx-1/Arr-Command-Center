@@ -409,6 +409,7 @@ const LOCAL_FALLBACK_TYPES = new Set([
   'sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'prowlarr',
   'bazarr', 'sabnzbd', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'tautulli', 'indexer',
   'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr',
+  'whisparr', 'portainer', 'glances', 'adguard', 'syncthing', 'pulsarr', 'unraid',
 ]);
 
 function fallbackHttpUrl(value) {

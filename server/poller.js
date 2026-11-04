@@ -17,6 +17,9 @@ import * as store from './store.js';
 import * as push from './push.js';
 import * as channels from './channels.js';
 import { serviceGet } from './proxy.js';
+import { integrationEvents, setPiholeFetcher } from './integrationEvents.js';
+import { piholeGet } from './proxy.js';
+setPiholeFetcher(piholeGet);
 
 const SEEN_NS = 'pushSeen';
 const SEEN_CAP = 500;
@@ -69,6 +72,7 @@ export async function collectEvents(cfg) {
           });
         }
       }
+      else events.push(...await integrationEvents(key, svc, { allowInsecureTruenas: !!(cfg.mock && svc.demoAllowInsecure) }));
     } catch { /* ignore per-service failures; other services still poll */ }
   }));
 

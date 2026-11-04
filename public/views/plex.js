@@ -1,4 +1,5 @@
 import { h, mount, tabs, skeletonList, empty, fmtRelative, timeEl, fmtBytes, copyable } from '../lib/ui.js';
+import { markManaged } from '../lib/plexDupes.js';
 
 export async function renderPlex(root, ctx) {
   const svc = ctx.service;
@@ -17,10 +18,34 @@ export async function renderPlex(root, ctx) {
 // Duplicates as Plex sees them on disk — works even when Radarr/Sonarr paths are
 // broken, since Plex scans the real filesystem. Shows each file so you can tell
 // which copy to remove.
+// Every movie file Radarr manages (and series folder Sonarr manages), to mark
+// which Plex copy the arr apps track.
+async function arrFiles(ctx) {
+  const out = [];
+  await Promise.all((ctx.state.services || []).filter((s) => s.configured && (s.type === 'radarr' || s.type === 'sonarr')).map(async (svc) => {
+    try {
+      if (svc.type === 'radarr') {
+        for (const m of await ctx.api.arr(svc.key).get('movie')) if (m.movieFile && m.path) out.push({ service: svc, item: m, file: `${m.path}/${m.movieFile.relativePath}` });
+      } else {
+        // Sonarr: series folders; episode files are matched by folder below.
+        for (const s of await ctx.api.arr(svc.key).get('series')) if (s.path) out.push({ service: svc, item: s, folder: s.path });
+      }
+    } catch { /* skip an instance that errors */ }
+  }));
+  return out;
+}
+
 async function tabDuplicates(root, ctx) {
   mount(root, skeletonList());
   try {
-    const items = await ctx.api.plex.duplicates();
+    const [raw, files] = await Promise.all([ctx.api.plex.duplicates(), arrFiles(ctx)]);
+    // Episode parts: a series folder anywhere in the path counts as managed.
+    const showFolders = files.filter((f) => f.folder).map((f) => ({ ...f, key: f.folder.replace(/\\/g, '/').split('/').filter(Boolean).pop().toLowerCase() }));
+    const items = markManaged(raw, files.filter((f) => f.file)).map((it) => {
+      if (it.managedService || it.type !== 'episode') return it;
+      const parts = it.parts.map((p) => { const segs = p.file.replace(/\\/g, '/').toLowerCase().split('/'); const hit = showFolders.find((f) => segs.includes(f.key)); return hit ? { ...p, where: 'show-folder', managedBy: { service: hit.service, item: hit.item } } : p; });
+      return { ...it, parts };
+    });
     if (!items.length) return mount(root, empty('', 'No duplicates in Plex', 'Every movie/episode has a single file.'));
     mount(root,
       h('div', { class: 'dim', style: { margin: '0 0 12px', lineHeight: '1.55', fontSize: '13px' } },
@@ -31,7 +56,11 @@ async function tabDuplicates(root, ctx) {
             h('span', { class: 'pill warn', style: { marginLeft: '8px' } }, `${it.parts.length} files`),
             it.section ? h('span', { class: 'pill muted', style: { marginLeft: '6px' } }, it.section) : null),
           ...it.parts.map((p) => h('div', { class: 'meta-line', style: { marginTop: '4px', wordBreak: 'break-all', display: 'block' } },
+            p.where === 'managed' ? h('span', { class: 'pill ok', style: { marginRight: '6px' } }, `${p.managedBy.service.label} manages this`)
+              : p.where === 'show-folder' ? h('span', { class: 'pill info', style: { marginRight: '6px' } }, `in a ${p.managedBy.service.label} series folder`)
+                : it.managedService ? h('span', { class: 'pill warn', style: { marginRight: '6px' } }, p.where === 'same-folder' ? 'extra file in the same folder' : `not managed by ${it.managedService.label}`) : null,
             copyable(p.file), p.size ? h('span', { class: 'dim', style: { marginLeft: '8px' } }, fmtBytes(p.size)) : null)),
+          it.managedService ? h('div', { style: { marginTop: '6px' } }, h('a', { class: 'btn sm', href: `#/${encodeURIComponent(it.managedService.key)}?tab=system&tool=duplicates` }, `Open ${it.managedService.label} duplicate finder`)) : null,
         ),
       ))),
     );

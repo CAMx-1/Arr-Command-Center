@@ -179,7 +179,12 @@ export function classifyProxyRequest(type, method, subPath, query = {}, body = n
     // Renaming a tag changes it on every item and setting that uses it.
     if (m === 'PUT' && /^tag\/\d+$/.test(rest)) return 'admin';
     if (/^command(\/|$)/.test(rest)) {
-      const name = (jsonBody(body) || {}).name || '';
+      const cmd = jsonBody(body) || {};
+      const name = cmd.name || '';
+      // Importing files that aren't a tracked download can replace (delete)
+      // an existing file, so it needs delete rights. Fixing a stuck download
+      // (files carry their downloadId) stays a normal action.
+      if (/^manualimport$/i.test(name) && (cmd.files || []).some((f) => !f || !f.downloadId)) return 'delete';
       return ADMIN_COMMANDS.test(name) ? 'admin' : 'write';
     }
     return 'write';

@@ -1,6 +1,6 @@
 // Views for Portainer, Glances, Pi-hole, AdGuard Home, Syncthing, Navidrome
 // and Pulsarr. Data access lives in lib/integrations.js.
-import { h, mount, tabs, skeletonList, empty, toast, fmtBytes, fmtRelative, pct, poster, confirmModal } from '../lib/ui.js';
+import { h, mount, tabs, skeletonList, empty, toast, fmtBytes, fmtRelative, pct, poster, confirmModal, openModal, closeModal } from '../lib/ui.js';
 import { statCard } from './downloadClient.js';
 import { liveRefresh } from '../lib/live.js';
 import {
@@ -76,7 +76,8 @@ const CONTAINER_ACTIONS = {
 function containerActions(c, envId, client, reload) {
   const running = c.state === 'running' || c.state === 'restarting';
   const acts = running ? ['restart', 'stop'] : ['start'];
-  return h('div', { class: 'row-actions' }, ...acts.map((a) => {
+  const logsBtn = h('button', { class: 'btn sm', onclick: () => openLogs(c, envId, client) }, 'Logs');
+  return h('div', { class: 'row-actions' }, logsBtn, ...acts.map((a) => {
     const info = CONTAINER_ACTIONS[a];
     return h('button', { class: `btn sm ${info.cls} confirm-btn`, onclick: () => confirmModal({
       title: `${info.label} ${c.name}?`,
@@ -88,6 +89,21 @@ function containerActions(c, envId, client, reload) {
       },
     }) }, info.label);
   }));
+}
+
+function openLogs(c, envId, client) {
+  const pre = h('pre', { class: 'mono', style: { maxHeight: '60vh', overflow: 'auto', fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 } }, 'Loading…');
+  const load = async () => {
+    pre.textContent = 'Loading…';
+    try {
+      const lines = await client.logs(envId, c.id, 300);
+      mount(pre, ...(lines.length ? lines.map((l) => h('div', { style: l.stream === 'stderr' ? { color: 'var(--amber, #d97706)' } : {} }, l.text)) : [h('span', { class: 'dim' }, 'No log output.')]));
+      pre.scrollTop = pre.scrollHeight;
+    } catch (e) { pre.textContent = `Couldn’t load logs: ${e.message}`; }
+  };
+  openModal({ title: `${c.name} logs`, wide: true, body: h('div', {}, h('p', { class: 'dim', style: { fontSize: '12px', margin: '0 0 8px' } }, 'Last 300 lines. Errors (stderr) are highlighted.'), pre),
+    footer: h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', width: '100%' } }, h('button', { class: 'btn', onclick: load }, 'Refresh'), h('button', { class: 'btn', onclick: closeModal }, 'Close')) });
+  load();
 }
 
 function portainerContainers(root, client, ctx) {

@@ -536,6 +536,13 @@ async function pingUnraid(svc, started) {
   }
 }
 
+// Authenticated Pi-hole GET returning JSON (used by the notification poller).
+export async function piholeGet(svc, path) {
+  const r = await piholeFetch(svc, svc.key || svc.baseUrl, new URL(`${trimSlash(svc.baseUrl)}/${path}`), { method: 'GET', headers: combinedHeaders(svc, { accept: 'application/json' }) }, 8000);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
 async function pingPihole(svc, serviceKey, started) {
   try {
     const target = new URL(`${trimSlash(svc.baseUrl)}/api/info/version`);

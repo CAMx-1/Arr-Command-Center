@@ -36,12 +36,36 @@ export function normalizePortainerContainers(list) {
   }).sort((a, b) => (!a.stack - !b.stack) || a.stack.localeCompare(b.stack) || a.name.localeCompare(b.name));
 }
 
+export function decodeDockerLogs(bytes) {
+  const out = [];
+  let i = 0;
+  const dec = new TextDecoder();
+  const framed = bytes.length >= 8 && (bytes[0] === 1 || bytes[0] === 2) && bytes[1] === 0 && bytes[2] === 0 && bytes[3] === 0;
+  if (!framed) return dec.decode(bytes).split(/\r?\n/).filter(Boolean).map((text) => ({ stream: 'stdout', text }));
+  while (i + 8 <= bytes.length) {
+    const stream = bytes[i] === 2 ? 'stderr' : 'stdout';
+    const len = (bytes[i + 4] << 24) | (bytes[i + 5] << 16) | (bytes[i + 6] << 8) | bytes[i + 7];
+    const chunk = dec.decode(bytes.subarray(i + 8, i + 8 + len));
+    for (const text of chunk.split(/\r?\n/)) if (text) out.push({ stream, text });
+    i += 8 + len;
+  }
+  return out;
+}
+
 export function portainerClient(api, key) {
   const get = (p) => api.proxy(key, `api/${p}`);
   return {
     status: () => get('system/status'),
     environments: async () => normalizePortainerEnvironments(await get('endpoints')),
     containers: async (envId) => normalizePortainerContainers(await get(`endpoints/${encodeURIComponent(envId)}/docker/containers/json?all=1`)),
+    // Last `tail` log lines (admin only: logs can contain secrets). Docker
+    // returns a multiplexed stream for non-TTY containers; decodeDockerLogs
+    // strips the 8-byte frame headers.
+    async logs(envId, containerId, tail = 200) {
+      const r = await fetch(`/api/proxy/${encodeURIComponent(key)}/api/endpoints/${encodeURIComponent(envId)}/docker/containers/${encodeURIComponent(containerId)}/logs?stdout=1&stderr=1&timestamps=1&tail=${tail}`);
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || d.message || `HTTP ${r.status}`); }
+      return decodeDockerLogs(new Uint8Array(await r.arrayBuffer()));
+    },
     // action: start | stop | restart. Docker answers 304 when it's already in
     // that state, which is fine.
     async containerAction(envId, containerId, action) {

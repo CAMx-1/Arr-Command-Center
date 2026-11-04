@@ -34,6 +34,7 @@ export const MOCK_PORTS = {
   prowlarr: 19696,
 };
 
+import { createMockFs, sonarrDemoFs, radarrDemoFs, lidarrDemoFs } from './mockFs.js';
 import { INTEGRATION_MOCK_PORTS, makePortainer, makeGlances, makePihole, makeAdguard, makeSyncthing, makeNavidrome, makePulsarr, makeUnraid, makeTruenasServer } from './integrationMocks.js';
 Object.assign(MOCK_PORTS, INTEGRATION_MOCK_PORTS);
 
@@ -126,7 +127,18 @@ function fillRadarrLibrary(movies, requestedSize) {
 //   GET  qualitydefinition           quality picker
 //   POST command {ManualImport}      imports + drops the queue item
 //   GET  command/:id                 completes on the second poll
-function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, library }) {
+// Quality from a release-style file name, for folder-based manual imports.
+const QUALITY_BY_NAME = [
+  [/2160p.*(bluray|uhd|remux)|(bluray|uhd|remux).*2160p/i, { id: 19, name: 'Bluray-2160p', resolution: 2160 }],
+  [/2160p/i, { id: 18, name: 'WEBDL-2160p', resolution: 2160 }],
+  [/1080p.*bluray|bluray.*1080p/i, { id: 7, name: 'Bluray-1080p', resolution: 1080 }],
+  [/1080p/i, { id: 3, name: 'WEBDL-1080p', resolution: 1080 }],
+  [/720p/i, { id: 5, name: 'WEBDL-720p', resolution: 720 }],
+];
+const qualityFromName = (name) => (QUALITY_BY_NAME.find(([re]) => re.test(name)) || [null, { id: 1, name: 'SDTV', resolution: 480 }])[1];
+const QUALITY_RANK = { 1: 1, 4: 2, 5: 2, 9: 3, 3: 3, 15: 3, 7: 4, 18: 5, 19: 6 };
+
+function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, library, fs, recycled, episodeFiles }) {
   const commands = new Map();
   let nextCmd = 1000;
   const qualities = [
@@ -139,6 +151,38 @@ function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, libr
   ];
   app.get('/api/v3/qualitydefinition', (req, res) => res.json(qualities));
   app.get('/api/v3/manualimport', (req, res) => {
+    // Folder import (movies): every video file in the folder, mapped to the
+    // given movie, rejected when it isn't better than the current file.
+    if (req.query.folder && fs && kind === 'movie') {
+      const movie = library().find((m) => m.id === Number(req.query.movieId));
+      const out = [];
+      const walk = (dir) => { for (const c of fs.children(dir) || []) { if (c.type === 'file') { if (/\.(mkv|mp4|avi|m4v)$/i.test(c.name)) out.push(c); } else walk(c.path); } };
+      walk(String(req.query.folder));
+      return res.json(out.map((c, i) => {
+        const q = qualityFromName(c.name);
+        const cur = movie && movie.movieFile && movie.movieFile.quality && movie.movieFile.quality.quality;
+        const rejections = cur && (QUALITY_RANK[q.id] || 0) <= (QUALITY_RANK[cur.id] || 0) ? [{ reason: 'Not an upgrade for existing movie file', type: 'permanent' }] : [];
+        return { id: i + 1, path: c.path, relativePath: c.name, folderName: String(req.query.folder).split('/').pop(), name: c.name.replace(/\.[^.]+$/, ''), size: 61203283968, movie: movie ? { id: movie.id, title: movie.title, year: movie.year } : undefined, quality: { quality: q, revision: { version: 1, real: 0, isRepack: false } }, languages: [{ id: 1, name: 'English' }], releaseGroup: '', indexerFlags: 0, rejections };
+      }));
+    }
+    // Folder import (series): every SxxEyy video file, mapped to episodes,
+    // rejected when it isn't better than those episodes' current files.
+    if (req.query.folder && fs && kind === 'series') {
+      const s = library().find((x) => x.id === Number(req.query.seriesId));
+      const out = [];
+      const walk = (dir) => { for (const c of fs.children(dir) || []) { if (c.type === 'file') { if (/\.(mkv|mp4|avi|m4v)$/i.test(c.name)) out.push(c); } else walk(c.path); } };
+      walk(String(req.query.folder));
+      return res.json(out.map((c, i) => {
+        const m = /S(\d+)E(\d+)/i.exec(c.name);
+        const season = m ? Number(m[1]) : 1; const ep = m ? Number(m[2]) : 1;
+        const epId = 5000 + season * 100 + ep;
+        const q = qualityFromName(c.name);
+        const cur = (episodeFiles || []).find((ef) => s && ef.seriesId === s.id && (ef.episodeIds || []).includes(epId));
+        const curQ = cur && cur.quality && cur.quality.quality;
+        const rejections = curQ && (QUALITY_RANK[q.id] || 0) <= (QUALITY_RANK[curQ.id] || 0) ? [{ reason: 'Not an upgrade for existing episode file(s)', type: 'permanent' }] : [];
+        return { id: i + 1, path: c.path, relativePath: c.name, folderName: '', name: c.name.replace(/\.[^.]+$/, ''), size: 9e9, series: s ? { id: s.id, title: s.title } : undefined, seasonNumber: season, episodes: [{ id: epId, seasonNumber: season, episodeNumber: ep, title: `Episode ${ep}` }], quality: { quality: q, revision: { version: 1, real: 0, isRepack: false } }, languages: [{ id: 1, name: 'English' }], releaseGroup: '', releaseType: 'singleEpisode', indexerFlags: 0, rejections };
+      }));
+    }
     const id = String(req.query.downloadId || '');
     res.json(JSON.parse(JSON.stringify(candidates[id] || candidates.default || [])));
   });
@@ -164,6 +208,44 @@ function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, libr
     if (body.name === 'ManualImport') {
       const ids = new Set((body.files || []).map((f) => f.downloadId).filter(Boolean));
       if (ids.size) setQueue(getQueue().filter((q) => !ids.has(q.downloadId)));
+      // Folder import into a series: replace each episode's file.
+      if (kind === 'series' && fs && episodeFiles) {
+        for (const f of body.files || []) {
+          if (f.downloadId) continue;
+          const s = library().find((x) => x.id === f.seriesId);
+          if (!s) continue;
+          const name = String(f.path).split('/').pop();
+          for (const old of episodeFiles.filter((ef) => ef.seriesId === s.id && (ef.episodeIds || []).some((id) => (f.episodeIds || []).includes(id)))) {
+            recycled.push(old.path);
+            fs.remove(old.path);
+            episodeFiles.splice(episodeFiles.indexOf(old), 1);
+          }
+          if (body.importMode !== 'copy') fs.remove(f.path);
+          const season = /S(\d+)E/i.exec(name);
+          const dest = `${s.path}/Season ${season ? Number(season[1]) : 1}/${name}`;
+          fs.addFile(dest);
+          episodeFiles.push({ id: 7000 + episodeFiles.length + recycled.length, seriesId: s.id, seasonNumber: season ? Number(season[1]) : 1, relativePath: dest.slice(s.path.length + 1), path: dest, quality: f.quality, size: 8e9, episodeIds: f.episodeIds });
+        }
+      }
+      // Folder import into a movie that already has a file: the old file goes
+      // to the recycle bin, the new one is moved into the movie folder.
+      if (kind === 'movie' && fs) {
+        for (const f of body.files || []) {
+          if (f.downloadId) continue;
+          const m = library().find((x) => x.id === f.movieId);
+          if (!m) continue;
+          const name = String(f.path).split('/').pop();
+          if (m.movieFile) {
+            recycled.push(`${m.path}/${m.movieFile.relativePath}`);
+            fs.remove(`${m.path}/${m.movieFile.relativePath}`);
+          }
+          if (body.importMode !== 'copy') fs.remove(f.path);
+          fs.addFile(`${m.path}/${name}`);
+          m.movieFile = { id: (m.movieFile ? m.movieFile.id : 900) + 1, movieId: m.id, relativePath: name, path: `${m.path}/${name}`, quality: f.quality, size: 61203283968 };
+          m.hasFile = true;
+          m.sizeOnDisk = m.movieFile.size;
+        }
+      }
     }
     res.status(201).json({ id: cmd.id, name: cmd.name, status: cmd.status });
   });
@@ -175,6 +257,19 @@ function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, libr
     else cmd.status = 'started';
     res.json({ id: cmd.id, name: cmd.name, status: cmd.status, message: cmd.status === 'completed' ? 'Completed' : 'Processing', body: cmd.body });
   });
+}
+
+// Sonarr/Radarr's RootFolderCheck: one error naming the missing roots.
+function missingRootsHealth(roots, fs, app) {
+  const missing = roots.filter((r) => !fs.exists(r.path)).map((r) => r.path);
+  return missing.length ? [{ id: 90, type: 'error', source: 'RootFolderCheck', message: `Missing root folder${missing.length > 1 ? 's' : ''}: ${missing.join(' | ')}`, wikiUrl: `https://wiki.servarr.com/${app}/system#missing-root-folder` }] : [];
+}
+
+// Filesystem where every item's folder (POSIX paths) exists.
+function fsFromItems(items) {
+  const fs = createMockFs({}, { disks: [{ path: '/', label: 'root', freeSpace: 5e11, totalSpace: 2e12 }] });
+  for (const it of items) if (it.path && it.path.startsWith('/')) fs.mkdirp(it.path);
+  return fs;
 }
 
 function makeSonarr(opts = {}) {
@@ -201,9 +296,14 @@ function makeSonarr(opts = {}) {
   });
   app.get('/__debug', (req, res) => res.json({ cf: cfSeen.sonarr || null }));
   app.get('/api/v3/system/status', (req, res) => res.json({ version: '4.0.10.2544', appName: 'Sonarr', instanceName: opts.instanceName || 'Sonarr (mock)' }));
-  let rootFolders = [{ id: 1, path: 'C:\\Media\\TV', freeSpace: 0, accessible: false, unmappedFolders: [] }, { id: 2, path: '/data/tv', freeSpace: 1649267441664, accessible: true, unmappedFolders: [] }];
-  app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
-  app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 500000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
+  // Root folders and disks come from a virtual filesystem (mockFs.js). The
+  // primary demo instance tells a "moved from Windows" story; other instances
+  // get a filesystem where every item's folder exists.
+  const fs = opts.series ? fsFromItems(series) : sonarrDemoFs();
+  let rootFolders = opts.series
+    ? [...new Set(series.map((x) => x.rootFolderPath).filter(Boolean))].map((path, i) => ({ id: i + 1, path }))
+    : [{ id: 1, path: 'C:\\Media\\TV' }, { id: 2, path: 'C:\\Media\\TV2' }, { id: 3, path: '/data/tv' }];
+  fs.mount(app, { getItems: () => series, rootFolders: () => rootFolders });
   app.get('/api/v3/qualityprofile', (req, res) => res.json(app.locals.profiles || MOCK_QUALITY_PROFILES));
   // Stable fake 'added' dates (days ago derived from id) for cleanup/age features.
   app.get('/api/v3/series', (req, res) => res.json(series.map((x) => (x.added ? x : { ...x, added: new Date(Date.now() - (120 + x.id * 97) * 86400000).toISOString() }))));
@@ -241,6 +341,7 @@ function makeSonarr(opts = {}) {
   app.post('/api/v3/release', (req, res) => res.status(201).json({ guid: req.body.guid, approved: true }));
   app.get('/api/v3/health', (req, res) => res.json([
     { id: 1, type: 'warning', message: 'Indexers unavailable due to failures: NZBgeek', source: 'IndexerStatusCheck', wikiUrl: 'https://wiki.servarr.com/sonarr/system#indexers-are-unavailable-due-to-failures' },
+    ...missingRootsHealth(rootFolders, fs, 'sonarr'),
   ]));
   app.put('/api/v3/series/editor', (req, res) => {
     const ids = (req.body && req.body.seriesIds) || [];
@@ -252,6 +353,7 @@ function makeSonarr(opts = {}) {
     res.json(series.filter((s) => ids.includes(s.id)));
   });
   app.delete('/api/v3/series/editor', (req, res) => { const ids = (req.body && req.body.seriesIds) || []; series = series.filter((s) => !ids.includes(s.id)); res.json({}); });
+  app.get('/api/v3/series/:id', (req, res) => { const x = series.find((s) => s.id === Number(req.params.id)); return x ? res.json(x) : res.status(404).json({ message: 'NotFound' }); });
   app.put('/api/v3/series/:id', (req, res) => {
     const id = Number(req.params.id);
     const idx = series.findIndex((s) => s.id === id);
@@ -268,7 +370,18 @@ function makeSonarr(opts = {}) {
     { episodeFileId: 501, seriesId: Number(req.query.seriesId) || 1, existingPath: 'Season 02/severance.s02e10.1080p.web.mkv', newPath: 'Season 02/Severance - S02E10 - Cold Harbor [WEBDL-1080p].mkv' },
   ]));
   app.put('/api/v3/episode/monitor', (req, res) => res.json({ updated: ((req.body && req.body.episodeIds) || []).length, monitored: !!(req.body && req.body.monitored) }));
+  // Episode files (Severance S01E01-04 at 1080p in the demo) and a recycle bin.
+  const episodeFiles = opts.series ? [] : [1, 2, 3, 4].map((e) => ({ id: 700 + e, seriesId: 1, seasonNumber: 1, relativePath: `Season 1/Severance.S01E0${e}.1080p.WEB-DL.mkv`, path: `/Volumes/Media/TV/Severance/Season 1/Severance.S01E0${e}.1080p.WEB-DL.mkv`, quality: { quality: { id: 3, name: 'WEBDL-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 4e9, episodeIds: [5100 + e] }));
+  const recycledTv = [];
+  app.locals.recycled = recycledTv;
+  // Paths are rewritten when Fix paths moves the series; keep files in step.
+  const filesFor = (s) => episodeFiles.filter((ef) => ef.seriesId === s.id).map((ef) => ({ ...ef, path: `${s.path}/${ef.relativePath}` }));
+  app.get('/api/v3/episodefile', (req, res) => { const s = series.find((x) => x.id === Number(req.query.seriesId)); res.json(s ? filesFor(s) : []); });
+  let mediaManagementTv = { id: 1, recycleBin: opts.series ? '' : '/Volumes/Media/.recycle', recycleBinCleanupDays: 7 };
+  app.get('/api/v3/config/mediamanagement', (req, res) => res.json(mediaManagementTv));
+  app.put('/api/v3/config/mediamanagement', (req, res) => { mediaManagementTv = { ...mediaManagementTv, ...req.body }; res.status(202).json(mediaManagementTv); });
   mountManualImportMock(app, {
+    fs, recycled: recycledTv, episodeFiles: { get length() { return episodeFiles.length; }, filter: (fn) => episodeFiles.map((ef) => { const s = series.find((x) => x.id === ef.seriesId); return s ? Object.assign(ef, { path: `${s.path}/${ef.relativePath}` }) : ef; }).filter(fn), find: (fn) => episodeFiles.find(fn), indexOf: (x) => episodeFiles.indexOf(x), splice: (...a) => episodeFiles.splice(...a), push: (x) => episodeFiles.push(x) },
     kind: 'series', library: () => series, getQueue: () => queue, setQueue: (q) => { queue = q; },
     candidates: {
       SABnzbd_nzo_bear0305: [
@@ -382,7 +495,7 @@ function makeRadarr(opts = {}) {
   const app = express();
   app.use(express.json());
   let movies = [
-    { id: 1, title: 'Dune: Part Two', year: 2024, tmdbId: 693134, status: 'released', monitored: true, hasFile: true, runtime: 166, overview: 'Paul Atreides unites with the Fremen to wage war against House Harkonnen.', path: 'C:\\Media\\Movies\\Dune Part Two (2024)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 32212254720, studio: 'Legendary', images: [] },
+    { id: 1, title: 'Dune: Part Two', year: 2024, tmdbId: 693134, status: 'released', monitored: true, hasFile: true, runtime: 166, overview: 'Paul Atreides unites with the Fremen to wage war against House Harkonnen.', path: 'C:\\Media\\Movies\\Dune Part Two (2024)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 32212254720, studio: 'Legendary', images: [], movieFile: { id: 101, movieId: 1, relativePath: 'Dune.Part.Two.mkv', quality: { quality: { id: 7, name: 'Bluray-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 32212254720 } },
     { id: 2, title: 'Oppenheimer', year: 2023, tmdbId: 872585, status: 'released', monitored: true, hasFile: true, runtime: 180, overview: 'The story of J. Robert Oppenheimer and the atomic bomb.', path: 'C:\\Media\\Movies2\\Oppenheimer (2023)', rootFolderPath: 'C:\\Media\\Movies2', sizeOnDisk: 27917287424, studio: 'Universal', images: [] },
     { id: 3, title: 'Furiosa', year: 2024, tmdbId: 786892, status: 'released', monitored: true, hasFile: false, runtime: 148, overview: 'The origin story of Furiosa before Mad Max: Fury Road.', path: 'C:\\Media\\Movies3\\Furiosa (2024)', rootFolderPath: 'C:\\Media\\Movies3', sizeOnDisk: 0, studio: 'Warner Bros', images: [] },
     { id: 4, title: 'Dune: Part Two', year: 2024, tmdbId: 693134, status: 'released', monitored: false, hasFile: false, runtime: 166, overview: 'Duplicate entry added on another drive.', path: 'C:\\Media\\Movies2\\Dune Part Two (2024)', rootFolderPath: 'C:\\Media\\Movies2', sizeOnDisk: 0, studio: 'Legendary', images: [] },
@@ -404,14 +517,17 @@ function makeRadarr(opts = {}) {
   });
   app.get('/__debug', (req, res) => res.json({ cf: cfSeen.radarr || null }));
   app.get('/api/v3/system/status', (req, res) => res.json({ version: '5.11.0.9244', appName: 'Radarr', instanceName: opts.instanceName || 'Radarr (mock)' }));
-  let rootFolders = [
+  const fs = opts.movies ? fsFromItems(movies) : radarrDemoFs();
+  let rootFoldersOld = [
     { id: 1, path: 'C:\\Media\\Movies', freeSpace: 0, accessible: false, unmappedFolders: [] },
     { id: 2, path: 'C:\\Media\\Movies2', freeSpace: 0, accessible: false, unmappedFolders: [{ name: '1917.2019.PROPER.1080p.BluRay.x265', path: 'C:\\Media\\Movies2\\1917.2019.PROPER.1080p.BluRay.x265', relativePath: '1917.2019.PROPER.1080p.BluRay.x265' }] },
     { id: 3, path: 'C:\\Media\\Movies3', freeSpace: 0, accessible: false, unmappedFolders: [] },
     { id: 4, path: '/data/movies', freeSpace: 2748779069440, accessible: true, unmappedFolders: [] },
   ];
-  app.get('/api/v3/rootfolder', (req, res) => res.json(rootFolders));
-  app.post('/api/v3/rootfolder', (req, res) => { const rf = { id: rootFolders.length + 1, path: req.body.path, freeSpace: 900000000000, accessible: true, unmappedFolders: [] }; rootFolders.push(rf); res.status(201).json(rf); });
+  let rootFolders = opts.movies
+    ? [...new Set(movies.map((x) => x.rootFolderPath).filter(Boolean))].map((path, i) => ({ id: i + 1, path }))
+    : rootFoldersOld.map(({ id, path }) => ({ id, path }));
+  fs.mount(app, { getItems: () => movies, rootFolders: () => rootFolders });
   app.get('/api/v3/qualityprofile', (req, res) => res.json(app.locals.profiles || MOCK_QUALITY_PROFILES));
   app.get('/api/v3/movie', (req, res) => res.json(movies.map((x) => (x.added ? x : { ...x, added: new Date(Date.now() - (90 + (x.id % 40) * 23) * 86400000).toISOString() }))));
   app.get('/api/v3/calendar', (req, res) => res.json([
@@ -437,7 +553,7 @@ function makeRadarr(opts = {}) {
   app.post('/api/v3/movie', (req, res) => { const m = { id: movies.length + 1, ...req.body, hasFile: false, sizeOnDisk: 0 }; movies.push(m); res.status(201).json(m); });
   app.get('/api/v3/release', (req, res) => res.json(mockReleases('Furiosa')));
   app.post('/api/v3/release', (req, res) => res.status(201).json({ guid: req.body.guid, approved: true }));
-  app.get('/api/v3/health', (req, res) => res.json([]));
+  app.get('/api/v3/health', (req, res) => res.json(missingRootsHealth(rootFolders, fs, 'radarr')));
   app.put('/api/v3/movie/editor', (req, res) => {
     const ids = (req.body && req.body.movieIds) || [];
     for (const m of movies) {
@@ -448,6 +564,7 @@ function makeRadarr(opts = {}) {
     res.json(movies.filter((m) => ids.includes(m.id)));
   });
   app.delete('/api/v3/movie/editor', (req, res) => { const ids = (req.body && req.body.movieIds) || []; movies = movies.filter((m) => !ids.includes(m.id)); res.json({}); });
+  app.get('/api/v3/movie/:id', (req, res) => { const x = movies.find((m) => m.id === Number(req.params.id)); return x ? res.json(x) : res.status(404).json({ message: 'NotFound' }); });
   app.put('/api/v3/movie/:id', (req, res) => {
     const id = Number(req.params.id);
     const idx = movies.findIndex((m) => m.id === id);
@@ -463,7 +580,15 @@ function makeRadarr(opts = {}) {
   app.get('/api/v3/rename', (req, res) => res.json([
     { movieFileId: 601, movieId: Number(req.query.movieId) || 1, existingPath: 'furiosa.2024.2160p.mkv', newPath: 'Furiosa A Mad Max Saga (2024) [Bluray-2160p].mkv' },
   ]));
+  // Movie files and media management (recycle bin) for upgrades.
+  const recycled = [];
+  app.locals.recycled = recycled;
+  app.get('/api/v3/moviefile', (req, res) => { const m = movies.find((x) => x.id === Number(req.query.movieId)); res.json(m && m.movieFile ? [m.movieFile] : []); });
+  let mediaManagement = { id: 1, recycleBin: opts.movies ? '' : '/Volumes/Movies/.recycle', recycleBinCleanupDays: 7, deleteEmptyFolders: false, autoUnmonitorPreviouslyDownloadedMovies: false };
+  app.get('/api/v3/config/mediamanagement', (req, res) => res.json(mediaManagement));
+  app.put('/api/v3/config/mediamanagement', (req, res) => { mediaManagement = { ...mediaManagement, ...req.body }; res.status(202).json(mediaManagement); });
   mountManualImportMock(app, {
+    fs, recycled,
     kind: 'movie', library: () => movies, getQueue: () => queue, setQueue: (q) => { queue = q; },
     candidates: {
       qbit_hash_furiosa1080: [
@@ -1326,7 +1451,18 @@ function makeLidarr(opts = {}) {
   app.use((req, res, next) => { recordCf('lidarr', req); if (req.headers['x-api-key'] !== 'MOCK_API_KEY') return res.status(401).json({ error: 'Unauthorized' }); next(); });
   app.get('/__debug', (req, res) => res.json({ cf: cfSeen.lidarr || null }));
   app.get('/api/v1/system/status', (req, res) => res.json({ version: '2.6.4.4402', appName: 'Lidarr', instanceName: opts.instanceName || 'Lidarr (mock)' }));
-  app.get('/api/v1/rootfolder', (req, res) => res.json([{ id: 1, path: '/music', freeSpace: 250000000000, accessible: true }]));
+  // The demo library still points at /music, which moved to /data/media/music.
+  const lfs = opts.artists ? fsFromItems(artists) : lidarrDemoFs();
+  const lidarrRoots = [{ id: 1, path: '/music' }];
+  lfs.mount(app, { getItems: () => artists, rootFolders: () => lidarrRoots, prefix: '/api/v1' });
+  app.get('/api/v1/artist/:id', (req, res) => { const a = artists.find((x) => x.id === Number(req.params.id)); return a ? res.json(a) : res.status(404).json({ message: 'NotFound' }); });
+  app.put('/api/v1/artist/:id', (req, res) => {
+    const id = Number(req.params.id);
+    const i = artists.findIndex((a) => a.id === id);
+    if (i < 0) return res.status(404).json({ message: 'NotFound' });
+    artists[i] = { ...artists[i], ...req.body, id };
+    res.status(202).json(artists[i]);
+  });
   app.get('/api/v1/qualityprofile', (req, res) => res.json([{ id: 1, name: 'Lossless' }, { id: 2, name: 'Standard' }]));
   app.get('/api/v1/metadataprofile', (req, res) => res.json([{ id: 1, name: 'Standard' }]));
   app.get('/api/v1/artist', (req, res) => res.json(artists));
@@ -1540,4 +1676,4 @@ export function startMockServices() {
 }
 
 // Exposed for tests (in-process, ephemeral ports).
-export { makeSonarr as _makeSonarrMock, makeRadarr as _makeRadarrMock, makeBazarr as _makeBazarrMock, makeQbittorrent as _makeQbittorrentMock, makeTransmission as _makeTransmissionMock, makeDeluge as _makeDelugeMock, makeNzbget as _makeNzbgetMock, makeFlood as _makeFloodMock };
+export { makeLidarr as _makeLidarrMock, makeSonarr as _makeSonarrMock, makeRadarr as _makeRadarrMock, makeBazarr as _makeBazarrMock, makeQbittorrent as _makeQbittorrentMock, makeTransmission as _makeTransmissionMock, makeDeluge as _makeDelugeMock, makeNzbget as _makeNzbgetMock, makeFlood as _makeFloodMock };

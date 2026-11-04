@@ -47,6 +47,15 @@ export function makePortainer() {
     res.json(req.query.all === '1' || req.query.all === 'true' ? list : list.filter((x) => x.State === 'running'));
   });
   app.get('/api/endpoints/:id/docker/containers/:cid/json', (req, res) => res.json({ Config: { Env: ['PUID=1000', 'SECRET=hunter2'] } }));
+  // Docker log stream (multiplexed: 8-byte header per frame).
+  app.get('/api/endpoints/:id/docker/containers/:cid/logs', (req, res) => {
+    const c = (containers[req.params.id] || []).find((x) => x.Id === req.params.cid);
+    if (!c) return res.status(404).json({ message: 'No such container' });
+    const name = c.Names[0].slice(1);
+    const lines = [[1, `2026-11-03T04:00:01Z [info] ${name} starting`], [1, `2026-11-03T04:00:02Z [info] listening on port 8080`], [2, `2026-11-03T04:10:00Z [warn] ${name}: health check took 5s`]];
+    const frames = lines.map(([s, t]) => { const body = Buffer.from(`${t}\n`); const head = Buffer.alloc(8); head[0] = s; head.writeUInt32BE(body.length, 4); return Buffer.concat([head, body]); });
+    res.type('application/octet-stream').send(Buffer.concat(frames));
+  });
   // Docker returns 204 on success and 304 when already in that state.
   app.post('/api/endpoints/:id/docker/containers/:cid/:action', (req, res) => {
     if (!['start', 'stop', 'restart'].includes(req.params.action)) return res.status(404).json({ message: 'Not found' });

@@ -18,6 +18,8 @@ function commandSet({ services, go, openSearch, openShortcuts }) {
     commands.push({ label: `Open ${service.label}`, hint: service.type, run: () => go(service.key) });
     if (service.type === 'sonarr' || service.type === 'radarr') {
       for (const tab of ['queue', 'wanted', 'history', 'system']) commands.push({ label: `${service.label}: ${tab}`, hint: 'Service tab', run: () => go(service.key, { tab }) });
+      commands.push({ label: `${service.label}: Fix paths`, hint: 'Tool', run: () => go(service.key, { tab: 'system', tool: 'fixpaths' }) });
+      commands.push({ label: `${service.label}: Find duplicates`, hint: 'Tool', run: () => go(service.key, { tab: 'system', tool: 'duplicates' }) });
       for (const view of loadSavedViews(service.key)) commands.push({ label: `${service.label}: ${view.name}`, hint: 'Saved view', run: () => go(service.key, view.params) });
     }
   }

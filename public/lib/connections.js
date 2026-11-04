@@ -40,6 +40,13 @@ export const LOCAL_SERVICE_DEFS = [
   { type: 'maintainerr', name: 'Maintainerr', urlPlaceholder: 'http://maintainerr.local:6246', keyMode: 'none' },
   { type: 'tdarr', name: 'Tdarr', urlPlaceholder: 'http://tdarr.local:8265', keyMode: 'optional', keyHint: 'Only if Tdarr auth is enabled' },
   { type: 'indexer', name: 'Indexer (Newznab)', urlPlaceholder: 'https://indexer.example.com' },
+  { type: 'whisparr', name: 'Whisparr', urlPlaceholder: 'http://whisparr.local:6969' },
+  { type: 'portainer', name: 'Portainer', urlPlaceholder: 'https://portainer.local:9443', keyHint: 'My account → Access tokens' },
+  { type: 'glances', name: 'Glances', urlPlaceholder: 'http://nas.local:61208', credentialMode: 'optional-basic' },
+  { type: 'adguard', name: 'AdGuard Home', urlPlaceholder: 'http://adguard.local:3000', credentialMode: 'basic' },
+  { type: 'syncthing', name: 'Syncthing', urlPlaceholder: 'http://nas.local:8384', keyHint: 'Actions → Settings → API Key' },
+  { type: 'pulsarr', name: 'Pulsarr', urlPlaceholder: 'http://pulsarr.local:3003', keyHint: 'System → API keys' },
+  { type: 'unraid', name: 'Unraid', urlPlaceholder: 'http://tower.local', keyHint: 'Settings → Management Access → API Keys' },
 ];
 export const LOCAL_SUPPORTED = LOCAL_SERVICE_DEFS.map((d) => d.type);
 export function localServiceDef(type) { return LOCAL_SERVICE_DEFS.find((d) => d.type === type) || null; }
@@ -111,6 +118,12 @@ export function authFor(conn, { baseUrl } = {}) {
     if (conn.apiKey) generated.Authorization = `Bearer ${conn.apiKey}`;
     const origin = trimSlash(baseUrl || conn.baseUrl || conn.localUrl || conn.remoteUrl);
     if (origin) { generated.Referer = origin; generated.Origin = origin; }
+  } else if (type === 'portainer' || type === 'syncthing' || type === 'pulsarr') {
+    if (conn.apiKey) generated['X-API-Key'] = conn.apiKey;
+  } else if (type === 'unraid') {
+    if (conn.apiKey) generated['x-api-key'] = conn.apiKey;
+  } else if (type === 'glances' || type === 'adguard') {
+    if (conn.username || conn.password) generated.Authorization = `Basic ${basicCredentials(conn.username, conn.password)}`;
   } else if (type === 'transmission' || type === 'nzbget') {
     if (conn.username || conn.password) generated.Authorization = `Basic ${basicCredentials(conn.username, conn.password)}`;
   } else if (type === 'deluge') {

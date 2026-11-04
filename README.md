@@ -472,6 +472,39 @@ internal traffic typically bypasses Cloudflare Access — in that case just omit
 - **Pulsarr** — approval queue (admins approve or reject) and recent watchlist requests.
 - **Whisparr v2** — uses the Sonarr screens, since it speaks the Sonarr v3 API.
 
+**Fix paths** (Sonarr, Radarr, Lidarr → System tab, or from a "missing root folder" health
+warning) — after moving drives or hosts, checks every item's folder through the app's own
+filesystem view (so Docker and network paths are what *it* sees), searches the disks and root
+folders it reports for the missing ones, and proposes a new path for each. It matches exact
+names, the same words with different punctuation, and release-named folders that start with the
+title and year, and settles ties by the drive neighbouring items moved to and by which folder has
+video files. Weak matches and ties are left unticked. You can pick another folder, browse (works
+with the keyboard), or map a whole moved folder ("old → new", with suggestions). Applying
+re-points only the ticked items, **without moving files**, adds the new root folders, can remove
+dead ones, and rescans just those items. The last five fixes can each be undone, and the plan can
+be exported as CSV. Admins only.
+
+**Duplicate finder** (Sonarr, Radarr → System tab) — groups entries by shared TMDB/TVDB/IMDb id
+("same title") or, when ids are missing, by title and year ("possible"; never preselected). Two
+films with the same name and year but different ids aren't flagged. Each group suggests a copy to
+keep and says why (folder on disk, files/episodes, quality, size, monitored); extras in sure
+groups are preselected. Deleting never removes the files of a folder a kept copy also uses.
+"Not a duplicate" hides a group until a new copy joins it. It also lists folders in a root folder
+that the app doesn't manage but that are named like a title you have (with their video-file count,
+and whether Plex shows them as duplicates), and the same title in another instance (marked "probably
+on purpose" for 4K/anime/kids instances). Export to CSV.
+
+**Keep this copy instead** — when an unmanaged copy is better, Radarr (whole movie) or Sonarr
+(chosen episodes) imports it through its own Manual Import: the file is moved into the item's
+folder and renamed, and the app removes the old file itself, to its **Recycle Bin** if one is set
+(you're warned, and must confirm, if not). Arr Command Center never needs write access to your
+drives.
+
+**Problem notifications** — besides downloads and requests, the poller reports unhealthy Portainer
+containers, unreachable Docker environments, degraded TrueNAS pools, Unraid disk problems or a
+stopped array, Syncthing folder errors, ad blocking left off in Pi-hole/AdGuard, and Pulsarr
+requests awaiting approval (category "Problems", on by default). Each problem notifies once.
+
 **Live updates** — Sonarr/Radarr/Lidarr/Readarr/Whisparr queues, SABnzbd, qBittorrent,
 Transmission, Deluge, Flood, NZBGet, Tautulli and Jellyfin/Emby now-playing update over
 Server-Sent Events (`/api/live/<service>`), and Home uses one combined stream

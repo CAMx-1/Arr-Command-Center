@@ -1,5 +1,7 @@
 import { h, mount, spinner, empty, toast, fmtBytes, fmtRelative, fmtDate, pct, tabs, confirmModal } from '../lib/ui.js';
 import { createBookServiceClient } from '../lib/bookServices.js';
+import { openPathFix } from '../lib/pathFix.js';
+import { roleAllows } from '../lib/roleUi.js';
 
 // Lidarr (music) & Readarr (books) share the *arr v1 API, so one renderer serves
 // both with type-specific labels/fields.
@@ -34,7 +36,10 @@ export function renderBindery(root, ctx) { return renderMB(root, ctx, 'bindery')
 
 function renderMB(root, ctx, type) {
   const svc = ctx.service;
-  ctx.setActions();
+  // Lidarr: re-point artists whose folders moved (same tool as Sonarr/Radarr).
+  ctx.setActions(type === 'lidarr' && svc.configured && roleAllows('admin')
+    ? h('button', { class: 'btn sm primary', title: 'Find artist folders that moved and re-point them', onclick: () => openPathFix(ctx.api.arrV1(svc.key), ctx, 'artist') }, '🛠 Fix paths')
+    : null);
   if (!svc.configured) return mount(root, empty(CFG[type].icon, `${svc.label} isn’t configured`, 'Set the URL and API key in Settings.'));
   const cfg = CFG[type];
   const client = createBookServiceClient(ctx.api, svc);

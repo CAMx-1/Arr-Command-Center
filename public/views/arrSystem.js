@@ -1,12 +1,27 @@
 // Shared "System" + "Wanted" tabs for Sonarr/Radarr — health checks, disk space,
 // system status, maintenance commands, and the missing/wanted list.
 import { h, mount, skeletonList, empty, toast, fmtBytes, pct, timeEl, openModal, closeModal, confirmModal } from '../lib/ui.js';
-import { profileSummary, formatSpecSummary, tagUsage, profileRows, applyProfileEdits, applyFormatEdits } from '../lib/arrProfiles.js';
+import { profileSummary, formatSpecSummary, tagUsage, profileRows, applyProfileEdits, applyFormatEdits, moveProfileItem, removeFormatSpec, duplicateFormatSpec } from '../lib/arrProfiles.js';
 import { roleAllows } from '../lib/roleUi.js';
 import { openPathFix } from '../lib/pathFix.js';
 import { openDuplicates } from '../lib/duplicates.js';
 
 const HEALTH_CLS = { error: 'down', warning: 'warn', notice: 'info' };
+// Health checks that Fix paths can resolve: missing root folders and items
+// whose folder is gone.
+export function isPathHealth(check) {
+  return /RootFolderCheck|RemovedSeriesCheck|RemovedMovieCheck|MountCheck/i.test((check && check.source) || '')
+    || /root folder|missing root|does not exist|is missing/i.test((check && check.message) || '');
+}
+
+// ?tool=fixpaths | duplicates opens a tool (used by the command palette).
+function openRequestedTool(arr, ctx, kind) {
+  const tool = ctx.params && ctx.params.tool;
+  if (!tool) return;
+  if (ctx.setParams) ctx.setParams({ tool: '' });
+  if (tool === 'fixpaths') openPathFix(arr, ctx, kind);
+  else if (tool === 'duplicates') openDuplicates(arr, ctx, kind);
+}
 
 export async function tabSystem(root, arr, ctx, kind) {
   mount(root, skeletonList());
@@ -21,6 +36,7 @@ export async function tabSystem(root, arr, ctx, kind) {
       arr.get('customformat').catch(() => []),
     ]);
     const reload = () => tabSystem(root, arr, ctx, kind);
+    setTimeout(() => openRequestedTool(arr, ctx, kind), 0);
     const run = async (name) => {
       try { await arr.post('command', { name }); toast(`${name} started`, 'success'); }
       catch (e) { toast(e.message, 'error'); }
@@ -45,6 +61,7 @@ export async function tabSystem(root, arr, ctx, kind) {
                 h('span', { class: `pill ${HEALTH_CLS[c.type] || 'muted'}` }, c.type || 'notice'),
                 c.source ? h('span', { class: 'dim' }, c.source) : null,
                 c.wikiUrl ? h('a', { class: 'btn sm', href: c.wikiUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Info') : null,
+                isPathHealth(c) ? h('button', { class: 'btn sm primary', onclick: () => openPathFix(arr, ctx, kind) }, '🛠 Fix paths') : null,
               ),
             ),
           )))
@@ -88,11 +105,19 @@ export async function tabSystem(root, arr, ctx, kind) {
 
 // Custom format editor: name, rename flag, and each condition's value,
 // negate and required.
-function editFormat(format, arr, reload) {
+function editFormat(original, arr, reload) {
+  let format = JSON.parse(JSON.stringify(original));
   const name = h('input', { class: 'input', value: format.name || '' });
   const rename = h('input', { type: 'checkbox', checked: format.includeCustomFormatWhenRenaming ? 'checked' : null });
-  const specs = {};
-  const specRows = (format.specifications || []).map((sp, i) => {
+  let specs = {};
+  const specList = h('div', { class: 'list' });
+  // Apply pending edits before a structural change so nothing typed is lost.
+  const restructure = (fn) => {
+    try { format = fn(applyFormatEdits(format, { specs })); } catch (e) { toast(e.message, 'error'); return; }
+    specs = {};
+    paintSpecs();
+  };
+  const paintSpecs = () => mount(specList, ...(format.specifications || []).map((sp, i) => {
     const value = (sp.fields || []).find((f) => f && f.name === 'value');
     const valueInput = value ? h('input', { class: 'input mono', value: value.value == null ? '' : String(value.value), spellcheck: 'false', autocapitalize: 'off' }) : null;
     const negate = h('input', { type: 'checkbox', checked: sp.negate ? 'checked' : null });
@@ -103,8 +128,12 @@ function editFormat(format, arr, reload) {
     return h('div', { class: 'row', style: { flexDirection: 'column', alignItems: 'stretch', gap: '6px' } },
       h('div', { class: 'row-title', style: { fontSize: '13px' } }, formatSpecSummary({ ...sp, negate: false, required: false }).label),
       valueInput,
-      h('div', { class: 'meta-line' }, h('label', {}, negate, ' Negate'), h('label', {}, required, ' Required')));
-  });
+      h('div', { class: 'meta-line' }, h('label', {}, negate, ' Negate'), h('label', {}, required, ' Required'),
+        h('span', { style: { marginLeft: 'auto', display: 'flex', gap: '6px' } },
+          h('button', { class: 'btn sm', type: 'button', onclick: () => restructure((f) => duplicateFormatSpec(f, i)) }, 'Duplicate'),
+          h('button', { class: 'btn sm danger confirm-btn', type: 'button', disabled: (format.specifications || []).length <= 1 ? 'disabled' : null, onclick: () => restructure((f) => removeFormatSpec(f, i)) }, 'Remove'))));
+  }));
+  paintSpecs();
   const save = async (btn) => {
     let next;
     try { next = applyFormatEdits(format, { name: name.value, includeCustomFormatWhenRenaming: rename.checked, specs }); }
@@ -120,8 +149,8 @@ function editFormat(format, arr, reload) {
       h('label', { class: 'pw-field' }, h('span', { class: 'pw-field-label' }, 'Name'), name),
       h('label', { class: 'pw-field' }, h('span', { class: 'pw-field-label' }, 'Include in renaming'), h('span', { class: 'pw-toggle' }, rename)),
       h('div', { class: 'section-title', style: { margin: '12px 0 6px' } }, 'Conditions'),
-      h('div', { class: 'list' }, ...specRows),
-      h('p', { class: 'dim settings-copy' }, 'Values are .NET regular expressions where the condition matches text; Sonarr/Radarr check them when you save. Add or remove conditions in Sonarr/Radarr.')),
+      specList,
+      h('p', { class: 'dim settings-copy' }, 'Values are .NET regular expressions where the condition matches text; Sonarr/Radarr check them when you save. Duplicate a condition to make a new one of the same kind.')),
     footer: h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', width: '100%' } }, h('button', { class: 'btn', onclick: closeModal }, 'Cancel'), saveBtn),
   });
 }
@@ -229,8 +258,11 @@ function openProfile(sum, profile, formats, arr, reload) {
 }
 
 // Profile editor: name, upgrades, allowed qualities, cutoff, format scores.
-function editProfile(profile, formats, arr, reload) {
-  const rows = profileRows(profile);
+function editProfile(original, formats, arr, reload) {
+  // Reordering works on a working copy; allowed ticks are applied to it as
+  // they change so moves keep them.
+  let profile = JSON.parse(JSON.stringify(original));
+  let rows = profileRows(profile);
   const allowed = {};
   const name = h('input', { class: 'input', value: profile.name || '' });
   const upgrades = h('input', { type: 'checkbox', checked: profile.upgradeAllowed ? 'checked' : null });
@@ -239,12 +271,30 @@ function editProfile(profile, formats, arr, reload) {
     const current = Number(cutoff.value || profile.cutoff);
     mount(cutoff, ...rows.filter((r) => (allowed[r.index] ?? r.allowed)).map((r) => h('option', { value: String(r.cutoffId), selected: r.cutoffId === current ? 'selected' : null }, r.name)));
   };
-  const qualityList = h('div', { class: 'list' }, ...rows.map((r) => {
-    const box = h('input', { type: 'checkbox', checked: r.allowed ? 'checked' : null, 'aria-label': `Allow ${r.name}` });
-    box.addEventListener('change', () => { allowed[r.index] = box.checked; paintCutoff(); });
-    return h('label', { class: 'row', style: { cursor: 'pointer' } }, box, h('div', { class: 'row-main' }, h('div', { class: 'row-title', style: { fontSize: '13px' } }, r.name, r.group ? h('span', { class: 'pill muted', style: { marginLeft: '6px' } }, 'group') : null)));
-  }));
-  paintCutoff();
+  const qualityList = h('div', { class: 'list' });
+  const move = (rowIdx, delta) => {
+    profile = applyProfileEdits(profile, { allowed });
+    for (const k of Object.keys(allowed)) delete allowed[k];
+    profile = moveProfileItem(profile, rowIdx, delta);
+    rows = profileRows(profile);
+    paintRows();
+    const btns = [...qualityList.querySelectorAll(`[data-row="${rowIdx + delta}"] button`)];
+    const want = btns[delta < 0 ? 0 : 1];
+    (want && !want.disabled ? want : btns.find((b) => !b.disabled))?.focus();
+  };
+  function paintRows() {
+    mount(qualityList, ...rows.map((r, i) => {
+      const box = h('input', { type: 'checkbox', checked: (allowed[r.index] ?? r.allowed) ? 'checked' : null, 'aria-label': `Allow ${r.name}` });
+      box.addEventListener('change', () => { allowed[r.index] = box.checked; paintCutoff(); });
+      return h('div', { class: 'row', dataset: { row: String(i) } },
+        h('label', { style: { display: 'flex', gap: '10px', alignItems: 'center', flex: '1', cursor: 'pointer' } }, box, h('span', { class: 'row-title', style: { fontSize: '13px' } }, r.name, r.group ? h('span', { class: 'pill muted', style: { marginLeft: '6px' } }, 'group') : null)),
+        h('div', { class: 'row-actions' },
+          h('button', { class: 'btn sm', type: 'button', disabled: i === 0 ? 'disabled' : null, 'aria-label': `Move ${r.name} up`, onclick: () => move(i, -1) }, '↑'),
+          h('button', { class: 'btn sm', type: 'button', disabled: i === rows.length - 1 ? 'disabled' : null, 'aria-label': `Move ${r.name} down`, onclick: () => move(i, 1) }, '↓')));
+    }));
+    paintCutoff();
+  }
+  paintRows();
   const num = (v) => h('input', { class: 'input', type: 'number', step: '1', value: String(v ?? 0), style: { maxWidth: '120px' } });
   const minScore = num(profile.minFormatScore);
   const cutoffScore = num(profile.cutoffFormatScore);
@@ -281,7 +331,7 @@ function editProfile(profile, formats, arr, reload) {
       field('Upgrade until format score', cutoffScore),
       field('Minimum score increment', minUpgrade),
       ...scoreInputs.map(([f, input]) => field(f.name, input)),
-      h('p', { class: 'dim settings-copy' }, 'Quality order and groups are kept as they are; change those in Sonarr/Radarr.')),
+      h('p', { class: 'dim settings-copy' }, 'Higher in the list is preferred. Grouping qualities still happens in Sonarr/Radarr.')),
     footer: h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', width: '100%' } }, h('button', { class: 'btn', onclick: closeModal }, 'Cancel'), saveBtn),
   });
 }
