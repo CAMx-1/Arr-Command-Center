@@ -1,25 +1,45 @@
 import { h, mount, clear, toast, empty, spinner, fmtBytes, fmtRelative, debounce, openModal, closeModal } from '../lib/ui.js';
 import { dismissNativeKeyboard } from '../lib/nativeApp.js';
 import { actionGroup } from '../lib/actions.js';
+import { pushTargets, pushRelease, sendToSabnzbd } from '../lib/releasePush.js';
+import { isLocalMode } from '../lib/connections.js';
 
 // Usenet indexer search — LunaSea-style "Search" for public indexers such as
 // NZBGeek (Indexer API Host + Indexer API Key). Public indexers expose the
 // standard Newznab API (?apikey=, t=search, cat=...), so the same host/key/
 // category mechanism works across them. Results can be grabbed straight to a
-// configured SABnzbd instance. Tuned for audiobooks, with book and audio filters.
+// configured SABnzbd instance. Filters for audiobooks, books, audio, PC and
+// console releases.
 
 // Category groups (standard indexer scheme). Sending cat=<group> (a *000 value)
 // matches all of its subcategories; specific subcats are listed to be safe
 // across indexers that don't expand groups.
 const CATEGORIES = [
   { id: 'audiobooks', label: 'Audiobooks', cat: '3030' },
-  { id: 'books', label: 'Books / eBooks / Comics / Magazines', cat: '7000,7010,7020,7030,7040' },
+  // Books: Magazines, eBook, Comics, Technical, Other, Foreign.
+  { id: 'books', label: 'Books', cat: '7000,7010,7020,7030,7040,7050,7060' },
   { id: 'audio', label: 'Audio', cat: '3000,3010,3020,3040' },
+  // PC: 0-day, ISO, Mac, Mobile (other), Games, iOS, Android.
+  { id: 'pc', label: 'PC', cat: '4000,4010,4020,4030,4040,4050,4060,4070' },
+  // Console: NDS, PSP, Wii, Xbox, Xbox 360, WiiWare, Xbox 360 DLC, PS3, Other,
+  // 3DS, PS Vita, Wii U, Xbox One, PS4.
+  { id: 'console', label: 'Console', cat: '1000,1010,1020,1030,1040,1050,1060,1070,1080,1090,1110,1120,1130,1140,1180' },
   { id: 'all', label: 'All', cat: '' },
 ];
 
+// Names of the standard subcategories, shown on each result.
+const SUBCATS = {
+  1010: 'NDS', 1020: 'PSP', 1030: 'Wii', 1040: 'Xbox', 1050: 'Xbox 360', 1060: 'WiiWare', 1070: 'Xbox 360 DLC',
+  1080: 'PS3', 1090: 'Console', 1110: '3DS', 1120: 'PS Vita', 1130: 'Wii U', 1140: 'Xbox One', 1180: 'PS4',
+  4010: '0-day', 4020: 'PC ISO', 4030: 'Mac', 4040: 'Mobile', 4050: 'PC Games', 4060: 'iOS', 4070: 'Android',
+  7040: 'Technical', 7050: 'Books', 7060: 'Foreign books',
+};
+
 function catLabel(c) {
   const n = Number(c);
+  if (SUBCATS[n]) return SUBCATS[n];
+  if (n >= 1000 && n < 2000) return 'Console';
+  if (n >= 4000 && n < 5000) return 'PC';
   if (n === 3030) return 'Audiobook';
   if (n >= 7030 && n < 7040) return 'Comics';
   if (n >= 7020 && n < 7030) return 'eBook';
@@ -30,6 +50,8 @@ function catLabel(c) {
 }
 function catIcon(c) {
   const n = Number(c);
+  if (n >= 1000 && n < 2000) return '🎮';
+  if (n >= 4000 && n < 5000) return '💻';
   if (n === 3030) return '🎧';
   if (n >= 7030 && n < 7040) return '📖';
   if (n >= 7000 && n < 8000) return '📚';
@@ -165,6 +187,7 @@ function resultRow(it, ctx) {
     actionGroup([
       (it.comments || it.details) ? { label: `\uD83D\uDCAC${it.commentsCount ? ` ${it.commentsCount}` : ''}`, title: 'Read comments on the indexer', onClick: () => openLink(it.comments || it.details) } : null,
       { label: 'Details', title: 'View details', onClick: () => openDetailsModal(it, ctx) },
+      ...appActions(ctx, it),
       { label: '+ Send to SAB', title: 'Send to SABnzbd', variant: 'primary', primary: true, disabled: !it.url, onClick: () => sendToSab(ctx, it) },
     ], { sheetTitle: it.title }),
   );
@@ -197,9 +220,21 @@ function openDetailsModal(it, ctx) {
   const footer = h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end', width: '100%' } },
     (it.comments || it.details) ? h('button', { class: 'btn hex-btn', title: 'Read comments on the indexer', onclick: () => openLink(it.comments || it.details) }, `💬 Comments${it.commentsCount ? ` (${it.commentsCount})` : ''}`) : null,
     it.details ? h('button', { class: 'btn hex-btn', title: 'Open the release page on the indexer', onclick: () => openLink(it.details) }, '↗ View on indexer') : null,
+    ...pushTargets(ctx.state.services, it.cat).map((svc) => h('button', { class: 'btn hex-btn', disabled: it.url ? null : 'disabled', title: `Let ${svc.label} grab and track it`, 'data-needs': 'write', onclick: () => { closeModal(); sendToApp(ctx, it, svc); } }, `+ ${svc.label}`)),
     h('button', { class: 'btn primary hex-btn', disabled: it.url ? null : 'disabled', onclick: () => { closeModal(); sendToSab(ctx, it); } }, '+ Send to SAB'),
   );
   openModal({ title: it.title, body, footer, wide: true });
+}
+
+// "+ Sonarr" / "+ Radarr" / …: one button per matching app instance.
+function appActions(ctx, it) {
+  return pushTargets(ctx.state.services, it.cat).map((svc) => ({ label: `+ ${svc.label}`, title: `Let ${svc.label} grab and track it (imports like its own grabs)`, needs: 'write', disabled: !it.url, onClick: () => sendToApp(ctx, it, svc) }));
+}
+async function sendToApp(ctx, it, svc) {
+  try {
+    const r = await pushRelease(ctx.api, svc, it, { indexerKey: ctx.service.key, indexerName: ctx.service && ctx.service.label, local: isLocalMode() });
+    toast(r.text, r.ok ? 'success' : 'warn', r.ok ? 3500 : 8000);
+  } catch (e) { toast(`${svc.label}: ${e.message}`, 'error'); }
 }
 
 function sabInstances(ctx) {
@@ -211,7 +246,7 @@ async function sendToSab(ctx, it) {
   if (!sabs.length) { toast('No SABnzbd service is configured', 'error'); return; }
   const send = async (svc) => {
     try {
-      await ctx.api.sab(svc.key, { mode: 'addurl', name: it.url, nzbname: it.title });
+      await sendToSabnzbd(ctx.api, svc, it, { indexerKey: ctx.service.key, local: isLocalMode() });
       toast(`Sent to ${svc.label}`, 'success');
     } catch (e) { toast(e.message, 'error'); }
   };

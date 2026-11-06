@@ -36,6 +36,7 @@ export const LIVE_TOPICS = {
       return (data.sessions || []).map((s) => `${s.session_key}:${s.state}:${Math.floor(Number(s.progress_percent) || 0)}:${s.transcode_decision}`);
     },
   },
+  overseerr: { path: 'api/v1/request/count', signature: (d) => [JSON.stringify(d || {})] },
   jellyfin: mediaSessions(),
   emby: mediaSessions(),
   // Download clients need session logins, so they use the proxy's client
@@ -178,5 +179,14 @@ export function createLiveHub({ getService, fetchJson, fetchClient, intervalMs =
     };
   }
 
-  return { handler, multiHandler, subscribe, tick, size: () => topics.size, clients: (key) => (topics.get(key) ? topics.get(key).clients.size : 0) };
+  // A webhook said something changed: tell open pages now, then re-read.
+  function nudge(key) {
+    const t = topics.get(key);
+    if (!t) return 0;
+    for (const c of t.clients) send(c, 'change', { at: now(), service: key, source: 'webhook' });
+    tick(key);
+    return t.clients.size;
+  }
+
+  return { handler, multiHandler, subscribe, tick, nudge, size: () => topics.size, clients: (key) => (topics.get(key) ? topics.get(key).clients.size : 0) };
 }

@@ -9,7 +9,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, publicConfig, localFallbackConfig, ALLOWED_SERVICE_TYPES, saveServiceToDisk, removeServiceFromDisk, isInsecureExposure, buildServiceUpdate } from './config.js';
+import { loadConfig, publicConfig, localFallbackConfig, ALLOWED_SERVICE_TYPES, saveServiceToDisk, removeServiceFromDisk, configWritable, isInsecureExposure, buildServiceUpdate } from './config.js';
 import { createProxyRouter, pingService, serviceRequest, serviceGet, liveClientFetch } from './proxy.js';
 import { startMockServices } from './mock/mockServices.js';
 import { createPlexAuth } from './plexAuth.js';
@@ -20,6 +20,10 @@ import * as channels from './channels.js';
 import { startPoller, pollOnce } from './poller.js';
 import { createInsightsRecorder, seedDemoHistory } from './insights.js';
 import { createActivityLog } from './activity.js';
+import { createServiceAccess, pushFilter } from './serviceAccess.js';
+import { discover, cleanHosts, localSubnets, DEFAULT_PORTS, freeKey } from './discovery.js';
+import { restoreIndexerLink, cleanRelease, scrub } from './indexerSend.js';
+import { createWebhooks, debounced, arrWebhookNotification } from './webhooks.js';
 import { createDigest, describeSchedule } from './digest.js';
 import { createBotCore, createTelegramPoller, createDiscordHandler, publicBot, applyBotSettings, upsertBotUser } from './chatBot.js';
 import * as automation from './automation.js';
@@ -104,7 +108,7 @@ app.use((req, res, next) => {
   res.on('finish', () => {
     if (!req.path.startsWith('/api/') || req.path === '/api/diagnostics') return;
     const ms = Math.round(Number(process.hrtime.bigint() - start) / 1e6);
-    const entry = { id, t: Date.now(), method: req.method, path: req.originalUrl.split('?')[0], status: res.statusCode, ms };
+    const entry = { id, t: Date.now(), method: req.method, path: req.originalUrl.split('?')[0].replace(/^(\/api\/hooks\/[^/]+\/).+$/, '$1…'), status: res.statusCode, ms };
     requestLog.push(entry);
     if (requestLog.length > 200) requestLog.shift();
     console.log(JSON.stringify({ level: res.statusCode >= 500 ? 'error' : 'info', ...entry }));
@@ -169,6 +173,18 @@ const bot = createBotCore({ cfg, store });
 // TELEGRAM_API_BASE lets you use a self-hosted Telegram Bot API server.
 const telegramBot = createTelegramPoller({ core: bot, apiBase: process.env.TELEGRAM_API_BASE || 'https://api.telegram.org', onError: (e) => console.warn('[bot] telegram:', e.message) });
 const discordBot = createDiscordHandler({ core: bot });
+// Webhooks from Sonarr/Radarr/Seerr/Tautulli (no session: the per-service
+// token in the URL is the secret). Wrong tokens count toward a lockout.
+const pollSoon = debounced(() => { if (poller) poller.tick().catch(() => {}); });
+const webhooks = createWebhooks({ cfg, store, onEvent: ({ key }) => { try { liveHub.nudge(key); } catch { /* not started */ } pollSoon(); } });
+const hookLimiter = createAuthLimiter({ maxFailures: 30, windowMs: 10 * 60000, baseLockMs: 5 * 60000 });
+app.post('/api/hooks/:key/:token', (req, res, next) => {
+  const client = req.socket.remoteAddress || 'unknown';
+  if (hookLimiter.blockedFor(client)) return res.status(429).json({ error: 'Too many attempts' });
+  res.on('finish', () => { if (res.statusCode === 404) hookLimiter.fail(client); });
+  next();
+}, express.json({ limit: '256kb', type: () => true }), (err, req, res, next) => (err ? res.status(400).json({ error: 'Bad JSON' }) : next()), webhooks.receive);
+
 app.post('/api/bot/discord/interactions', express.raw({ type: '*/*', limit: '64kb' }), (req, res) => { discordBot.interactions(req, res).catch(() => { if (!res.headersSent) res.status(500).end(); }); });
 
 app.post('/api/notify/action/:token', async (req, res) => {
@@ -221,14 +237,46 @@ app.use(plexAuth.middleware);
 if (plexAuth.enabled) console.log('[startup] Plex authentication is ENABLED.');
 // Roles: every /api request is checked against the caller's role (admin /
 // user / guest). Without Plex sign-in everyone is an admin.
-const roleGuard = createRoleGuard(plexAuth);
+const serviceAccess = createServiceAccess(store);
+// A subscriber's role, only when it's certain: listed by name or email, or
+// (for the "any Plex user" default role) the subscription has the email too.
+// Older subscriptions only stored the username; those are sent as before.
+const subscriberRole = (u, e) => {
+  const ids = [u, e].filter(Boolean).map((x) => String(x).toLowerCase().trim());
+  const listed = plexAuth.roles.list().users.find((x) => ids.includes(x.id));
+  if (listed) return listed.role;
+  return e ? plexAuth.roles.lookup(u, e) : null;
+};
+const pushTo = pushFilter({ enabled: () => plexAuth.enabled, roleOf: subscriberRole, allowed: (r, k) => serviceAccess.allowed(r, k), known: (k) => !!cfg.services[k] });
+const roleGuard = createRoleGuard(plexAuth, { canSee: (role, key) => serviceAccess.allowed(role, key), keyOf: (svc) => (svc && svc.key) || Object.keys(cfg.services).find((k) => cfg.services[k] === svc) });
+const seeing = (req) => plexAuth.roleOf(req);
 // Activity log hooks in before the role guard so refused attempts are logged too.
 const activity = createActivityLog({ store, cfg, roleOf: (req) => plexAuth.roleOf(req) });
 app.use(activity.middleware);
 app.use(roleGuard.app);
+// Your sign-in sessions and two-factor (any signed-in role, for themselves).
+app.use('/api/account', plexAuth.account);
 app.get('/api/activity', (req, res) => res.json(activity.list(req.query)));
 app.delete('/api/activity', (req, res) => { activity.clear(); res.json({ ok: true }); });
 mountUserRoutes(app, plexAuth, { plex, cfg });
+// Service-specific app routes follow the same per-role service list.
+app.use((req, res, next) => {
+  const role = seeing(req);
+  if (role === 'admin' || !role) return next();
+  const m = /^\/api\/(?:insights\/history|truenas|backups|indexer)\/([^/]+)/.exec(req.path);
+  const key = m ? decodeURIComponent(m[1]) : (/^\/api\/plex\//.test(req.path) && !/^\/api\/plex\/image$/.test(req.path) ? Object.keys(cfg.services).find((k) => cfg.services[k].type === 'plex') : null);
+  if (key && !serviceAccess.allowed(role, key)) return res.status(403).json({ error: 'Your role can’t use this service', role });
+  next();
+});
+// Which services each role sees (admins only: /api/users is admin).
+app.get('/api/users/services', (req, res) => {
+  res.json({ settings: serviceAccess.read(), services: Object.entries(cfg.services).filter(([, s]) => s.enabled !== false).map(([k, s]) => ({ key: k, label: s.label || k, type: s.type })) });
+});
+app.put('/api/users/services', express.json({ limit: '8kb' }), (req, res) => {
+  const r = serviceAccess.save(req.body || {}, Object.keys(cfg.services));
+  if (r.error) return res.status(400).json({ error: r.error });
+  res.json({ settings: r.settings });
+});
 
 // Fail closed: refuse to expose the secret-injecting proxy on a public
 // interface with no authentication (unless explicitly opted in).
@@ -249,7 +297,7 @@ if (!localOnly && !anyAuth) {
 }
 
 // Public (secret-free) config for the frontend.
-app.get('/api/config', (req, res) => res.json({ ...publicConfig(cfg), buildId: BUILD_ID, auth: { plexEnabled: plexAuth.enabled, user: req.plexUser || null, role: plexAuth.roleOf(req) } }));
+app.get('/api/config', (req, res) => { const pc = publicConfig(cfg); res.json({ ...pc, services: serviceAccess.filterMap(seeing(req), pc.services), buildId: BUILD_ID, auth: { plexEnabled: plexAuth.enabled, user: req.plexUser || null, role: plexAuth.roleOf(req) } }); });
 
 // Explicit credential-bearing export for the native local-fallback feature.
 // Authentication middleware above protects this route; normal /api/config and
@@ -289,7 +337,7 @@ const uptime = createUptimeTracker({
       ? { title: `${a.label} is down`, body: a.error ? `Not responding: ${a.error}` : 'Not responding', url: '/', category: 'service' }
       : { title: `${a.label} is back up`, body: `Recovered after ${fmtDur(a.downFor)}`, url: '/', category: 'service' };
     channels.sendToChannels(msg, { globalEnabled: (c) => push.categoryEnabled(c) }).catch(() => {});
-    if (push.categoryEnabled('service')) push.sendToAll(push.notification({ ...msg, tag: `service:${a.key}` })).catch(() => {});
+    if (push.categoryEnabled('service')) push.sendToAll(push.notification({ ...msg, tag: `service:${a.key}` }), { filter: pushTo([a.key]) }).catch(() => {});
   },
 });
 const statusCache = createStatusCache({
@@ -302,17 +350,17 @@ const statusCache = createStatusCache({
 app.get('/api/uptime', (req, res) => {
   const days = Math.min(7, Math.max(1, Number(req.query.days) || 1));
   res.set('Cache-Control', 'no-store');
-  res.json(uptime.all(days * 86400000, days === 1 ? 24 : 28));
+  res.json(serviceAccess.filterMap(seeing(req), uptime.all(days * 86400000, days === 1 ? 24 : 28)));
 });
 app.get('/api/status', async (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json(await statusCache.get({ fresh: req.query.fresh === '1' }));
+  res.json(serviceAccess.filterMap(seeing(req), await statusCache.get({ fresh: req.query.fresh === '1' })));
 });
 
 // Single-service status.
 app.get('/api/status/:service', async (req, res) => {
   const svc = cfg.services[req.params.service];
-  if (!svc || svc.enabled === false) return res.status(404).json({ error: 'Unknown service' });
+  if (!svc || svc.enabled === false || !serviceAccess.allowed(seeing(req), req.params.service)) return res.status(404).json({ error: 'Unknown service' });
   if (svc.sample) return res.json({ label: svc.label || req.params.service, type: svc.type, ok: true, status: 200, ms: 0, version: 'sample' });
   if (svc.type === 'plex') { const ok = plex.hasToken(cfg); return res.json({ label: svc.label || req.params.service, type: 'plex', ok, status: ok ? 200 : 0, ms: 0, error: ok ? undefined : 'Sign in with Plex to enable' }); }
   res.json({ label: svc.label || req.params.service, type: svc.type, ...(await pingService(svc, req.params.service).catch((e) => ({ ok: false, status: 0, ms: 0, error: (e && e.message) || 'ping failed' }))) });
@@ -322,7 +370,10 @@ app.get('/api/status/:service', async (req, res) => {
 app.get('/api/operations', async (req, res) => {
   try {
     const limit = Math.max(1, Math.min(250, Number(req.query.limit) || 100));
-    res.json(await getOperations(cfg, { limit, ttlMs: req.query.fresh ? 0 : 5000 }));
+    const ops = await getOperations(cfg, { limit, ttlMs: req.query.fresh ? 0 : 5000 });
+    const role = seeing(req);
+    const keep = (x) => !x || !x.serviceKey || serviceAccess.allowed(role, x.serviceKey);
+    res.json(role === 'admin' ? ops : Object.fromEntries(Object.entries(ops).map(([k, v]) => [k, Array.isArray(v) ? v.filter(keep) : v])));
   } catch (e) {
     res.status(502).json({ error: e.message || 'Could not collect operations data' });
   }
@@ -404,7 +455,7 @@ app.post('/api/push/subscribe', express.json({ limit: '16kb' }), (req, res) => {
     const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
     if (host) push.setSubject(`${proto}://${host}`);
     const sub = req.body && req.body.subscription ? req.body.subscription : req.body;
-    const result = push.addSubscription(sub, { user: req.plexUser || null, ua: req.headers['user-agent'] || '' });
+    const result = push.addSubscription(sub, { user: req.plexUser || null, email: req.plexEmail || null, ua: req.headers['user-agent'] || '' });
     res.json({ ok: true, ...result });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -496,6 +547,23 @@ app.get('/api/plex/watchlist', async (req, res) => { try { res.json(await plex.g
 app.get('/api/plex/users', async (req, res) => { try { res.json(await plex.getUsers(cfg)); } catch (e) { res.status(502).json({ error: e.message }); } });
 app.get('/api/plex/friends', async (req, res) => { try { res.json(await plex.getFriends(cfg)); } catch (e) { res.status(502).json({ error: e.message }); } });
 app.get('/api/plex/sessions', async (req, res) => { try { res.json(await plex.getSessions(cfg)); } catch (e) { res.status(502).json({ error: e.message }); } });
+// Wrong Plex matches: compare Plex's ids with the Sonarr/Radarr entry in the
+// same folder. Admins can pick the right match from Plex's own search.
+app.get('/api/plex/mismatches', async (req, res) => {
+  try {
+    const role = seeing(req);
+    const arrs = Object.entries(cfg.services).filter(([k, s]) => (s.type === 'sonarr' || s.type === 'radarr') && s.enabled !== false && serviceAccess.allowed(role, k));
+    const [plexItems, ...lists] = await Promise.all([plex.plexLibraryItems(cfg), ...arrs.map(([k, s]) => serviceGet(s, `api/v3/${s.type === 'sonarr' ? 'series' : 'movie'}`, { timeout: 30000 }).then((l) => (l || []).map((x) => ({ ...x, serviceKey: k, serviceLabel: s.label || k }))).catch(() => []))]);
+    const r = plex.findWrongMatches(plexItems, lists.flat());
+    res.json({ checked: plexItems.length, compared: r.compared, items: r.items });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.get('/api/plex/matches/:ratingKey', async (req, res) => {
+  try { res.json(await plex.plexMatchCandidates(cfg, req.params.ratingKey, { title: req.query.title, year: req.query.year })); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/plex/match/:ratingKey', express.json({ limit: '2kb' }), async (req, res) => {
+  try { await plex.plexApplyMatch(cfg, req.params.ratingKey, req.body || {}); res.json({ ok: true }); } catch (e) { res.status(502).json({ error: e.message }); }
+});
 app.get('/api/plex/duplicates', async (req, res) => { try { res.json(await plex.getDuplicates(cfg)); } catch (e) { res.status(502).json({ error: e.message }); } });
 
 // Image proxy: fetches a Plex image with the token server-side (token never sent
@@ -577,7 +645,9 @@ async function sendDigestMessage(msg) {
   const out = { channels: null, push: null };
   try { out.channels = await channels.sendToChannels(msg, { globalEnabled: (c) => push.categoryEnabled(c) }); } catch (e) { out.channels = { error: e.message }; }
   if (push.categoryEnabled('digest')) {
-    try { out.push = await push.sendToAll(push.notification({ title: msg.title, body: msg.body.split('\n').slice(0, 6).join('\n'), url: msg.url, tag: 'digest' })); } catch (e) { out.push = { error: e.message }; }
+    // The digest covers every Sonarr and Radarr, so it goes to people who can see them all.
+    const digestKeys = Object.entries(cfg.services).filter(([, s]) => (s.type === 'sonarr' || s.type === 'radarr') && s.enabled !== false).map(([k]) => k);
+    try { out.push = await push.sendToAll(push.notification({ title: msg.title, body: msg.body.split('\n').slice(0, 6).join('\n'), url: msg.url, tag: 'digest' }), { filter: pushTo(digestKeys) }); } catch (e) { out.push = { error: e.message }; }
   }
   return out;
 }
@@ -608,6 +678,35 @@ app.delete('/api/bot/users/:platform/:id', (req, res) => {
 });
 app.post('/api/bot/discord/register', async (req, res) => {
   try { res.json({ ok: true, commands: await discordBot.registerCommands() }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/webhooks', (req, res) => res.json({ hooks: webhooks.list() }));
+app.post('/api/webhooks/:key/rotate', (req, res) => {
+  if (!webhooks.list().some((h) => h.key === req.params.key)) return res.status(404).json({ error: 'Unknown service' });
+  webhooks.rotate(req.params.key); res.json({ hooks: webhooks.list() });
+});
+// Add the webhook to a Sonarr/Radarr/… instance (Settings → Connect).
+app.post('/api/webhooks/:key/install', express.json({ limit: '2kb' }), async (req, res) => {
+  const svc = cfg.services[req.params.key];
+  const hook = webhooks.list().find((h) => h.key === req.params.key);
+  if (!svc || !hook) return res.status(404).json({ error: 'Unknown service' });
+  const base = String((req.body && req.body.baseUrl) || '').replace(/\/+$/, '');
+  if (!/^https?:\/\/[^/\s]+/.test(base)) return res.status(400).json({ error: 'Enter the address this app can reach Arr Command Center at, e.g. http://192.168.1.10:7373' });
+  const v = ['sonarr', 'radarr', 'whisparr'].includes(svc.type) ? 'v3' : 'v1';
+  const url = `${base}${hook.path}`;
+  try {
+    const existing = await serviceGet(svc, `api/${v}/notification`);
+    const mine = (existing || []).find((n) => n.implementation === 'Webhook' && ((n.fields || []).find((f) => f.name === 'url') || {}).value === url);
+    if (mine) return res.json({ ok: true, already: true });
+    const old = (existing || []).find((n) => n.implementation === 'Webhook' && /\/api\/hooks\//.test(String(((n.fields || []).find((f) => f.name === 'url') || {}).value || '')));
+    const body = arrWebhookNotification(await serviceGet(svc, `api/${v}/notification/schema`), url);
+    if (old) await serviceRequest(svc, `api/${v}/notification/${old.id}`, { method: 'PUT', body: { ...body, id: old.id } });
+    else await serviceRequest(svc, `api/${v}/notification`, { method: 'POST', body });
+    res.json({ ok: true, updated: !!old });
+  } catch (e) {
+    const msg = e.body && (Array.isArray(e.body) ? e.body.map((x) => x.errorMessage).join('; ') : e.body.message);
+    res.status(502).json({ error: msg || e.message });
+  }
 });
 
 app.get('/api/digest', async (req, res) => {
@@ -664,6 +763,77 @@ app.post('/api/config/service', express.json({ limit: '32kb' }), async (req, res
     res.status(500).json({ error: `Could not write config.json: ${err.message}` });
   }
 });
+
+// ---- Send an indexer result to SABnzbd or an *arr (Newznab indexer page).
+// The browser only has links with the indexer key redacted; the server puts
+// it back (indexer's own host only) and redacts replies again.
+const SEND_API = { sabnzbd: null, sonarr: 'v3', radarr: 'v3', whisparr: 'v3', lidarr: 'v1', readarr: 'v1', bindery: 'v1' };
+app.post('/api/indexer/:key/send', express.json({ limit: '16kb' }), async (req, res) => {
+  const idx = cfg.services[req.params.key];
+  const b = req.body || {};
+  const to = typeof b.to === 'string' ? cfg.services[b.to] : null;
+  if (!idx || idx.type !== 'indexer' || idx.enabled === false) return res.status(404).json({ error: 'Unknown indexer' });
+  if (!to || to.enabled === false || !(to.type in SEND_API) || !serviceAccess.allowed(seeing(req), b.to)) return res.status(404).json({ error: 'Unknown service' });
+  let release;
+  try { release = cleanRelease(b.release); release.downloadUrl = restoreIndexerLink(release.downloadUrl, idx); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+  try {
+    if (to.type === 'sabnzbd') {
+      const r = await serviceGet(to, `api?mode=addurl&name=${encodeURIComponent(release.downloadUrl)}&nzbname=${encodeURIComponent(release.title)}&output=json`);
+      if (r && r.status === false) return res.status(502).json({ error: scrub(String(r.error || 'SABnzbd refused it'), idx, to) });
+      return res.json({ ok: true });
+    }
+    const reply = await serviceRequest(to, `api/${SEND_API[to.type]}/release/push`, { method: 'POST', body: release });
+    res.json({ reply: scrub(reply, idx, to) });
+  } catch (e) {
+    const msg = e.body && (Array.isArray(e.body) ? e.body.map((x) => x && x.errorMessage).filter(Boolean).join('; ') : e.body.message);
+    res.status(502).json({ error: scrub(String(msg || e.message), idx, to) });
+  }
+});
+
+// ---- Setup wizard: find apps on the network, then check a key before saving.
+// The demo only looks at its own mock apps, never the real default ports.
+let mockPorts = null;
+app.get('/api/setup/networks', (req, res) => res.json({ subnets: cfg.mock ? [] : localSubnets(), demo: !!cfg.mock, canSave: !cfg.mock && configWritable() }));
+app.post('/api/setup/discover', express.json({ limit: '4kb' }), async (req, res) => {
+  const body = req.body || {};
+  let ports = DEFAULT_PORTS;
+  if (cfg.mock) {
+    if (!mockPorts) { const { MOCK_PORTS } = await import('./mock/mockServices.js'); mockPorts = Object.fromEntries(Object.keys(DEFAULT_PORTS).filter((t) => MOCK_PORTS[t]).map((t) => [t, [MOCK_PORTS[t]]])); }
+    ports = mockPorts;
+  }
+  try {
+    const out = await discover({ hosts: cleanHosts(body.hosts), subnet: !cfg.mock && body.subnet === true, ports, mockOnly: !!cfg.mock, existing: cfg.services, timeoutMs: body.subnet ? 700 : 1500, concurrency: body.subnet ? 128 : 48 });
+    res.json({ ...out, found: out.found.map((f) => ({ ...f, suggestedKey: f.existing || freeKey(f.type, Object.keys(cfg.services)) })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/setup/check', express.json({ limit: '8kb' }), async (req, res) => {
+  const b = req.body || {};
+  if (!ALLOWED_SERVICE_TYPES.includes(b.type)) return res.status(400).json({ error: 'Unknown service type' });
+  if (!isHttpUrl(String(b.baseUrl || ''))) return res.status(400).json({ error: 'Enter an http:// or https:// address' });
+  const svc = { type: b.type, baseUrl: String(b.baseUrl).replace(/\/+$/, ''), apiKey: String(b.apiKey || ''), username: b.username ? String(b.username) : undefined, password: b.password ? String(b.password) : undefined };
+  if (svc.type === 'plex') return res.json(await checkPlex(svc));
+  const r = await pingService(svc, `setup:${svc.type}:${svc.baseUrl}`).catch((e) => ({ ok: false, error: e.message }));
+  res.json({ ok: !!r.ok, version: r.version || null, error: r.ok ? null : (r.error || `HTTP ${r.status}`) });
+});
+
+// Plex has no keyed health check: /identity is public, and a token is
+// checked against the library list. With no token, the one captured at
+// "Sign in with Plex" is used. Redirects are refused so the token stays put.
+async function checkPlex(svc) {
+  const get = (p, token) => fetch(`${svc.baseUrl}${p}`, { redirect: 'error', signal: AbortSignal.timeout(6000), headers: { Accept: 'application/json', ...(token ? { 'X-Plex-Token': token } : {}) } });
+  try {
+    const id = await get('/identity');
+    const mc = id.ok ? ((await id.json().catch(() => null)) || {}).MediaContainer : null;
+    if (!mc || !mc.machineIdentifier) return { ok: false, version: null, error: 'That address doesn’t answer like a Plex server' };
+    if (svc.apiKey) {
+      const r = await get('/library/sections', svc.apiKey);
+      if (r.status === 401 || r.status === 403) return { ok: false, version: null, error: 'Plex refused that token' };
+      if (!r.ok) return { ok: false, version: null, error: `Plex answered HTTP ${r.status}` };
+    } else if (!plexAuth.enabled) return { ok: false, version: null, error: 'Paste your Plex token, or turn on Sign in with Plex so the server can use yours' };
+    return { ok: true, version: mc.version || null, error: null };
+  } catch (e) { return { ok: false, version: null, error: e.name === 'TimeoutError' ? 'No answer from that address' : e.message }; }
+}
 
 app.delete('/api/config/service/:key', async (req, res) => {
   if (cfg.mock) return res.status(400).json({ error: 'Services cannot be edited in demo mode' });
@@ -727,7 +897,7 @@ const server = app.listen(cfg.port, cfg.host, () => {
 statusCache.start();
 let poller = null;
 if (!process.env.NOTIFY_DISABLE) {
-  poller = startPoller(cfg, { intervalSeconds: Number(process.env.NOTIFY_POLL_SECONDS) || 60, actionsFor });
+  poller = startPoller(cfg, { intervalSeconds: Number(process.env.NOTIFY_POLL_SECONDS) || 60, actionsFor, pushFilter: pushTo });
 }
 
 // Automation scheduler (Queue Cleaner + Hunting). Ticks every minute; each job

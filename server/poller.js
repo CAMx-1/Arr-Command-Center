@@ -116,7 +116,9 @@ export async function pollOnce(cfg, opts = {}) {
       } catch { /* channel failures never block web push */ }
       if (!push.categoryEnabled(e.category)) { skipped += 1; continue; }
       try {
-        const r = await push.sendToAll(push.notification({ title: e.title, body: e.body, url: e.url, tag: e.id }));
+        // Event ids start with the service key ("sonarr:hist:12").
+        const filter = opts.pushFilter ? opts.pushFilter([String(e.id || '').split(':')[0]]) : undefined;
+        const r = await push.sendToAll(push.notification({ title: e.title, body: e.body, url: e.url, tag: e.id }), { filter });
         results.push({ id: e.id, ...r });
         pushed += 1;
       } catch (err) {
@@ -143,7 +145,7 @@ export function startPoller(cfg, opts = {}) {
     if (running) return; // avoid overlap on slow upstreams
     running = true;
     try {
-      const r = await pollOnce(cfg, { actionsFor: opts.actionsFor });
+      const r = await pollOnce(cfg, { actionsFor: opts.actionsFor, pushFilter: opts.pushFilter });
       if (r.pushed) console.log(`[poller] pushed ${r.pushed} notification(s) (${r.collected} events, ${r.fresh} new)`);
     } catch (e) {
       console.error('[poller] poll failed:', e.message);

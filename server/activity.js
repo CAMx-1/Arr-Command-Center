@@ -46,6 +46,12 @@ const APP_ROUTES = [
   [/^\/api\/links/, '', 'changed custom links'],
   [/^\/api\/digest/, '', 'changed or sent the digest'],
   [/^\/api\/bot/, '', 'changed chat bot settings'],
+  [/^\/api\/webhooks\/[^/]+\/install/, '', 'added a webhook to an app'],
+  [/^\/api\/indexer\/[^/]+\/send/, '', 'sent an indexer result to an app'],
+  [/^\/api\/account\/2fa\/confirm/, '', 'turned on two-factor sign-in'],
+  [/^\/api\/account\/2fa\/disable/, '', 'turned off two-factor sign-in'],
+  [/^\/api\/account\/sessions/, '', 'signed out a session'],
+  [/^\/api\/webhooks\/[^/]+\/rotate/, '', 'changed a webhook address'],
   [/^\/api\/activity/, 'DELETE', 'cleared the activity log'],
 ];
 export function describeApp(method, path) {

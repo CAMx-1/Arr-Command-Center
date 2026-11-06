@@ -255,6 +255,10 @@ export function classifyLocalPath(pathname) {
     || pathname.startsWith('/api/insights/')
     || pathname === '/api/activity'
     || pathname.startsWith('/api/backups/')
+    || pathname.startsWith('/api/webhooks')
+    || pathname.startsWith('/api/setup/')
+    || pathname.startsWith('/api/account')
+    || pathname.startsWith('/api/indexer/')
     || pathname.startsWith('/api/digest')
     || pathname.startsWith('/api/bot')
     || pathname === '/api/live' || pathname.startsWith('/api/live/')) return 'server-only';

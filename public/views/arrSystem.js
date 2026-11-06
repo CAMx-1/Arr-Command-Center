@@ -7,6 +7,8 @@ import { openTrashSync } from '../lib/trashUI.js';
 import { openCompare, sameTypeInstances } from '../lib/compareUI.js';
 import { openFileHealth } from '../lib/fileHealthUI.js';
 import { openInsights } from '../lib/insightsUI.js';
+import { openTidyUp } from '../lib/tidyUpUI.js';
+import { openCollections } from '../lib/collectionsUI.js';
 import { releaseSection, delaySection } from '../lib/releaseDelay.js';
 import { isLocalMode } from '../lib/connections.js';
 import { openPathFix } from '../lib/pathFix.js';
@@ -62,6 +64,8 @@ export async function tabSystem(root, arr, ctx, kind) {
         h('button', { class: 'btn sm', title: 'Find duplicate entries and choose which to delete', onclick: () => openDuplicates(arr, ctx, kind) }, '🔍 Find duplicates'),
         h('button', { class: 'btn sm', title: 'Find files that look broken or mislabelled', onclick: () => openFileHealth(arr, ctx, kind) }, '🩺 Check files'),
         h('button', { class: 'btn sm', title: 'Where the space goes, largest titles and growth', onclick: () => openInsights(arr, ctx, kind) }, '📊 Insights'),
+        h('button', { class: 'btn sm', title: 'Entries that waste searches or clutter the library, with bulk fixes', onclick: () => openTidyUp(arr, ctx, kind) }, 'Tidy up'),
+        kind === 'movie' ? h('button', { class: 'btn sm', title: 'Trilogies and franchises you’ve started but not finished', onclick: () => openCollections(arr, ctx) }, 'Collections') : null,
         sameTypeInstances(ctx).length ? h('button', { class: 'btn sm', title: 'Compare profiles, formats, naming and more with another instance', onclick: () => openCompare(arr, ctx) }, '⇄ Compare with…') : null,
       ),
       h('div', { class: 'section-title' }, 'Health'),

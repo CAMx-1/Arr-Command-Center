@@ -7,7 +7,7 @@
 import { autoRefresh } from './ui.js';
 import { isLocalMode } from './connections.js';
 
-export const LIVE_TYPES = new Set(['sonarr', 'radarr', 'whisparr', 'lidarr', 'readarr', 'sabnzbd', 'tautulli', 'jellyfin', 'emby', 'qbittorrent', 'transmission', 'deluge', 'flood', 'nzbget']);
+export const LIVE_TYPES = new Set(['sonarr', 'radarr', 'whisparr', 'lidarr', 'readarr', 'sabnzbd', 'tautulli', 'overseerr', 'jellyfin', 'emby', 'qbittorrent', 'transmission', 'deluge', 'flood', 'nzbget']);
 const SAFETY_POLL_MS = 60000;
 const MIN_GAP_MS = 750;
 

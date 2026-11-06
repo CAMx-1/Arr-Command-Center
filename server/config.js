@@ -78,6 +78,13 @@ async function atomicUpdateConfig(mutate) {
   });
 }
 
+// Whether config.json can be saved from the UI: the file and its folder must
+// be writable (saving writes a temp file next to it, then renames it). The
+// Docker setup mounts it read-only, so there it can't.
+export function configWritable() {
+  try { fs.accessSync(CONFIG_PATH, fs.constants.W_OK); fs.accessSync(path.dirname(CONFIG_PATH), fs.constants.W_OK); return true; } catch { return false; }
+}
+
 // Persist a single service into config.json (add or update) and return it.
 export async function saveServiceToDisk(key, service) {
   await atomicUpdateConfig((disk) => { disk.services[key] = service; });
@@ -309,6 +316,7 @@ function buildMockConfig() {
       pulsarr: mk('pulsarr', 'Pulsarr', 'pulsarr', MOCK_PORTS.pulsarr),
       unpackerr: mk('unpackerr', 'Unpackerr', 'unpackerr', MOCK_PORTS.unpackerr),
       speedtest: mk('speedtest', 'Speedtest Tracker', 'speedtest', MOCK_PORTS.speedtest),
+      plex: { ...mk('plex', 'Plex', 'plex', MOCK_PORTS.plex), cloudflareAccess: undefined },
       whisparr: mk('whisparr', 'Whisparr', 'whisparr', MOCK_PORTS.whisparr),
       unraid: mk('unraid', 'Unraid', 'unraid', MOCK_PORTS.unraid),
       // Real TrueNAS needs https (it revokes keys sent over http); the demo

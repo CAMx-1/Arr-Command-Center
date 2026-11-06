@@ -69,6 +69,8 @@ export function settingsLayout(sections, { params = {}, setParams = () => {} } =
     list.appendChild(wrap);
     const setValue = (v) => { s.summaryText = v; mount(value, ...(v == null ? [] : [typeof v === 'string' ? document.createTextNode(v) : v])); };
     if (typeof s.summary === 'function') { setValue(''); Promise.resolve().then(s.summary).then(setValue).catch(() => setValue('')); } else setValue(s.summary);
+    // A card can ask for its row's summary to be read again after a change.
+    if (typeof s.summary === 'function') body.addEventListener('sx:refresh', () => { Promise.resolve().then(s.summary).then(setValue).catch(() => {}); });
     const setBadge = (n) => { const v = Number(n) || 0; badges.set(s.id, v); badge.textContent = v ? `${v} ${s.badgeLabel || ''}`.trim() : ''; badge.hidden = !v; paintBadges(); };
     if (typeof s.badge === 'function') Promise.resolve().then(s.badge).then(setBadge).catch(() => setBadge(0)); else setBadge(s.badge);
   }

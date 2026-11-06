@@ -4,6 +4,9 @@ import { activityCard } from '../lib/activityUI.js';
 import { digestCard } from '../lib/digestUI.js';
 import { botCard } from '../lib/botUI.js';
 import { settingsLayout } from '../lib/settingsLayout.js';
+import { webhooksCard } from '../lib/webhooksUI.js';
+import { openSetupWizard } from '../lib/setupWizard.js';
+import { accountSecurityCard } from '../lib/accountSecurity.js';
 import { clearPersistedCache } from '../lib/cache.js';
 import { h, mount, clear, spinner, svcIcon, confirmModal, openModal, closeModal, toast, tabs, fmtBytes } from '../lib/ui.js';
 import { api as apiClient } from '../lib/api.js';
@@ -168,6 +171,7 @@ export async function renderSettings(root, ctx) {
   const servicesNodes = [
     h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', margin: '0 0 12px' } },
       h('div', { class: 'dim', style: { fontSize: '13px', flex: '1' } }, (localMode ? 'Manage local connections under “Connection”. Drag a service card to reorder it, or Hide it from the sidebar and Home.' : 'Drag a service card to reorder it, or Hide it from the sidebar and Home.')),
+      (localMode || !admin) ? null : h('button', { class: 'btn sm hex-btn', onclick: () => openSetupWizard(ctx) }, 'Find services'),
       (cfg.mock || localMode || !admin) ? null : h('button', { class: 'btn sm primary hex-btn', onclick: () => openServiceForm(root, ctx, null, null) }, '+ Add service')),
     h('div', { class: 'grid cols-2' }, ...serviceCards),
   ];
@@ -176,6 +180,7 @@ export async function renderSettings(root, ctx) {
   // and the existing card(s) as its body. Old anchor ids stay as aliases.
   const sections = [
     { id: 'appearance', tab: 'you', title: 'Appearance', nodes: [appearanceCard(root, ctx)], summary: `${cap(getTheme())} · ${cap(getAccent())} · ${cap(getDensity())}`, keywords: ['theme', 'dark', 'accent', 'colour', 'color', 'density', 'view mode'], aliases: ['settings-appearance'] },
+    localMode ? null : { id: 'security', tab: 'you', title: 'Sign-in & security', nodes: [accountSecurityCard()], summary: () => fetchJson('/api/account').then((d) => (!d.plexAuth ? '' : `${d.twoFactor.enabled ? 'Two-factor on' : d.twoFactor.canEnroll ? 'Two-factor off' : ''}${d.twoFactor.canEnroll ? ' · ' : ''}${d.sessions.length} signed in`)), keywords: ['2fa', 'two-factor', 'totp', 'authenticator', 'sessions', 'sign out', 'devices', 'security'] },
     { id: 'favorites', tab: 'you', title: 'Favorites & navigation', nodes: [favoriteNavigationCard(ctx)], summary: pinned ? `${pinned} in the bottom bar` : '', keywords: ['bottom bar', 'sidebar', 'pin'], aliases: ['settings-favorites'] },
     { id: 'quick-add', tab: 'you', title: 'Quick Add', nodes: [quickAddSettingsCard(state)], summary: arrCount ? `Defaults for ${arrCount} ${arrCount === 1 ? 'app' : 'apps'}` : '', keywords: ['add', 'profile', 'root folder', 'monitor'], aliases: ['settings-quick-add'] },
     { id: 'overview', tab: 'you', title: 'Overview layout', nodes: [dashboardSettingsCard(ctx)], summary: 'Home widgets', keywords: ['home', 'widgets', 'dashboard', 'workspace'] },
@@ -188,6 +193,7 @@ export async function renderSettings(root, ctx) {
 
     { id: 'services', tab: 'services', title: 'Services', nodes: servicesNodes, summary: `${state.services.length} connected`, badge: offline, badgeLabel: 'offline', keywords: ['api key', 'url', 'sonarr', 'radarr', 'add service', 'hide'], aliases: ['settings-services'] },
     { id: 'connection', tab: 'services', title: 'Connection', nodes: [connectionModeCard(root, ctx)], summary: localMode ? 'Local only' : 'Through the server', keywords: ['local', 'server', 'mode', 'fallback'], aliases: ['settings-connection'] },
+    (!localMode && admin) ? { id: 'webhooks', tab: 'services', title: 'Instant updates (webhooks)', nodes: [webhooksCard()], summary: () => fetchJson('/api/webhooks').then((d) => { const on = d.hooks.filter((x) => x.lastAt).length; return d.hooks.length ? `${on} of ${d.hooks.length} apps sending` : ''; }), keywords: ['webhook', 'instant', 'connect', 'push'] } : null,
     admin ? { id: 'links', tab: 'services', title: 'Custom links', nodes: [localMode ? serverOnlyCard('Custom Links') : h('div', { class: 'card', id: 'links-admin' }, h('div', { class: 'dim' }, 'Loading…'))], summary: '', keywords: ['bookmarks', 'organizr'] } : null,
 
     admin ? { id: 'automation', tab: 'automation', title: 'Automation', nodes: [localMode ? serverOnlyCard('Automation') : h('div', { class: 'card', id: 'automation-panel' }, h('div', { class: 'dim' }, 'Loading…'))], summary: 'Queue cleaner and hunting', keywords: ['queue cleaner', 'hunt', 'stalled', 'missing'] } : null,

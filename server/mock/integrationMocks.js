@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 
 export const INTEGRATION_MOCK_PORTS = {
-  truenas: 16443, unraid: 18088, portainer: 19443, glances: 16120, pihole: 18053, adguard: 13000, syncthing: 18384, navidrome: 14533, pulsarr: 13003, whisparr: 16969, unpackerr: 15656, speedtest: 18765,
+  truenas: 16443, unraid: 18088, portainer: 19443, glances: 16120, pihole: 18053, adguard: 13000, syncthing: 18384, navidrome: 14533, pulsarr: 13003, whisparr: 16969, unpackerr: 15656, speedtest: 18765, plex: 32499,
 };
 export const MOCK_KEY = 'MOCK_API_KEY';
 const basic = (req) => {
@@ -426,5 +426,53 @@ export function makeSpeedtest({ now = Date.now() } = {}) {
   });
   app.get('/api/v1/stats', (req, res) => { const d = done(); const avg = (k) => d.reduce((s, r) => s + r[k], 0) / d.length; res.json({ data: { total_results: results.length, download: { avg: avg('download') }, upload: { avg: avg('upload') }, ping: { avg: avg('ping') } } }); });
   app.post('/api/v1/speedtests/run', (req, res) => { const r = { id: results.length + 1, service: 'ookla', status: 'started', scheduled: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }; res.status(201).json({ data: r, message: 'Speedtest added to the queue.' }); });
+  return app;
+}
+
+// ---------------------------------------------------------- Plex Media Server
+// Library sections, items with Guid ids and file paths, Fix Match search and
+// match, and metadata refresh. 1917 and Foundation start matched to the wrong
+// title, for the "wrong matches" demo.
+export function makePlex() {
+  const app = express();
+  app.use((req, res, next) => (req.path === '/identity' || req.headers['x-plex-token'] === MOCK_KEY || req.query['X-Plex-Token'] === MOCK_KEY ? next() : res.status(401).send('Unauthorized')));
+  const mc = (o) => ({ MediaContainer: o });
+  const guids = (tmdb, tvdb, imdb) => [tmdb && { id: `tmdb://${tmdb}` }, tvdb && { id: `tvdb://${tvdb}` }, imdb && { id: `imdb://${imdb}` }].filter(Boolean);
+  const items = {
+    1: [
+      { ratingKey: '11', type: 'movie', title: 'Dune: Part Two', year: 2024, Guid: guids(693134), Media: [{ Part: [{ file: 'C:\\Media\\Movies\\Dune Part Two (2024)\\Dune.Part.Two.mkv' }] }] },
+      { ratingKey: '15', type: 'movie', title: '1917', year: 1917, Guid: guids(41372), Media: [{ Part: [{ file: 'C:\\Media\\Movies\\1917 (2019)\\1917.mkv' }] }] },
+      { ratingKey: '10', type: 'movie', title: 'Oppenheimer', year: 2023, Guid: guids(872585), Media: [{ Part: [{ file: 'C:\\Media\\Movies2\\Oppenheimer (2023)\\Oppenheimer.2023.1080p.mkv' }] }] },
+    ],
+    2: [
+      { ratingKey: '20', type: 'show', title: 'Severance', year: 2022, Guid: guids(95396, 371980), Location: [{ path: 'C:\\Media\\TV\\Severance' }] },
+      { ratingKey: '30', type: 'show', title: 'Foundation', year: 1951, Guid: guids(null, 79420), Location: [{ path: 'C:\\Media\\TV\\Foundation' }] },
+      { ratingKey: '40', type: 'show', title: 'The Bear', year: 2022, Guid: guids(136315, 388477), Location: [{ path: 'C:\\Media\\TV\\The Bear' }] },
+    ],
+  };
+  const all = () => [...items[1], ...items[2]];
+  const find = (rk) => all().find((x) => x.ratingKey === String(rk));
+  const CANDIDATES = {
+    15: [{ guid: 'plex://movie/1917-2019', name: '1917', year: 2019, score: 100, tmdb: 530915 }, { guid: 'plex://movie/1917-1917', name: '1917', year: 1917, score: 82, tmdb: 41372 }],
+    30: [{ guid: 'plex://show/foundation-2021', name: 'Foundation', year: 2021, score: 98, tvdb: 358711 }, { guid: 'plex://show/foundation-1951', name: 'Foundation', year: 1951, score: 80, tvdb: 79420 }],
+  };
+  app.get('/library/sections', (req, res) => res.json(mc({ Directory: [{ key: '1', type: 'movie', title: 'Movies' }, { key: '2', type: 'show', title: 'TV Shows' }] })));
+  app.get('/library/sections/:id/all', (req, res) => {
+    if (req.query.duplicate) return res.json(mc({ Metadata: [] }));
+    res.json(mc({ Metadata: (items[req.params.id] || []).map((x) => (req.query.includeGuids === '1' ? x : { ...x, Guid: undefined })) }));
+  });
+  app.get('/library/metadata/:rk/matches', (req, res) => {
+    const it = find(req.params.rk); if (!it) return res.status(404).send('Not found');
+    res.json(mc({ SearchResult: (CANDIDATES[req.params.rk] || [{ guid: `plex://${it.type}/${it.ratingKey}`, name: it.title, year: it.year, score: 100 }]).map(({ tmdb, tvdb, ...c }) => c) }));
+  });
+  app.put('/library/metadata/:rk/match', (req, res) => {
+    const it = find(req.params.rk); if (!it) return res.status(404).send('Not found');
+    const c = (CANDIDATES[req.params.rk] || []).find((x) => x.guid === req.query.guid);
+    if (!c) return res.status(400).send('Unknown guid');
+    it.title = req.query.name || c.name; it.year = Number(req.query.year) || c.year; it.Guid = guids(c.tmdb, c.tvdb);
+    res.send('');
+  });
+  app.put('/library/metadata/:rk/refresh', (req, res) => (find(req.params.rk) ? res.send('') : res.status(404).send('Not found')));
+  app.get('/identity', (req, res) => res.json(mc({ machineIdentifier: 'mock-plex', version: '1.41.0' })));
   return app;
 }

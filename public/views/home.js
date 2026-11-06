@@ -18,6 +18,7 @@ import { getSysmonPrefs, diskVisible } from '../lib/systemMonitor.js';
 import { persistentSWR, cachedGet } from '../lib/cache.js';
 import { seerrRequestBadge } from '../lib/seerrStatus.js';
 import { createBookServiceClient } from '../lib/bookServices.js';
+import { setupNeeded, openSetupWizard } from '../lib/setupWizard.js';
 import { downloadClientFor } from '../lib/downloadClients.js';
 import { autobrrClient, maintainerrClient, tdarrClient, absClient, normalizeTdarrWorkers } from '../lib/extraServices.js';
 import { mediaServerFor } from '../lib/mediaServers.js';
@@ -55,6 +56,16 @@ export async function renderHome(root, ctx) {
   const dashboard = activeDashboard(dashboards);
   ctx.setActions(h('span', { class: 'dim', style: { fontSize: '13px' } }, state.config.mock ? 'Showing mock data' : 'Live'));
 
+  if (setupNeeded(state)) {
+    mount(root, h('div', { class: 'card', style: { maxWidth: '560px', margin: '40px auto', textAlign: 'center' } },
+      h('h2', { style: { margin: '0 0 8px' } }, 'Welcome to Arr Command Center'),
+      h('p', { class: 'dim' }, 'No services are set up yet. Let it look for Sonarr, Radarr, Seerr, Plex and the rest on your network, then paste each API key.'),
+      h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '14px', flexWrap: 'wrap' } },
+        h('button', { class: 'btn primary', onclick: () => openSetupWizard(ctx, { firstRun: true }) }, 'Find my services'),
+        h('a', { class: 'btn', href: '#/settings?tab=services&open=services' }, 'Add one by hand'))));
+    try { if (!sessionStorage.getItem('acc:setup-shown')) { sessionStorage.setItem('acc:setup-shown', '1'); openSetupWizard(ctx, { firstRun: true }); } } catch { /* storage off */ }
+    return;
+  }
   mount(root, spinner());
   const status = state.status || {};
   const wantSys = getSysmonPrefs().enabled;

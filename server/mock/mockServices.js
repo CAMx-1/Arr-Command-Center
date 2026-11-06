@@ -35,7 +35,7 @@ export const MOCK_PORTS = {
 };
 
 import { createMockFs, sonarrDemoFs, radarrDemoFs, lidarrDemoFs } from './mockFs.js';
-import { INTEGRATION_MOCK_PORTS, makePortainer, makeGlances, makePihole, makeAdguard, makeSyncthing, makeNavidrome, makePulsarr, makeUnraid, makeTruenasServer, makeUnpackerr, makeSpeedtest } from './integrationMocks.js';
+import { INTEGRATION_MOCK_PORTS, makePortainer, makeGlances, makePihole, makeAdguard, makeSyncthing, makeNavidrome, makePulsarr, makeUnraid, makeTruenasServer, makeUnpackerr, makeSpeedtest, makePlex } from './integrationMocks.js';
 Object.assign(MOCK_PORTS, INTEGRATION_MOCK_PORTS);
 
 const cfSeen = {}; // service -> last seen CF headers
@@ -293,6 +293,29 @@ function mountBackupMock(app, appName, v) {
     }
     next();
   });
+  // Connect → notifications (only the Webhook type is modelled).
+  const notifications = [];
+  app.locals.notifications = notifications;
+  const WEBHOOK_SCHEMA = { implementation: 'Webhook', implementationName: 'Webhook', configContract: 'WebhookSettings', name: '', fields: [{ name: 'url', value: '' }, { name: 'method', value: 1 }, { name: 'username', value: '' }, { name: 'password', value: '' }],
+    onGrab: false, onDownload: false, onUpgrade: false, onHealthIssue: false, onApplicationUpdate: false, supportsOnGrab: true, supportsOnDownload: true, supportsOnUpgrade: true, supportsOnHealthIssue: true, supportsOnApplicationUpdate: false, presets: [] };
+  app.get(`/api/${v}/notification`, (req, res) => res.json(notifications));
+  app.get(`/api/${v}/notification/schema`, (req, res) => res.json([WEBHOOK_SCHEMA, { implementation: 'Discord', fields: [] }]));
+  app.post(`/api/${v}/notification`, (req, res) => {
+    const url = ((req.body.fields || []).find((f) => f.name === 'url') || {}).value;
+    if (!/^https?:\/\//.test(url || '')) return res.status(400).json([{ propertyName: 'Url', errorMessage: "'Url' must be a valid URL" }]);
+    const n = { ...req.body, id: notifications.length + 1 }; notifications.push(n); res.status(201).json(n);
+  });
+  app.put(`/api/${v}/notification/:id`, (req, res) => { const i = notifications.findIndex((n) => n.id === Number(req.params.id)); if (i < 0) return res.status(404).json({ message: 'NotFound' }); notifications[i] = { ...req.body, id: notifications[i].id }; res.status(202).json(notifications[i]); });
+  // release/push: approve unless the title looks wrong for this app.
+  const pushed = [];
+  app.locals.pushed = pushed;
+  app.post(`/api/${v}/release/push`, (req, res) => {
+    const b = req.body || {};
+    if (!b.title || !b.downloadUrl) return res.status(400).json([{ propertyName: 'Title', errorMessage: "'Title' must not be empty." }]);
+    pushed.push(b);
+    const unknown = /unknown|zzz/i.test(b.title);
+    res.json([{ guid: `push-${pushed.length}`, title: b.title, approved: !unknown, rejections: unknown ? [{ reason: 'Unknown Series', type: 'permanent' }] : [], ...(appName === 'radarr' ? { movieTitle: b.title.split(/[.(\[]/)[0].trim() } : { seriesTitle: b.title.split(/[.(\[]/)[0].trim() }) }]);
+  });
   app.get('/backup/:type/:name', (req, res) => {
     if (!authed(req, res)) return;
     const b = backups.find((x) => x.type === req.params.type && x.name === req.params.name);
@@ -407,6 +430,8 @@ function makeSonarr(opts = {}) {
     for (const s of series) {
       if (!ids.includes(s.id)) continue;
       if (req.body.monitored !== undefined) s.monitored = req.body.monitored;
+      if (req.body.qualityProfileId !== undefined) s.qualityProfileId = req.body.qualityProfileId;
+      if (Array.isArray(req.body.tags) && req.body.applyTags) { const cur = new Set(s.tags || []); if (req.body.applyTags === 'add') req.body.tags.forEach((t) => cur.add(t)); else if (req.body.applyTags === 'remove') req.body.tags.forEach((t) => cur.delete(t)); else { cur.clear(); req.body.tags.forEach((t) => cur.add(t)); } s.tags = [...cur]; }
       if (req.body.rootFolderPath) { const root = String(req.body.rootFolderPath).replace(/[\\/]+$/, ''); s.rootFolderPath = req.body.rootFolderPath; s.path = `${root}/${s.title}`; }
     }
     res.json(series.filter((s) => ids.includes(s.id)));
@@ -489,6 +514,16 @@ const MOCK_CUSTOM_FORMATS = [
   { id: 3, name: 'Bad release group', includeCustomFormatWhenRenaming: false, specifications: [{ name: 'Groups', implementation: 'ReleaseGroupSpecification', negate: false, required: false, fields: [{ name: 'value', value: '^(YIFY|aXXo)$' }] }] },
 ];
 function mountArrLibraryExtras(app, kind, state) {
+  // Tidy-up demo cases (main instance only): every item gets a profile; The
+  // Bear has ended with every episode, Foundation's profile was deleted.
+  for (const it of state.getItems() || []) if (it.qualityProfileId == null) it.qualityProfileId = 1;
+  if (state.variant !== 'b' && kind === 'series') {
+    const bear = (state.getItems() || []).find((x) => x.id === 2); if (bear) bear.status = 'ended';
+    const fnd = (state.getItems() || []).find((x) => x.id === 3); if (fnd) fnd.qualityProfileId = 99;
+  }
+  if (state.variant !== 'b' && kind === 'movie') {
+    const fur = (state.getItems() || []).find((x) => x.id === 3); if (fur) { fur.inCinemas = '2024-05-24'; fur.digitalRelease = '2024-06-25'; }
+  }
   const idKey = kind === 'series' ? 'seriesIds' : 'movieIds';
   app.get('/api/v3/tag/detail', (req, res) => res.json(state.getTags().map((t) => ({
     ...t, delayProfileIds: [], importListIds: [], notificationIds: [], restrictionIds: [], indexerIds: [], downloadClientIds: [], autoTagIds: [],
@@ -668,10 +703,36 @@ function makeRadarr(opts = {}) {
   ] }));
   app.get('/api/v3/queue', (req, res) => res.json({ page: 1, pageSize: 20, totalRecords: queue.length, records: queue }));
   app.delete('/api/v3/queue/:id', (req, res) => { queue = queue.filter(q => q.id !== Number(req.params.id)); res.json({}); });
+  // Collections (Radarr v4.2+): isExisting comes from the library.
+  const COLLECTIONS = [
+    { id: 1, title: 'Dune Collection', tmdbId: 726871, movies: [
+      { tmdbId: 438631, title: 'Dune', year: 2021, status: 'released', images: [{ coverType: 'poster', remoteUrl: 'https://image.tmdb.org/t/p/w200/d5NXSklXo0qyIYkgV94XAgMIckC.jpg' }] },
+      { tmdbId: 693134, title: 'Dune: Part Two', year: 2024, status: 'released', images: [] },
+      { tmdbId: 1170608, title: 'Dune: Part Three', year: 2026, status: 'announced', images: [] },
+    ] },
+    { id: 2, title: 'Mad Max Collection', tmdbId: 8945, movies: [
+      { tmdbId: 9659, title: 'Mad Max', year: 1979, status: 'released', images: [] },
+      { tmdbId: 8810, title: 'Mad Max 2', year: 1981, status: 'released', images: [] },
+      { tmdbId: 9355, title: 'Mad Max Beyond Thunderdome', year: 1985, status: 'released', images: [] },
+      { tmdbId: 76341, title: 'Mad Max: Fury Road', year: 2015, status: 'released', images: [] },
+      { tmdbId: 786892, title: 'Furiosa: A Mad Max Saga', year: 2024, status: 'released', images: [] },
+    ], excluded: [9355] },
+    { id: 3, title: 'Gladiator Collection', tmdbId: 1069584, movies: [
+      { tmdbId: 98, title: 'Gladiator', year: 2000, status: 'released', images: [] },
+      { tmdbId: 558449, title: 'Gladiator II', year: 2024, status: 'released', images: [] },
+    ] },
+  ];
+  app.get('/api/v3/collection', (req, res) => {
+    const have = new Set(movies.map((m) => m.tmdbId));
+    res.json(COLLECTIONS.map(({ excluded = [], ...c }) => {
+      const ms = c.movies.map((m) => ({ ...m, isExisting: have.has(m.tmdbId), isExcluded: excluded.includes(m.tmdbId) }));
+      return { ...c, monitored: false, qualityProfileId: 1, rootFolderPath: '', movies: ms, missingMovies: ms.filter((m) => !m.isExisting && !m.isExcluded).length };
+    }));
+  });
   app.get('/api/v3/movie/lookup', (req, res) => {
     const term = (req.query.term || '').toString();
     const tmdb = /^tmdb:(\d+)$/.exec(term);
-    if (tmdb) return res.json([{ title: 'The Wild Robot', year: 2024, tmdbId: Number(tmdb[1]), status: 'released', overview: 'A robot learns to survive in the wilderness.', studio: 'DreamWorks', images: [] }]);
+    if (tmdb) { const known = COLLECTIONS.flatMap((c) => c.movies).find((m) => m.tmdbId === Number(tmdb[1])); return res.json([known ? { ...known, titleSlug: String(known.tmdbId), overview: '' } : { title: 'The Wild Robot', year: 2024, tmdbId: Number(tmdb[1]), status: 'released', overview: 'A robot learns to survive in the wilderness.', studio: 'DreamWorks', images: [] }]); }
     res.json([
       { title: `${term || 'Gladiator II'}`, year: 2024, tmdbId: 558449, status: 'released', overview: 'Years after Maximus, Lucius must fight for Rome.', studio: 'Paramount', images: [] },
       { title: `${term || 'Gladiator'}`, year: 2000, tmdbId: 98, status: 'released', overview: 'A betrayed Roman general seeks revenge.', studio: 'DreamWorks', images: [] },
@@ -686,6 +747,8 @@ function makeRadarr(opts = {}) {
     for (const m of movies) {
       if (!ids.includes(m.id)) continue;
       if (req.body.monitored !== undefined) m.monitored = req.body.monitored;
+      if (req.body.qualityProfileId !== undefined) m.qualityProfileId = req.body.qualityProfileId;
+      if (Array.isArray(req.body.tags) && req.body.applyTags) { const cur = new Set(m.tags || []); if (req.body.applyTags === 'add') req.body.tags.forEach((t) => cur.add(t)); else if (req.body.applyTags === 'remove') req.body.tags.forEach((t) => cur.delete(t)); else { cur.clear(); req.body.tags.forEach((t) => cur.add(t)); } m.tags = [...cur]; }
       if (req.body.rootFolderPath) { const root = String(req.body.rootFolderPath).replace(/[\\/]+$/, ''); m.rootFolderPath = req.body.rootFolderPath; m.path = `${root}/${m.title} (${m.year})`; }
     }
     res.json(movies.filter((m) => ids.includes(m.id)));
@@ -976,9 +1039,40 @@ function makeTautulli() {
         { full_title: 'Foundation - S01E01', grandparent_title: 'Foundation', user: 'jamie', friendly_name: 'jamie', user_id: 4004, rating_key: 31, grandparent_rating_key: 30, player: 'Apple TV', media_type: 'episode', date: ago(300), watched_status: 1, percent_complete: 100, duration: 3600 },
         { full_title: 'Severance - S02E01', user: 'guest', friendly_name: 'Guest', user_id: 5005, rating_key: 21, grandparent_rating_key: 20, player: 'Chrome', media_type: 'episode', grandparent_thumb: '/library/metadata/11/thumb/11', date: Math.floor((Date.now() - 86400000) / 1000), watched_status: 1, percent_complete: 96, duration: 3600 },
       ];
+      data.forEach((d, i) => { d.id = d.id || i + 1; d.transcode_decision = d.transcode_decision || 'direct play'; });
+      // Plays that transcode, for the Transcodes tab (users chosen so the
+      // "never watched" demo is unchanged).
+      const tx = (id, o) => ({ id, user: 'cameron', friendly_name: 'cameron', user_id: 1001, player: 'Chrome', platform: 'Chrome', percent_complete: 100, watched_status: 1, date: ago(id % 20), transcode_decision: 'transcode', ...o });
+      data.push(
+        tx(101, { full_title: 'Dune: Part Two', title: 'Dune: Part Two', year: 2024, media_type: 'movie', rating_key: 12 }),
+        tx(102, { full_title: 'Dune: Part Two', title: 'Dune: Part Two', year: 2024, media_type: 'movie', rating_key: 12, player: 'Roku', platform: 'Roku' }),
+        tx(103, { full_title: 'Dune: Part Two', title: 'Dune: Part Two', year: 2024, media_type: 'movie', rating_key: 12 }),
+        tx(104, { full_title: 'Oppenheimer', title: 'Oppenheimer', year: 2023, media_type: 'movie', rating_key: 10, player: 'Apple TV', platform: 'tvOS' }),
+        tx(105, { full_title: 'Oppenheimer', title: 'Oppenheimer', year: 2023, media_type: 'movie', rating_key: 10, player: 'Apple TV', platform: 'tvOS' }),
+        tx(106, { full_title: 'Severance - S02E02', grandparent_title: 'Severance', media_type: 'episode', rating_key: 22, grandparent_rating_key: 20, player: 'Android', platform: 'Android', user: 'alex', friendly_name: 'alex', user_id: 3003 }),
+        tx(107, { full_title: 'Severance - S02E03', grandparent_title: 'Severance', media_type: 'episode', rating_key: 23, grandparent_rating_key: 20, player: 'Android', platform: 'Android', user: 'alex', friendly_name: 'alex', user_id: 3003 }),
+        tx(108, { full_title: 'The Bear - S03E02', grandparent_title: 'The Bear', media_type: 'episode', rating_key: 42, grandparent_rating_key: 40 }),
+        { ...tx(109, { full_title: 'The Bear - S03E03', grandparent_title: 'The Bear', media_type: 'episode', rating_key: 43, grandparent_rating_key: 40, player: 'Apple TV', platform: 'tvOS' }), transcode_decision: 'direct play' },
+      );
+      if (req.query.after) data = data.filter((d) => d.date * 1000 >= Date.parse(req.query.after));
       if (req.query.rating_key) data = data.filter((d) => String(d.rating_key) === String(req.query.rating_key));
       if (req.query.grandparent_rating_key) data = data.filter((d) => String(d.grandparent_rating_key) === String(req.query.grandparent_rating_key));
       return res.json(wrap({ recordsFiltered: data.length, recordsTotal: data.length, data }));
+    }
+    if (cmd === 'get_stream_data') {
+      const base = { container: 'mkv', stream_container: 'mkv', video_codec: 'h264', stream_video_codec: 'h264', audio_codec: 'eac3', stream_audio_codec: 'eac3', video_decision: 'copy', audio_decision: 'copy', subtitle_decision: '', bitrate: 12000, stream_bitrate: 12000, video_full_resolution: '1080p', stream_video_full_resolution: '1080p', quality_profile: 'Original' };
+      const rows = {
+        101: { video_codec: 'hevc', stream_video_codec: 'h264', video_decision: 'transcode', bitrate: 32000, stream_bitrate: 20000, video_full_resolution: '4k', stream_video_full_resolution: '1080p', player: 'Chrome' },
+        102: { video_codec: 'hevc', stream_video_codec: 'h264', video_decision: 'transcode', bitrate: 32000, stream_bitrate: 8000, quality_profile: '8 Mbps 1080p', player: 'Roku' },
+        103: { video_codec: 'hevc', stream_video_codec: 'h264', video_decision: 'transcode', bitrate: 32000, stream_bitrate: 20000, player: 'Chrome' },
+        104: { subtitle_decision: 'burn', subtitle_codec: 'pgs', stream_subtitle_codec: '', video_decision: 'transcode', player: 'Apple TV' },
+        105: { subtitle_decision: 'burn', subtitle_codec: 'pgs', stream_subtitle_codec: '', video_decision: 'transcode', player: 'Apple TV' },
+        106: { video_decision: 'transcode', bitrate: 18000, stream_bitrate: 4000, quality_profile: '4 Mbps 720p', stream_video_full_resolution: '720p', player: 'Android' },
+        107: { video_decision: 'transcode', bitrate: 18000, stream_bitrate: 4000, quality_profile: '4 Mbps 720p', stream_video_full_resolution: '720p', player: 'Android' },
+        108: { audio_codec: 'truehd', stream_audio_codec: 'aac', audio_decision: 'transcode', player: 'Chrome' },
+      };
+      const r = rows[Number(req.query.row_id)];
+      return r ? res.json(wrap({ ...base, ...r })) : res.json({ response: { result: 'error', message: 'Invalid row_id', data: {} } });
     }
     if (cmd === 'get_home_stats') {
       const days = Number(req.query.time_range) || 30;
@@ -1225,6 +1319,16 @@ function makeBazarr() {
     if (lang) fetchEpisodeSub(item, lang);
     res.status(204).end();
   });
+  app.patch('/api/movies/subtitles', (req, res) => {
+    const { radarrid, language, forced, hi } = req.query;
+    if ([radarrid, language, forced, hi].some((v) => v === undefined || v === '')) return res.status(400).json({ message: 'radarrid, language, forced and hi are required' });
+    const item = wantedMovies.find((w) => w.radarrId === Number(radarrid));
+    if (!item) return res.status(404).send('Movie not found');
+    const lang = (item.missing_subtitles || []).find((x) => sameLang(x, { code2: language, forced: /^true$/i.test(forced), hi: /^true$/i.test(hi) }));
+    if (lang) item.missing_subtitles = item.missing_subtitles.filter((x) => x !== lang);
+    if (!item.missing_subtitles.length) wantedMovies.splice(wantedMovies.indexOf(item), 1);
+    res.status(204).end();
+  });
   app.patch('/api/series', (req, res) => {
     const { action } = req.query;
     if (action === 'search-missing') fetchSeriesSubs(Number(req.query.seriesid));
@@ -1308,6 +1412,11 @@ function makeQbittorrent() {
     { hash: 'a1a1a1', name: 'ubuntu-24.04.1-desktop-amd64.iso', state: 'downloading', progress: 0.42, dlspeed: 9568256, upspeed: 131072, eta: 540, size: 6033534976, amount_left: 3499450086, completed: 2534084890, num_seeds: 48, num_leechs: 6, category: 'linux', tags: '', ratio: 0.08, added_on: now - 3600, completion_on: 0, save_path: '/downloads' },
     { hash: 'b2b2b2', name: 'Big Buck Bunny (2008) [1080p BluRay x265]', state: 'stalledUP', progress: 1, dlspeed: 0, upspeed: 262144, eta: 8640000, size: 355566592, amount_left: 0, completed: 355566592, num_seeds: 12, num_leechs: 3, category: 'movies', tags: 'x265', ratio: 2.41, added_on: now - 86400, completion_on: now - 80000, save_path: '/downloads/movies' },
     { hash: 'c3c3c3', name: 'Sintel.2010.2160p.UHD.BluRay.x265-DEMO', state: 'pausedDL', progress: 0.15, dlspeed: 0, upspeed: 0, eta: 8640000, size: 12884901888, amount_left: 10952166605, completed: 1932735283, num_seeds: 0, num_leechs: 0, category: 'movies', tags: '', ratio: 0, added_on: now - 7200, completion_on: 0, save_path: '/downloads/movies' },
+    // Finished and seeding: for the seeding clean-up demo.
+    { hash: 'd4d4d4', name: 'Severance.S02E01.1080p.WEB.H264-NTb', state: 'stalledUP', progress: 1, dlspeed: 0, upspeed: 0, eta: 8640000, size: 2147483648, amount_left: 0, completed: 2147483648, num_seeds: 40, num_leechs: 0, category: 'tv-sonarr', tags: '', ratio: 3.2, seeding_time: 21 * 86400, added_on: now - 22 * 86400, completion_on: now - 21 * 86400, save_path: '/downloads/tv', tracker: 'https://tracker.torrentleech.org/a/123/announce' },
+    { hash: 'e5e5e5', name: 'Dune.Part.Two.2024.2160p.UHD.BluRay.x265', state: 'uploading', progress: 1, dlspeed: 0, upspeed: 524288, eta: 8640000, size: 62277025792, amount_left: 0, completed: 62277025792, num_seeds: 15, num_leechs: 4, category: 'radarr', tags: '', ratio: 0.6, seeding_time: 3 * 86400, added_on: now - 4 * 86400, completion_on: now - 3 * 86400, save_path: '/downloads/movies', tracker: 'https://tracker.torrentleech.org/a/123/announce' },
+    { hash: 'f6f6f6', name: 'Oppenheimer.2023.1080p.BluRay.x264', state: 'pausedUP', progress: 1, dlspeed: 0, upspeed: 0, eta: 8640000, size: 14495514624, amount_left: 0, completed: 14495514624, num_seeds: 22, num_leechs: 0, category: 'radarr', tags: '', ratio: 1.05, seeding_time: 40 * 86400, added_on: now - 41 * 86400, completion_on: now - 40 * 86400, save_path: '/downloads/movies', tracker: 'udp://tracker.opentrackr.org:1337/announce' },
+    { hash: 'g7g7g7', name: 'Rare.Documentary.2011.DVDRip', state: 'stalledUP', progress: 1, dlspeed: 0, upspeed: 0, eta: 8640000, size: 1395864371, amount_left: 0, completed: 1395864371, num_seeds: 1, num_leechs: 0, category: 'radarr', tags: 'keep', ratio: 0.2, seeding_time: 90 * 86400, added_on: now - 91 * 86400, completion_on: now - 90 * 86400, save_path: '/downloads/movies', tracker: 'https://privatehd.example/announce' },
   ];
   let dlLimit = 0; let upLimit = 0; let altSpeed = 0;
 
@@ -1530,7 +1639,8 @@ function makeIndexer() {
   const port = MOCK_PORTS.indexer;
   const getUrl = (id) => `http://127.0.0.1:${port}/api?t=get&id=${id}&apikey=MOCK_API_KEY`;
   const day = 86400000;
-  // Demo catalogue spanning Audiobooks (30x0), Audio (30x0), and Books (70x0).
+  // Demo catalogue spanning Audiobooks, Audio (30x0), Books (70x0), PC (40x0)
+  // and Console (10x0).
   const catalogue = [
     { id: 'ab1', title: 'Project Hail Mary - Andy Weir [Audiobook M4B]', cat: '3030', size: 891289600, grabs: 142, age: 2 },
     { id: 'ab2', title: 'The Hobbit - J.R.R. Tolkien (Unabridged Audiobook)', cat: '3030', size: 650117120, grabs: 96, age: 9 },
@@ -1541,6 +1651,12 @@ function makeIndexer() {
     { id: 'mg1', title: 'National Geographic - January 2024', cat: '7010', size: 62914560, grabs: 12, age: 6 },
     { id: 'au1', title: 'Various Artists - Jazz Classics [MP3 320]', cat: '3010', size: 188743680, grabs: 27, age: 12 },
     { id: 'au2', title: 'Ludwig van Beethoven - Symphony No. 9 [FLAC]', cat: '3040', size: 524288000, grabs: 9, age: 40 },
+    { id: 'tb1', title: 'Clean Code - Robert C. Martin (PDF)', cat: '7040', size: 9437184, grabs: 64, age: 11 },
+    { id: 'pc1', title: 'LibreOffice 24.8.2 Win x64', cat: '4010', size: 356515840, grabs: 58, age: 3 },
+    { id: 'pc2', title: 'Ubuntu 24.04.1 Desktop amd64 ISO', cat: '4020', size: 6174015488, grabs: 233, age: 25 },
+    { id: 'pc3', title: 'Stardew Valley v1.6.14 (GOG)', cat: '4050', size: 734003200, grabs: 91, age: 8 },
+    { id: 'cn1', title: 'Celeste (NSW homebrew demo) [3DS]', cat: '1110', size: 104857600, grabs: 7, age: 18 },
+    { id: 'cn2', title: 'Retro Arcade Collection [PS4]', cat: '1180', size: 2147483648, grabs: 15, age: 21 },
   ];
   const catMatch = (itemCat, reqCats) => {
     if (!reqCats.length) return true;
@@ -1849,13 +1965,19 @@ export function startMockServices() {
     ['pulsarr', makePulsarr(), MOCK_PORTS.pulsarr],
     ['unpackerr', makeUnpackerr(), MOCK_PORTS.unpackerr],
     ['speedtest', makeSpeedtest(), MOCK_PORTS.speedtest],
+    ['plex', makePlex(), MOCK_PORTS.plex],
     ['whisparr', makeSonarr({ instanceName: 'Whisparr (mock)' }), MOCK_PORTS.whisparr],
     ['unraid', makeUnraid(), MOCK_PORTS.unraid],
     ['truenas', makeTruenasServer(), MOCK_PORTS.truenas],
   ];
   const servers = [];
   for (const [name, app, port] of defs) {
-    const server = app.listen(port, '127.0.0.1', () => {
+    // A login-page-like title, as the real apps serve, for the setup wizard.
+    // Real apps serve their login page without a key; the mocks' own auth
+    // would refuse it, so answer "/" in front of them.
+    let front = app;
+    if (typeof app.get === 'function' && typeof app.use === 'function') { front = express(); front.get('/', (req, res) => res.type('html').send(`<!doctype html><title>${name}</title>`)); front.use(app); }
+    const server = front.listen(port, '127.0.0.1', () => {
       console.log(`  [mock] ${name} listening on http://127.0.0.1:${port}`);
     });
     servers.push(server);

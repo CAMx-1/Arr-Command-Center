@@ -166,6 +166,7 @@ export function addSubscription(sub, meta = {}) {
     endpoint: sub.endpoint,
     keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth },
     user: meta.user || null,
+    email: meta.email || null,
     ua: meta.ua || null,
     createdAt: Date.now(),
   };
@@ -188,8 +189,10 @@ export function removeSubscription(endpoint) {
 // endpoints the push service reports as permanently gone (404/410).
 export async function sendToAll(payload, options = {}) {
   if (!ready) initPush();
-  const subs = loadSubs();
-  if (!subs.length) return { sent: 0, failed: 0, pruned: 0, total: 0 };
+  const all = loadSubs();
+  // options.filter(sub) → false skips a subscriber (role-hidden services).
+  const subs = typeof options.filter === 'function' ? all.filter((s) => { try { return options.filter(s) !== false; } catch { return true; } }) : all;
+  if (!subs.length) return { sent: 0, failed: 0, pruned: 0, total: 0, skipped: all.length };
 
   const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
   const gone = [];
@@ -213,11 +216,11 @@ export async function sendToAll(payload, options = {}) {
   let pruned = 0;
   if (gone.length) {
     const goneSet = new Set(gone);
-    const next = subs.filter((s) => !goneSet.has(s.endpoint));
-    pruned = subs.length - next.length;
+    const next = all.filter((s) => !goneSet.has(s.endpoint));
+    pruned = all.length - next.length;
     saveSubs(next);
   }
-  return { sent, failed, pruned, total: subs.length };
+  return { sent, failed, pruned, total: subs.length, skipped: all.length - subs.length };
 }
 
 // Convenience: build a notification payload the service worker understands.

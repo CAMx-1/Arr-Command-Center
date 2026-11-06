@@ -1,9 +1,12 @@
 // Shared honeycomb layout + poster/gradient hex tile, reused across all pages.
 import { h, mount } from './ui.js';
+import { windowedList } from './windowed.js';
 
-// A paged library view: renders the first `pageSize` items (hex = virtualized,
-// list = plain rows) with a "Load more" button that reveals the next page.
-export function pagedLibrary(items, { isHex, makeCard, makeRow, pageSize = 100 }) {
+// A library view of any size. Hexes and rows are both windowed: only the
+// ones near the screen are in the page, so 10,000 titles scroll as smoothly
+// as 100. (pageSize is kept for callers that still pass it.)
+export function pagedLibrary(items, { isHex, makeCard, makeRow, pageSize = 100, paged = false }) {
+  if (!paged) return isHex ? virtualHive(items, makeCard) : windowedList(items, makeRow);
   const container = h('div', {});
   let limit = pageSize;
   let io = null;
@@ -85,9 +88,9 @@ export function virtualHive(items, makeCard, { W = 300, H = 290, gap = 18, buffe
   const mounted = new Map();
   let cols = 1, rowsCount = 0, lastW = -1;
 
+  const avail = () => (container.parentElement && container.parentElement.clientWidth) || container.clientWidth || (colStep + W);
   function layout() {
-    const avail = container.clientWidth || (colStep + W);
-    cols = Math.max(1, Math.floor((avail - W) / colStep) + 1);
+    cols = Math.max(1, Math.floor((avail() - W) / colStep) + 1);
     rowsCount = Math.ceil(items.length / cols);
     let maxBottom = 0;
     const lastK = rowsCount - 1;
@@ -140,8 +143,8 @@ export function virtualHive(items, makeCard, { W = 300, H = 290, gap = 18, buffe
   }
   function onResize() {
     if (!container.isConnected) return teardown();
-    if (container.clientWidth === lastW) return;
-    lastW = container.clientWidth;
+    if (avail() === lastW) return;
+    lastW = avail();
     for (const [, el] of mounted) el.remove();
     mounted.clear();
     layout();
@@ -154,7 +157,7 @@ export function virtualHive(items, makeCard, { W = 300, H = 290, gap = 18, buffe
 
   window.addEventListener('scroll', onScroll, true);
   window.addEventListener('resize', onResize);
-  requestAnimationFrame(() => { lastW = container.clientWidth; layout(); renderWindow(); });
+  requestAnimationFrame(() => { lastW = avail(); layout(); renderWindow(); });
   return container;
 }
 

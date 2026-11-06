@@ -1,3 +1,4 @@
+import { liveRefresh } from '../lib/live.js';
 import { showcaseName } from '../lib/showcase.js';
 import { h, mount, clear, tabs, spinner, skeletonList, empty, toast, fmtRelative, timeEl, poster, debounce, openModal, closeModal, rootFolderLabel } from '../lib/ui.js';
 import { openDetailModal } from './detail.js';
@@ -202,16 +203,21 @@ function requestListRow(r, seerr, ctx, pipe) {
   return row;
 }
 
-async function tabRequests(root, seerr, ctx, filter) {
-  mount(root, skeletonList());
+async function tabRequests(root, seerr, ctx, filter, silent = false) {
+  if (!silent) mount(root, skeletonList());
+  // Re-render quietly when Seerr reports a change (new request, approval):
+  // instantly with a Seerr webhook, otherwise on the live poll. The marker
+  // ends this watcher when the tab re-renders or closes.
+  const watch = () => { const mark = h('span', { hidden: 'hidden' }); root.appendChild(mark); liveRefresh(mark, ctx.service, 60000, () => tabRequests(root, seerr, ctx, filter, true)); };
   try {
     const q = filter === 'pending' ? '?filter=pending&take=60' : '?take=60&sort=added';
     const [data, pipe] = await Promise.all([seerr.get(`request${q}`), loadPipeline(ctx.state.services).catch(() => null)]);
     const results = data.results || [];
-    if (!results.length) return mount(root, empty('', filter === 'pending' ? 'No pending requests' : 'No requests yet'));
+    if (!results.length) { mount(root, empty('', filter === 'pending' ? 'No pending requests' : 'No requests yet')); watch(); return; }
     // Repaint just the progress chips every 15s while this tab is on screen.
+    const gen = (root.__reqGen = (root.__reqGen || 0) + 1);
     const refreshProgress = async () => {
-      if (!root.isConnected) return;
+      if (!root.isConnected || root.__reqGen !== gen) return;
       const next = await loadPipeline(ctx.state.services).catch(() => null);
       if (!next || !root.isConnected) return;
       for (const r of results) {
@@ -223,6 +229,7 @@ async function tabRequests(root, seerr, ctx, filter) {
     setTimeout(refreshProgress, 15000);
     if (effectiveMode(ctx.service.key) === 'list') {
       mount(root, h('div', { class: 'list' }, ...results.map((r) => requestListRow(r, seerr, ctx, pipe))));
+      watch();
       return;
     }
     const cards = results.map((r) => {
@@ -243,6 +250,7 @@ async function tabRequests(root, seerr, ctx, filter) {
       });
     });
     mount(root, hive(cards, root.clientWidth));
+    watch();
   } catch (err) {
     mount(root, empty('', 'Failed to load requests', err.message, { label: 'Retry', onClick: () => tabRequests(root, seerr, ctx, filter) }));
   }

@@ -43,7 +43,8 @@ setting, then the iPhone app in server and local-only mode. Chapters and notes a
 
 ![Arr Command Center home dashboard](docs/home-page.png)
 
-*Live status hexes for every service with at-a-glance stats, a filterable activity
+*Live status hexes for every service (37 in the demo, including Unpackerr and Speedtest
+Tracker) with at-a-glance stats, a filterable activity
 feed, and a Seerr requests panel. The whole Overview is customizable — reorder, resize,
 show/hide widgets, and keep multiple dashboards (see Settings).*
 
@@ -133,11 +134,11 @@ now-playing details with a Stop control, plus History, Statistics, and Graphs ta
 
 ### Settings
 
-![Settings page](docs/settings.png)
+![Settings with tabs and an open Weekly digest row](docs/settings.png)
 
-*Themes (light/dark) with accent colors, a comfortable/compact density toggle, a default
-library view, drag-to-reorder services, and a full Overview dashboard builder — all
-secrets stay server-side.*
+*Settings are grouped into tabs (You, Notifications, Services, Automation, Admin, System).
+Each row shows its current value and opens in place; search finds any setting, and badges
+flag what needs attention. Only the tabs your role can use are shown.*
 
 ### Service uptime
 
@@ -150,8 +151,8 @@ two minutes you get a "down" alert, and a "recovered" alert when it comes back.*
 
 ![Push notification categories and ntfy/Discord channels](docs/notifications.png)
 
-*Choose what to be alerted about, then fan alerts out to ntfy, Gotify, Discord, Telegram
-or any webhook. ntfy alerts for new requests include Approve/Decline buttons, so you can
+*Choose what to be alerted about (including problems and the weekly digest), then fan
+alerts out to ntfy, Gotify, Discord, Telegram or any webhook, each with its own categories. ntfy alerts for new requests include Approve/Decline buttons, so you can
 act from the lock screen.*
 
 ### Push notifications (iOS / Safari)
@@ -194,7 +195,7 @@ npm run demo
 Then open <http://localhost:7373>. This spins up a full set of **bundled mock services**
 (Sonarr, Radarr, Lidarr, Bindery, legacy Readarr, Overseerr, SABnzbd, qBittorrent,
 Transmission, Deluge, NZBGet, Flood, Jellyfin, Emby, Audiobookshelf, Tautulli, Bazarr,
-Autobrr, Maintainerr, Tdarr, and a Newznab indexer) with fake data so you can click around immediately. The mock services
+Autobrr, Maintainerr, Tdarr, a Plex Media Server, and a Newznab indexer) with fake data so you can click around immediately. The mock services
 even *require* the injected API key and record the Cloudflare Access headers, proving the
 proxy works end-to-end.
 
@@ -208,6 +209,16 @@ npm start
 ```
 
 Open <http://localhost:7373>.
+
+**Or let it find your apps:** start with `"services": {}` in `config.json`. The first visit
+opens the setup wizard. It looks for Sonarr, Radarr, Seerr, Plex and the rest on this server,
+the Docker host, the usual Docker container names (`sonarr`, `radarr`, …) and any hosts you
+type in. Tick the switch to also try every address on the server's own /24 network. For each
+app it finds, it asks only for the API key (or login), checks it, and saves the service. It
+only contacts private addresses and only opens each app's public login page; it never sends
+or guesses keys while looking. Run it again any time from **Settings → Services → Find
+services** (admins). If `config.json` is read-only, as in the Docker setup, the wizard checks
+each key and gives you the lines to paste into `config.json` instead.
 
 ---
 
@@ -291,6 +302,28 @@ only); those entries are stored in `data/store.json`. You can also set roles in
 With `allowAnyPlexUser`, people who aren't listed get `auth.plex.defaultRole`
 (default `guest`). Roles are enforced by the server on every request, and
 removing someone or changing their role takes effect on their next request.
+
+**Services each role can see** — in the same section, turn off **All services** for users or
+guests and tick the services they may use. Admins always see everything. A hidden service is
+left out of the sidebar, Home, search, status, uptime and the activity feed for that role, and
+the server refuses every request to it (the proxy, live updates and the service's own pages).
+Push notifications about a hidden service only go to people who can see it. While All services
+is on, services you add later are included.
+
+**Two-factor sign-in** (admins) — **Settings → You → Sign-in & security**. After Plex, the
+sign-in page asks for a 6-digit code from an authenticator app (1Password, iOS Passwords,
+Google Authenticator, Authy, …). Setup shows a link that opens your authenticator app and the
+key to type in, then 10 one-time recovery codes, shown once. Turning it on signs out your other
+browsers. A code is accepted 30 seconds either side of now and only once; five wrong codes pause
+code entry for a few minutes. Turning it off, or making new recovery codes, needs a current code.
+If you lose your phone and your recovery codes, stop the server, remove your entry (your Plex
+username in lower case) under `"twoFactor"` in `data/store.json`, and start it again.
+
+**Where you're signed in** — the same section lists each browser signed in to your account
+(device, last active, IP), with **Sign out** for each and **Sign out everywhere else**. Admins
+also see everyone else's sessions and can end them. Signing out ends the session on the server,
+so a copied cookie stops working too. Two-factor and the session list need Sign in with Plex;
+with Basic auth, change the password to sign everyone out.
 
 ### Migrating Readarr to Bindery
 
@@ -484,6 +517,63 @@ internal traffic typically bypasses Cloudflare Access — in that case just omit
   with a line for what your download clients are pulling right now. Users can start a test.
   Auth: an API token from Admin → API tokens ("Read results", plus "Run speedtest").
 
+**Send indexer results to an app** (Newznab indexer search) — besides **+ Send to SAB**, each
+result has a button for each app that takes its category: TV → Sonarr/Whisparr, movies → Radarr,
+music → Lidarr, books and audiobooks → Readarr/Bindery. The app checks the release against its
+quality profile and, if it wants it, grabs it with its own download client, so it's tracked and
+imported like the app's own grabs. If it doesn't want it, you see the app's reason. Users and
+admins. Both buttons send through the server (see Security notes).
+
+**Tidy up** (Sonarr, Radarr → System) — finds ended shows that are complete but still monitored,
+films still missing two years after release, unmonitored entries with no files, and entries whose
+quality profile or root folder is gone. Each group has a bulk fix for the ones you tick: unmonitor,
+set a quality profile, remove the entries (their files are kept), or open Fix paths.
+
+**Complete your collections** (Radarr → System → Collections) — collections (trilogies,
+franchises) you've started but not finished, closest to complete first, from Radarr's own
+collection list (Radarr v4.2+, no TMDB key needed). Add one film or all the missing ones, with a
+quality profile, root folder and search-on-add choice that's remembered. Films you've excluded
+in Radarr aren't suggested, and unreleased ones only when you ask.
+
+**Missing subtitles** (Bazarr → Wanted) — how many episodes and films are missing each language,
+episodes grouped by show, and a search for the shows and films you tick, in every language or
+just one. That search sends one request per episode and language, one at a time (Bazarr searches
+its providers before it answers); click the button again to stop. **Search all wanted** starts
+Bazarr's own search instead.
+
+**Titles that always transcode** (Tautulli → Transcodes) — titles played at least twice in the
+last 7, 30 or 90 days where 60% or more of the plays transcoded, with the reason from Tautulli's
+stream data (subtitles burned into the picture, a video codec the player can't play, a bitrate
+over the player's limit, audio conversion, or only the container changing) and what to do about
+it. **Tag for replacement** adds a `transcodes` tag to the title in Sonarr or Radarr.
+
+**Seeding clean-up** (qBittorrent → Seeding clean-up) — finished torrents that have reached a
+ratio and/or a seeding time (either or both; 0 ignores a limit), optionally only in some
+categories or on some trackers. Torrents tagged `keep` are never touched. You see the list
+first, then Remove (asks twice; admins). Deleting the files as well is off by default: Sonarr and
+Radarr normally hard-link or copy downloads, but check yours don't move them before you turn it
+on. The rules are saved per qBittorrent instance in this browser.
+
+**Wrong Plex matches** (Plex → Wrong matches) — Plex movies and shows whose TMDB/TVDB id differs
+from the Sonarr/Radarr entry in the same folder. Folders are matched by full path, or by folder
+name when Plex and the apps see the disks under different mount points. **Fix match** (admins)
+lists Plex's own match candidates, marks the one that agrees with Sonarr/Radarr, applies it and
+refreshes the title's details. Needs a Plex service (`"type": "plex"`) with the server's address.
+
+**Instant updates** (Settings → Services → Instant updates, admins) — Sonarr, Radarr, Lidarr,
+Readarr, Whisparr, Prowlarr, Seerr and Tautulli can call a secret webhook address when something
+happens, so open pages update and notifications go out at once instead of on the next check (up
+to a minute). **Add to …** creates the webhook in an *arr app (its Settings → Connect) with every
+event it supports switched on. Seerr and Tautulli get short instructions, including the JSON body
+Tautulli needs. **New address** replaces the secret. Each app's row shows the last event received.
+The apps must be able to reach this server: if Cloudflare Access or another login is in front of
+it, let `/api/hooks/` through, or give the apps the server's local address.
+
+**Big libraries** — Sonarr and Radarr libraries keep only the rows, table rows or hexagons near
+the screen in the page, so there's no "Load more" and long libraries scroll smoothly. With a
+10,000-movie demo library, the table view opens in 0.3 s instead of 5 s and scrolling stays at
+about 60 frames a second in every view.
+
 **Sync from TRaSH Guides** (Sonarr, Radarr → System → Custom formats, admins) — pick one of
 TRaSH's quality profiles; the preview lists each custom format as new, rules differ or up to
 date, with the score change on the quality profile you choose (or formats only). Untick
@@ -579,10 +669,11 @@ stopped array, Syncthing folder errors, ad blocking left off in Pi-hole/AdGuard,
 extractions, a failed or below-benchmark speedtest, and Pulsarr requests awaiting approval (category "Problems", on by default). Each problem notifies once.
 
 **Live updates** — Sonarr/Radarr/Lidarr/Readarr/Whisparr queues, SABnzbd, qBittorrent,
-Transmission, Deluge, Flood, NZBGet, Tautulli and Jellyfin/Emby now-playing update over
-Server-Sent Events (`/api/live/<service>`), and Home uses one combined stream
+Transmission, Deluge, Flood, NZBGet, Tautulli and Jellyfin/Emby now-playing, and Seerr's request
+list, update over Server-Sent Events (`/api/live/<service>`), and Home uses one combined stream
 (`/api/live?services=…`) for its tiles and activity feed. The server polls once for every
-viewer and only signals visible changes. The iOS local-only mode keeps polling.
+viewer and only signals visible changes; with Instant updates set up, a webhook from the app
+signals the change straight away. The iOS local-only mode keeps polling.
 
 **Quality profiles and custom formats** — admins can edit a profile's name, upgrades,
 allowed qualities, cutoff and format scores, and a custom format's name, rename flag and
@@ -619,15 +710,15 @@ any change for guests). The server still enforces every rule.
 **Requests, streaming & downloads**
 - **Overseerr / Seerr** — pending & all requests with one-click **approve/decline**,
   issues, recently added, and a **discover** search to create new requests.
-- **Plex** — watchlist, shared users, and now-playing sessions, with a server-side image
+- **Plex** — watchlist, shared users, now-playing sessions and a wrong-match check, with a server-side image
   proxy so posters render (Plex token never touches the browser).
 - **Jellyfin & Emby** — shared library browser, recently added media, users, and live
   sessions with direct-play/transcode state; artwork streams through the authenticated proxy.
 - **Tautulli** — active streams (direct-play/transcode, bandwidth), history, statistics,
-  and graphs.
+  graphs, and the titles that keep transcoding.
 - **SABnzbd** — live queue with **pause/resume**, per-item remove, **speed-limit** control,
   and download history.
-- **qBittorrent** — live torrent list with state, ratio, speeds, and controls.
+- **qBittorrent** — live torrent list with state, ratio, speeds, and controls, plus a seeding clean-up.
 - **Transmission & Deluge** — shared live torrent UI with downloading/completed views,
   global and per-item pause/resume, safe removal, ratio/speed/ETA details, and speed limits.
 - **Flood** — the shared torrent UI (downloading/completed, pause/resume all or per item,
@@ -635,7 +726,7 @@ any change for guests). The server still enforces every rule.
   login and keeps the session cookie server-side.
 - **NZBGet** — shared Usenet queue/history UI with pause/resume, group/history removal,
   disk/remaining statistics, and absolute speed limits.
-- **Bazarr** — subtitle wanted/history management.
+- **Bazarr** — missing subtitles by language and show with batch search, and history.
 - **Prowlarr** — indexer overview.
 - **Autobrr** — recent releases with push outcome (pushed/rejected/error) and reason,
   announce/push stats, enable/disable filters, and IRC network + channel health.
@@ -646,7 +737,8 @@ any change for guests). The server still enforces every rule.
   progress (fps, ETA, size estimate), and the transcode queue/error tables (read-only).
 - **Audiobookshelf** — who's listening now (admin key), continue-listening progress,
   recently added per library with covers, and library stats.
-- **Newznab indexer** — search a public/private Usenet indexer directly.
+- **Newznab indexer** — search a public/private Usenet indexer directly, and send results to
+  SABnzbd, Sonarr, Radarr, Lidarr or Readarr.
 
 **Appearance & UX**
 - **Light & dark themes** with selectable accent colors and a default library view.
@@ -674,7 +766,18 @@ any change for guests). The server still enforces every rule.
   - enable the built-in **basic auth** (`auth.enabled`), and/or
   - put the dashboard itself behind Cloudflare Access / Tailscale.
 - Secrets are never sent to the browser — the frontend only ever sees `/api/config`, which
-  reports *whether* a service is configured, not the values.
+  reports *whether* a service is configured, not the values. Responses that echo a key (an
+  indexer's download links, for example) have it replaced with `[redacted]`; sending an indexer
+  result to an app goes through the server, which puts the key back only for links on the
+  indexer's own host.
+- Webhook addresses (Instant updates) work without signing in, because the apps can't sign in;
+  the secret in each address is what protects it. Treat them like passwords and use **New
+  address** if one leaks. Wrong addresses get "not found", and repeated wrong guesses from one
+  address are locked out for a while.
+- With Sign in with Plex, every sign-in is a session stored on the server. Signing out, Sign out
+  everywhere else, removing a user or turning on two-factor ends sessions at once.
+- The setup wizard is admin-only, only contacts private network addresses and only opens the
+  apps' public pages. The network-wide scan runs only when you tick it.
 
 ---
 

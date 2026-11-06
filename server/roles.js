@@ -131,14 +131,16 @@ const ADMIN_ROUTES = [
   /^\/api\/notify\/channels(\/|$)/,
   /^\/api\/automation(\/|$)/,
   /^\/api\/push\/(prefs|poll|status)$/,
-  /^\/api\/plex\/(users|friends)$/,
+  /^\/api\/plex\/(users|friends|match\/[^/]+)$/,
   /^\/api\/users(\/|$)/,
   /^\/api\/activity$/,
   /^\/api\/digest(\/|$)/,
   /^\/api\/bot(\/|$)/,
   /^\/api\/backups(\/|$)/,
+  /^\/api\/webhooks(\/|$)/,
+  /^\/api\/setup(\/|$)/,
 ];
-const SELF_ROUTES = [/^\/api\/push\/(subscribe|unsubscribe|test|public-key)$/];
+const SELF_ROUTES = [/^\/api\/push\/(subscribe|unsubscribe|test|public-key)$/, /^\/api\/account(\/|$)/];
 
 export function classifyAppRoute(method, path) {
   const m = String(method || 'GET').toUpperCase();

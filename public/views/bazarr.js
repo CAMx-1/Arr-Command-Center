@@ -4,6 +4,8 @@ import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet } from '../lib/cache.js';
 import { movieSearchPath, seriesSearchPath, episodeSearchPaths, SEARCH_ALL_WANTED_PATHS } from '../lib/bazarrSearch.js';
+import { summarize, searchPaths, hasLang } from '../lib/subtitleReport.js';
+import { roleAllows } from '../lib/roleUi.js';
 
 // Bazarr (subtitle manager) panel. Mirrors the Sonarr/Radarr/Prowlarr layout:
 // tabbed sections, a Hex/List toggle, stat-hex headers, and a filter bar that
@@ -309,51 +311,75 @@ async function searchMovie(m, bz, reload) {
 }
 
 // ---- Wanted (missing subtitles) ----
+// Wanted: what's missing per language, episodes grouped by show, and a batch
+// search for the shows/movies you tick (optionally one language only).
 async function tabWanted(root, ctx, bz) {
   mount(root, skeletonList());
+  let eps; let mvs;
   try {
     const [epResp, mvResp] = await Promise.all([
-      bz.get('episodes/wanted').catch(() => ({ data: [] })),
-      bz.get('movies/wanted').catch(() => ({ data: [] })),
+      bz.get('episodes/wanted?start=0&length=-1').catch(() => ({ data: [] })),
+      bz.get('movies/wanted?start=0&length=-1').catch(() => ({ data: [] })),
     ]);
-    const eps = (epResp && epResp.data) || [];
-    const mvs = (mvResp && mvResp.data) || [];
-    const reload = () => tabWanted(root, ctx, bz);
-
-    if (!eps.length && !mvs.length) {
-      return mount(root, empty('', 'Nothing wanted', 'Every monitored item has its subtitles 🎉'));
-    }
-
-    const header = h('div', { class: 'honeycomb' }, h('div', { class: 'hc-row' },
-      statCard('Episodes', eps.length),
-      statCard('Movies', mvs.length),
-    ));
-
-    const searchAll = h('button', { class: 'btn sm primary', onclick: async () => {
-      toast('Searching all wanted subtitles…', 'info', 1800);
-      try {
-        // Bazarr's own wanted-search actions: one request per side.
-        const [seriesAll, moviesAll] = SEARCH_ALL_WANTED_PATHS;
-        if (eps.length) await bz.patch(seriesAll);
-        if (mvs.length) await bz.patch(moviesAll);
-        toast('Subtitle search queued for all wanted items', 'success');
-        reload();
-      } catch (err) { toast(err.message || 'Search failed', 'error'); }
-    } }, 'Search all');
-
-    const blocks = [header, h('div', { class: 'lib-head' }, searchAll)];
-    if (eps.length) {
-      blocks.push(h('div', { class: 'section-title' }, `Episodes (${eps.length})`));
-      blocks.push(h('div', { class: 'list' }, ...eps.map((e) => wantedEpisodeRow(e, bz, reload))));
-    }
-    if (mvs.length) {
-      blocks.push(h('div', { class: 'section-title', style: { marginTop: '18px' } }, `Movies (${mvs.length})`));
-      blocks.push(h('div', { class: 'list' }, ...mvs.map((m) => wantedMovieRow(m, bz, reload))));
-    }
-    mount(root, ...blocks);
+    eps = (epResp && epResp.data) || []; mvs = (mvResp && mvResp.data) || [];
   } catch (err) {
-    mount(root, empty('', 'Failed to load wanted', err.message, { label: 'Retry', onClick: () => tabWanted(root, ctx, bz) }));
+    return mount(root, empty('', 'Failed to load wanted', err.message, { label: 'Retry', onClick: () => tabWanted(root, ctx, bz) }));
   }
+  const reload = () => tabWanted(root, ctx, bz);
+  if (!eps.length && !mvs.length) return mount(root, empty('', 'Nothing wanted', 'Every monitored item has its subtitles 🎉'));
+  const rep = summarize(eps, mvs);
+  let lang = null;
+  const seriesIds = new Set(rep.shows.map((x) => x.seriesId));
+  const radarrIds = new Set(rep.movies.map((m) => m.radarrId));
+  const out = h('div', {});
+  const canSearch = roleAllows('write');
+
+  // One request per episode and language, one at a time (Bazarr searches
+  // providers before it answers). Clicking again stops; so does leaving.
+  const run = async (btn, paths, label) => {
+    if (btn.dataset.running === '1') { btn.dataset.stop = '1'; btn.textContent = 'Stopping…'; return; }
+    if (!paths.length) return;
+    btn.dataset.running = '1';
+    let failed = 0; let done = 0;
+    for (let i = 0; i < paths.length; i++) {
+      if (btn.dataset.stop === '1' || !root.isConnected) break;
+      btn.textContent = `Searching ${i + 1}/${paths.length}… (click to stop)`;
+      try { await bz.patch(paths[i]); } catch { failed += 1; }
+      done += 1;
+    }
+    if (!root.isConnected) return;
+    const stopped = done < paths.length ? ` (stopped after ${done} of ${paths.length})` : '';
+    toast(failed ? `${label}: ${done - failed} searched, ${failed} failed${stopped}` : `${label}: searched ${done}${stopped}`, failed || stopped ? 'warn' : 'success', 5000);
+    reload();
+  };
+
+  function render() {
+    const shows = rep.shows.map((x) => ({ ...x, episodes: x.episodes.filter((e) => hasLang(e, lang)) })).filter((x) => x.episodes.length);
+    const movies = rep.movies.filter((m) => hasLang(m, lang));
+    const paths = searchPaths({ episodes: eps, movies: mvs, seriesIds, radarrIds, lang });
+    const chip = (key, label, n) => h('button', { class: `btn sm ${lang === key ? 'primary' : ''}`, onclick: () => { lang = key; render(); } }, `${label} · ${n}`);
+    const tick = (set, id) => h('input', { type: 'checkbox', checked: set.has(id) ? 'checked' : null, 'aria-label': 'Include in search', onclick: (e) => e.stopPropagation(), onchange: (e) => { if (e.target.checked) set.add(id); else set.delete(id); render(); } });
+    const go = canSearch ? h('button', { class: 'btn sm primary', disabled: paths.length ? null : 'disabled', onclick: () => run(go, paths, lang ? rep.languages.find((l) => l.key === lang).label : 'Subtitles') }, paths.length ? `Search selected (${paths.length})` : 'Nothing selected') : null;
+    const allBtn = canSearch ? h('button', { class: 'btn sm', title: 'Bazarr’s own search for everything wanted', onclick: () => run(allBtn, [...(eps.length ? [SEARCH_ALL_WANTED_PATHS[0]] : []), ...(mvs.length ? [SEARCH_ALL_WANTED_PATHS[1]] : [])], 'All wanted') }, 'Search all wanted') : null;
+    mount(out,
+      h('div', { class: 'honeycomb' }, h('div', { class: 'hc-row' }, statCard('Episodes', eps.length), statCard('Shows', rep.shows.length), statCard('Movies', mvs.length), statCard('Languages', rep.languages.length))),
+      h('div', { class: 'section-title' }, 'By language'),
+      h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' } }, chip(null, 'All', eps.length + mvs.length), ...rep.languages.map((l) => chip(l.key, l.label, l.episodes + l.movies))),
+      h('div', { class: 'lib-head', style: { gap: '8px' } },
+        h('button', { class: 'btn sm', onclick: () => { rep.shows.forEach((x) => seriesIds.add(x.seriesId)); rep.movies.forEach((m) => radarrIds.add(m.radarrId)); render(); } }, 'Select all'),
+        h('button', { class: 'btn sm', onclick: () => { seriesIds.clear(); radarrIds.clear(); render(); } }, 'Select none'),
+        h('span', { style: { flex: '1' } }), allBtn, go),
+      shows.length ? h('div', { class: 'section-title' }, `Shows (${shows.length})`) : null,
+      shows.length ? h('div', { class: 'list' }, ...shows.map((x) => h('details', { class: 'row', style: { display: 'block' } },
+        h('summary', { style: { display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', listStyle: 'none' } },
+          canSearch ? tick(seriesIds, x.seriesId) : null,
+          h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, x.title), h('div', { class: 'meta-line' }, h('span', { class: 'dim' }, `${x.episodes.length} ${x.episodes.length === 1 ? 'episode' : 'episodes'}`), ...x.langs.map((k) => h('span', { class: 'pill warn' }, (rep.languages.find((l) => l.key === k) || {}).label || k))))),
+        h('div', { class: 'list', style: { marginTop: '10px' } }, ...x.episodes.map((e) => wantedEpisodeRow(e, bz, reload)))))) : null,
+      movies.length ? h('div', { class: 'section-title', style: { marginTop: '18px' } }, `Movies (${movies.length})`) : null,
+      movies.length ? h('div', { class: 'list' }, ...movies.map((m) => h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } }, canSearch ? tick(radarrIds, m.radarrId) : null, h('div', { style: { flex: '1', minWidth: '0' } }, wantedMovieRow(m, bz, reload))))) : null);
+  }
+  mount(root, out);
+  render();
 }
 
 function wantedEpisodeRow(e, bz, reload) {

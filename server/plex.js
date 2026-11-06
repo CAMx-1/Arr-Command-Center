@@ -186,3 +186,71 @@ function extractGuid(m, service) {
   }
   return null;
 }
+
+// ------------------------------------------------------- wrong-match check
+const folderName = (p) => normPath(p).split('/').pop();
+// Plex items whose TMDB/TVDB id doesn't match the Sonarr/Radarr entry stored
+// in the same folder. Matching is by folder, so titles don't have to agree.
+// Plex and the apps often see the same disks under different mount points
+// (Docker), so when the full path isn't found the folder's own name is used,
+// as long as only one Sonarr/Radarr entry has that name.
+// Returns { items, compared } (compared: Plex titles paired with an entry).
+const normPath = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+const parentDir = (p) => normPath(p).replace(/\/[^/]*$/, '');
+export function plexIds(item) {
+  const out = {};
+  for (const g of item.Guid || []) { const m = /^(tmdb|tvdb|imdb):\/\/(.+)$/.exec(g.id || ''); if (m) out[m[1]] = m[2]; }
+  return out;
+}
+export function findWrongMatches(plexItems, arrItems) {
+  const byFolder = new Map(arrItems.map((a) => [normPath(a.path), a]));
+  const byName = new Map();
+  for (const a of arrItems) { const n = folderName(a.path); if (n) byName.set(n, byName.has(n) ? null : a); }
+  const out = []; let compared = 0;
+  for (const p of plexItems) {
+    const folder = p.type === 'show' ? normPath((p.Location || [])[0] && p.Location[0].path) : parentDir(((p.Media || [])[0] && p.Media[0].Part && p.Media[0].Part[0] && p.Media[0].Part[0].file) || '');
+    const a = folder ? (byFolder.get(folder) || byName.get(folderName(folder)) || null) : null;
+    if (!a) continue;
+    const ids = plexIds(p);
+    const key = p.type === 'show' ? 'tvdb' : 'tmdb';
+    const want = String(p.type === 'show' ? a.tvdbId : a.tmdbId || '');
+    if (!want || want === 'undefined') continue;
+    compared += 1;
+    if (ids[key] === want) continue;
+    out.push({ ratingKey: p.ratingKey, type: p.type, plexTitle: p.title, plexYear: p.year, plexId: ids[key] || null, idType: key,
+      arr: { serviceKey: a.serviceKey, serviceLabel: a.serviceLabel, id: a.id, title: a.title, year: a.year, expectedId: want }, folder: a.path || folder });
+  }
+  return { items: out, compared };
+}
+
+async function plexBase(cfg) {
+  const t = plexToken(cfg); const url = plexServerUrl(cfg);
+  if (!t) throw new Error('No Plex token — sign in with Plex first');
+  if (!url) throw new Error('Set the Plex server URL (services.plex.baseUrl)');
+  return { t, base: url.replace(/\/$/, ''), cid: clientId(cfg) };
+}
+export async function plexLibraryItems(cfg) {
+  const { t, base, cid } = await plexBase(cfg);
+  const sects = await pj(`${base}/library/sections`, t, cid);
+  const out = [];
+  for (const d of (sects.MediaContainer && sects.MediaContainer.Directory) || []) {
+    if (!['movie', 'show'].includes(d.type)) continue;
+    const data = await pj(`${base}/library/sections/${encodeURIComponent(d.key)}/all?includeGuids=1`, t, cid).catch(() => null);
+    out.push(...(((data && data.MediaContainer && data.MediaContainer.Metadata) || []).map((m) => ({ ...m, section: d.title }))));
+  }
+  return out;
+}
+export async function plexMatchCandidates(cfg, ratingKey, { title, year } = {}) {
+  const { t, base, cid } = await plexBase(cfg);
+  const qs = new URLSearchParams({ manual: '1', ...(title ? { title } : {}), ...(year ? { year: String(year) } : {}) });
+  const d = await pj(`${base}/library/metadata/${encodeURIComponent(ratingKey)}/matches?${qs}`, t, cid);
+  return ((d.MediaContainer && d.MediaContainer.SearchResult) || []).map((r) => ({ guid: r.guid, name: r.name, year: r.year, score: r.score }));
+}
+export async function plexApplyMatch(cfg, ratingKey, { guid, name, year }) {
+  const { t, base, cid } = await plexBase(cfg);
+  if (!/^[a-z]+:\/\/[\w./:-]+$/i.test(String(guid || ''))) throw new Error('Bad match id');
+  const qs = new URLSearchParams({ guid, ...(name ? { name } : {}), ...(year ? { year: String(year) } : {}) });
+  const r = await fetch(`${base}/library/metadata/${encodeURIComponent(ratingKey)}/match?${qs}`, { method: 'PUT', headers: { 'X-Plex-Token': t, 'X-Plex-Client-Identifier': cid } });
+  if (!r.ok) throw new Error(`Plex HTTP ${r.status}`);
+  await fetch(`${base}/library/metadata/${encodeURIComponent(ratingKey)}/refresh`, { method: 'PUT', headers: { 'X-Plex-Token': t, 'X-Plex-Client-Identifier': cid } }).catch(() => {});
+}

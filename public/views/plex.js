@@ -1,5 +1,6 @@
 import { h, mount, tabs, skeletonList, empty, fmtRelative, timeEl, fmtBytes, copyable } from '../lib/ui.js';
 import { markManaged } from '../lib/plexDupes.js';
+import { tabWrongMatches } from '../lib/plexMatchesUI.js';
 
 export async function renderPlex(root, ctx) {
   const svc = ctx.service;
@@ -8,10 +9,11 @@ export async function renderPlex(root, ctx) {
   const bar = tabs(body, [
     { id: 'watchlist', label: 'Watchlist', render: (c) => tabWatchlist(c, ctx) },
     { id: 'duplicates', label: 'Duplicates', render: (c) => tabDuplicates(c, ctx) },
+    { id: 'matches', label: 'Wrong matches', render: (c) => tabWrongMatches(c, ctx) },
     { id: 'users', label: 'Users', render: (c) => tabUsers(c, ctx) },
     { id: 'friends', label: 'Friends', render: (c) => tabFriends(c, ctx) },
     { id: 'sessions', label: 'Now Playing', render: (c) => tabSessions(c, ctx) },
-  ], `tabs-${svc.key}`);
+  ], `tabs-${svc.key}`, { activeId: ctx.params.tab, onChange: (id) => ctx.setParams({ tab: id === 'watchlist' ? '' : id }) });
   mount(root, bar, body);
 }
 

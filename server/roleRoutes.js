@@ -2,7 +2,7 @@
 import express from 'express';
 import { permits, denialMessage, classifyAppRoute, classifyProxyRequest } from './roles.js';
 
-export function createRoleGuard(plexAuth) {
+export function createRoleGuard(plexAuth, { canSee = () => true, keyOf = (svc) => svc && svc.key } = {}) {
   const deny = (role, level, method) => ({ status: 403, error: denialMessage(role, level, method), role });
 
   // App routes (everything under /api except the proxy, which is checked
@@ -18,9 +18,11 @@ export function createRoleGuard(plexAuth) {
     return res.status(d.status).json({ error: d.error, role });
   }
 
+  const hidden = (role, svc) => { const k = keyOf(svc); return k && !canSee(role, k) ? { status: 403, error: 'Your role can’t use this service', role } : null; };
   function proxy(req, svc, subPath) {
     const role = plexAuth.roleOf(req);
     if (!role) return { status: 401, error: 'Authentication required' };
+    const h = hidden(role, svc); if (h) return h;
     const level = classifyProxyRequest(svc.type, req.method, subPath, req.query, req.body);
     return permits(role, level) ? null : deny(role, level, req.method);
   }
@@ -30,6 +32,7 @@ export function createRoleGuard(plexAuth) {
   function read(req, svc, path) {
     const role = plexAuth.roleOf(req);
     if (!role) return { status: 401, error: 'Authentication required' };
+    const h = hidden(role, svc); if (h) return h;
     const [p, qs] = String(path).split('?');
     const query = Object.fromEntries(new URLSearchParams(qs || ''));
     const level = classifyProxyRequest(svc.type, 'GET', p, query, null);

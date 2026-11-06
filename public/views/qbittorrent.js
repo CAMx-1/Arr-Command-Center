@@ -1,4 +1,5 @@
 import { liveRefresh } from '../lib/live.js';
+import { tabSeeding } from '../lib/seedCleanupUI.js';
 import { h, mount, tabs, spinner, skeletonList, empty, toast, fmtBytes, pct, openModal, closeModal } from '../lib/ui.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
@@ -41,7 +42,8 @@ export async function renderQbittorrent(root, ctx) {
   const bar = tabs(body, [
     { id: 'downloading', label: 'Downloading', render: (c) => tabTorrents(c, qb, ctx, 'downloading') },
     { id: 'completed', label: 'Completed', render: (c) => tabTorrents(c, qb, ctx, 'completed') },
-  ], `tabs-${svc.key}`);
+    { id: 'seeding', label: 'Seeding clean-up', render: (c) => tabSeeding(c, qb, ctx) },
+  ], `tabs-${svc.key}`, { activeId: ctx.params.tab, onChange: (id) => ctx.setParams({ tab: id === 'downloading' ? '' : id }) });
   mount(root, bar, body);
 }
 

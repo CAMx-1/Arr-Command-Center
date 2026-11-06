@@ -146,9 +146,9 @@ async function tabMovies(root, arr, ctx) {
       if (!items.length) return mount(listWrap, empty('', 'No matches', 'No movies match this filter'));
       if (mode === 'table') {
         return mount(listWrap, compactTable(items, {
-          columns, sortKey, direction, selected,
+          columns, sortKey, direction, selected, windowed: true,
           onSort: (key, dir) => { sortKey = key; direction = dir; ctx.setParams({ sort: key === 'title' ? '' : key, dir: dir === 'asc' ? '' : dir }); renderList(filteredItems); },
-          onToggle: (entry) => { selected.has(entry.id) ? selected.delete(entry.id) : selected.set(entry.id, entry); persistSel(); renderList(filteredItems); updateCompare(); },
+          onToggle: (entry) => { selected.has(entry.id) ? selected.delete(entry.id) : selected.set(entry.id, entry); persistSel(); updateCompare(); },
           onOpen: openInfo,
         }));
       }

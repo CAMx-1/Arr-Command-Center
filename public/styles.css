@@ -559,6 +559,8 @@ html[data-theme="dark"] .hex-disk-fill {
   .seerr-hex, .seerr-hex:hover { filter: none; }
 }
 .list .row { animation: rowIn 0.34s var(--ease) backwards; }
+/* Windowed lists add rows as you scroll; don't replay the entrance. */
+.list.windowed .row { animation: none; }
 @keyframes rowIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .row .poster { width: 48px; height: 70px; border-radius: 8px; background: linear-gradient(145deg, var(--accent-soft), #fbeffb); object-fit: cover; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--accent-2); }
 .row .row-main { flex: 1; min-width: 0; }

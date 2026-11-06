@@ -9,9 +9,14 @@ import path from 'node:path';
 import * as store from './store.js';
 import { writeFileAtomic } from './store.js';
 import { createRoleDirectory } from './roles.js';
+import { createAuthLimiter } from './authGuard.js';
+import { createSessions, checkTotp, newSecret, otpauthUrl, newRecoveryCodes, useRecoveryCode, describeAgent } from './twoFactor.js';
 
 const PLEX_API = 'https://plex.tv/api/v2';
 const COOKIE = 'acc_session';
+const MFA_COOKIE = 'acc_mfa';
+const TF_NS = 'twoFactor';
+const clientIp = (req) => (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '';
 const STATE_FILE = 'auth-state.json';
 
 // Persist a stable Plex client identifier + session secret across restarts.
@@ -80,8 +85,22 @@ export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root,
   const clientId = pcfg.clientId || state.clientId;
   const secret = process.env.SESSION_SECRET || pcfg.sessionSecret || state.sessionSecret;
 
-  function sign(username, email) {
-    const payload = Buffer.from(JSON.stringify({ u: username, ...(email ? { e: email } : {}), exp: Math.floor(Date.now() / 1000) + ttlSeconds })).toString('base64url');
+  // Sessions and two-factor records live in the auth store; a write-only store
+  // (some tests) gets an in-memory stand-in for them.
+  const mem = {};
+  const kv = typeof authStore.get === 'function' ? authStore : { get: (k, d) => (k in mem ? mem[k] : d), set: (k, v) => { mem[k] = v; return v; } };
+  const sessions = createSessions(kv, { ttlMs: ttlSeconds * 1000 });
+  // Two-factor records: { [user]: { secret, enabledAt, lastStep, recovery: [hash], pending: { secret, at } } }
+  const tfKey = (u) => String(u || '').toLowerCase();
+  const tfGet = (u) => ((kv.get(TF_NS, {}) || {})[tfKey(u)]) || {};
+  const tfSet = (u, v) => { const all = { ...(kv.get(TF_NS, {}) || {}) }; if (v) all[tfKey(u)] = v; else delete all[tfKey(u)]; kv.set(TF_NS, all); };
+  const tfOn = (u) => !!tfGet(u).secret;
+  const codeLimiter = createAuthLimiter({ maxFailures: 5, windowMs: 15 * 60000, baseLockMs: 5 * 60000 });
+  // Plex sign-ins waiting for a two-factor code: nonce -> { uname, email, token, exp, tries }
+  const pendingMfa = new Map();
+
+  function sign(username, email, sid) {
+    const payload = Buffer.from(JSON.stringify({ u: username, ...(email ? { e: email } : {}), ...(sid ? { s: sid } : {}), exp: Math.floor(Date.now() / 1000) + ttlSeconds })).toString('base64url');
     const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
     return `${payload}.${sig}`;
   }
@@ -94,12 +113,16 @@ export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root,
     const a = Buffer.from(sig); const b = Buffer.from(expected);
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
     try {
-      const { u, e, exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
+      const { u, e, s, exp } = JSON.parse(Buffer.from(payload, 'base64url').toString());
       if (!exp || exp < Math.floor(Date.now() / 1000)) return null;
-      return u ? { username: u, email: e || '' } : null;
+      return u ? { username: u, email: e || '', sid: s || null } : null;
     } catch { return null; }
   }
 
+  function plainCookie(name, value, maxAge, cookiePath) {
+    const age = Math.max(0, Math.floor(Number(maxAge) || 0));
+    return [`${name}=${encodeURIComponent(value)}`, `Path=${cookiePath}`, 'HttpOnly', 'SameSite=Lax', `Max-Age=${age}`, ...(secureCookies ? ['Secure'] : [])].join('; ');
+  }
   function sessionCookie(value, maxAge) {
     const age = Math.max(0, Math.floor(Number(maxAge) || 0));
     // Native launches enter from capacitor://localhost, which is cross-site to
@@ -124,11 +147,50 @@ export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root,
   function isAllowed(user) { return roles.isAllowed(user.username, user.email); }
   // Re-checked on every request, so removing a user or changing a role takes
   // effect immediately instead of when the session cookie expires.
+  // Cookies from before the session list have no id. Each one is tied to one
+  // stored session the first time it's seen (so a page's parallel requests
+  // don't each start a session) and after that works only while that session
+  // exists, so signing it out ends the old cookie too.
+  const LEGACY_NS = 'sessionsLegacy';
+  const legacyId = (raw) => crypto.createHash('sha256').update(String(raw)).digest('base64url').slice(0, 32);
+  function legacySession(raw, user, req) {
+    const map = { ...(kv.get(LEGACY_NS, {}) || {}) };
+    const id = legacyId(raw);
+    if (map[id]) return sessions.get(map[id].sid) ? map[id].sid : null;
+    const cutoff = Date.now() - ttlSeconds * 1000;
+    for (const [k, v] of Object.entries(map)) if (!v || v.at < cutoff) delete map[k];
+    const sid = sessions.create(user.username, { ip: clientIp(req), ua: req.headers['user-agent'] || '' });
+    map[id] = { sid, at: Date.now() };
+    kv.set(LEGACY_NS, map);
+    return sid;
+  }
+
+  // Each cookie names a stored session; signing out a session (or the
+  // account) removes it, which ends that cookie at once. Old cookies are
+  // upgraded (above), except for accounts with two-factor on, which must
+  // sign in again.
   function sessionUser(req) {
     const s = verify(getCookie(req, COOKIE));
     if (!s) return null;
     const role = roles.lookup(s.username, s.email);
-    return role ? { ...s, role } : null;
+    if (!role) return null;
+    if (s.sid) {
+      const rec = sessions.get(s.sid);
+      if (!rec || rec.user.toLowerCase() !== s.username.toLowerCase()) return null;
+      return { ...s, role, session: rec };
+    }
+    if (tfOn(s.username)) return null;
+    const sid = legacySession(getCookie(req, COOKIE), s, req);
+    return sid ? { ...s, role, sid, session: sessions.get(sid), upgrade: true } : null;
+  }
+
+  // Finish a sign-in: keep the Plex token server-side, log it, start a session.
+  function completeSignIn(req, res, { uname, email, token, mfa }, extraCookies = []) {
+    try { authStore.set('plex', { token, user: uname, at: Date.now() }); } catch { /* best effort */ }
+    try { authStore.push('loginLog', { user: uname, at: Date.now(), ip: clientIp(req), ua: req.headers['user-agent'] || '', ...(mfa ? { mfa: true } : {}) }); } catch { /* best effort */ }
+    const sid = sessions.create(uname, { ip: clientIp(req), ua: req.headers['user-agent'] || '', mfa });
+    res.setHeader('Set-Cookie', [sessionCookie(sign(uname, email, sid), ttlSeconds), ...extraCookies]);
+    return sid;
   }
 
   // ---- Router: /api/auth/* ----
@@ -184,26 +246,55 @@ export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root,
       if (!isAllowed(user)) {
         return res.status(403).json({ authorized: false, error: 'This Plex account is not permitted to access this dashboard.' });
       }
-      // Capture the Plex token server-side (never sent to the browser) so the
-      // dashboard can call the Plex API (watchlist, users, sessions). Also log
-      // the successful login.
+      // The Plex token is kept server-side (never sent to the browser) so the
+      // dashboard can call the Plex API (watchlist, users, sessions).
       const uname = user.username || user.email;
-      try { authStore.set('plex', { token: data.authToken, user: uname, at: Date.now() }); } catch { /* best effort */ }
-      try {
-        authStore.push('loginLog', {
-          user: uname, at: Date.now(),
-          ip: (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '',
-          ua: req.headers['user-agent'] || '',
-        });
-      } catch { /* best effort */ }
-      res.setHeader('Set-Cookie', sessionCookie(sign(uname, user.username ? user.email : ''), ttlSeconds));
+      const email = user.username ? user.email : '';
+      if (tfOn(uname)) {
+        // Plex said yes; now the authenticator code. Nothing is stored and no
+        // session starts until the code is right.
+        const nonce = crypto.randomBytes(24).toString('base64url');
+        for (const [k, v] of pendingMfa) if (v.exp < Date.now()) pendingMfa.delete(k);
+        pendingMfa.set(nonce, { uname, email, token: data.authToken, exp: Date.now() + 5 * 60000, tries: 0 });
+        res.setHeader('Set-Cookie', plainCookie(MFA_COOKIE, nonce, 300, '/api/auth'));
+        return res.json({ authorized: false, mfaRequired: true, user: { username: user.username } });
+      }
+      completeSignIn(req, res, { uname, email, token: data.authToken, mfa: false });
       res.json({ authorized: true, user: { username: user.username, email: user.email, thumb: user.thumb } });
     } catch (e) {
       res.status(502).json({ authorized: false, error: 'Plex request failed: ' + e.message });
     }
   });
 
+  // Second step of sign-in: a code from the authenticator app, or a recovery code.
+  router.post('/2fa', (req, res) => {
+    if (!enabled) return res.status(400).json({ error: 'Plex auth is disabled' });
+    const nonce = getCookie(req, MFA_COOKIE);
+    const p = nonce && pendingMfa.get(nonce);
+    if (!p || p.exp < Date.now()) return res.status(401).json({ error: 'This sign-in has expired. Start again with Plex.' });
+    const limitKey = `2fa:${tfKey(p.uname)}`;
+    const wait = codeLimiter.blockedFor(limitKey);
+    if (wait) return res.status(429).json({ error: `Too many wrong codes. Try again in ${Math.ceil(wait / 60000)} min.` });
+    const rec = tfGet(p.uname);
+    const code = String((req.body && req.body.code) || '').trim();
+    let ok = false; let usedRecovery = false;
+    const step = checkTotp(rec.secret, code, { lastStep: rec.lastStep ?? -1 });
+    if (step !== null) { tfSet(p.uname, { ...rec, lastStep: step }); ok = true; }
+    else { const left = useRecoveryCode(rec.recovery, code); if (left) { tfSet(p.uname, { ...rec, recovery: left }); ok = true; usedRecovery = true; } }
+    if (!ok) {
+      codeLimiter.fail(limitKey);
+      if (++p.tries >= 5) pendingMfa.delete(nonce);
+      return res.status(401).json({ error: p.tries >= 5 ? 'Too many wrong codes. Start again with Plex.' : 'That code didn’t work. Check the time on your phone and try the newest code.' });
+    }
+    codeLimiter.succeed(limitKey);
+    pendingMfa.delete(nonce);
+    completeSignIn(req, res, { uname: p.uname, email: p.email, token: p.token, mfa: true }, [plainCookie(MFA_COOKIE, '', 0, '/api/auth')]);
+    res.json({ authorized: true, recoveryLeft: usedRecovery ? (tfGet(p.uname).recovery || []).length : undefined });
+  });
+
   router.post('/logout', (req, res) => {
+    const s = verify(getCookie(req, COOKIE));
+    if (s && s.sid) sessions.revoke(s.sid);
     res.setHeader('Set-Cookie', sessionCookie('', 0));
     res.json({ ok: true });
   });
@@ -221,7 +312,13 @@ export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root,
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
 
     const user = sessionUser(req);
-    if (user) { req.plexUser = user.username; req.plexRole = user.role; return next(); }
+    if (user) {
+      req.plexUser = user.username; req.plexRole = user.role; req.plexEmail = user.email || null;
+      req.plexSession = user.sid;
+      if (user.upgrade) res.append('Set-Cookie', sessionCookie(sign(user.username, user.email, user.sid), ttlSeconds));
+      else sessions.touch(user.sid, clientIp(req));
+      return next();
+    }
     if (p.startsWith('/api/')) return res.status(401).json({ error: 'Authentication required' });
     // Serve the login page with a 401 so crawlers treat it as protected and
     // don't index it as a public "deceptive login" page. No WWW-Authenticate
@@ -229,8 +326,81 @@ export function createPlexAuth(cfg, { root, publicDir, dataDir = path.join(root,
     return res.status(401).sendFile(path.join(publicDir, 'login.html'));
   }
 
+  // ---- /api/account: your sessions and two-factor (behind the gate) ----
+  const account = express.Router();
+  account.use(express.json({ limit: '4kb' }));
+  const off = (res) => res.status(400).json({ error: 'Sessions and two-factor need Sign in with Plex turned on.' });
+  const shape = (x, me) => ({ id: x.id, user: x.user, created: x.created, lastSeen: x.lastSeen, ip: x.ip, device: describeAgent(x.ua), mfa: !!x.mfa, current: x.id === me });
+  const summary = (req) => {
+    const rec = tfGet(req.plexUser);
+    const admin = req.plexRole === 'admin';
+    return {
+      plexAuth: true, user: req.plexUser, role: req.plexRole,
+      twoFactor: { enabled: !!rec.secret, enabledAt: rec.enabledAt || null, recoveryLeft: (rec.recovery || []).length, canEnroll: admin || !!rec.secret },
+      sessions: sessions.list(req.plexUser).map((x) => shape(x, req.plexSession)),
+      everyone: admin ? sessions.list().map((x) => shape(x, req.plexSession)) : undefined,
+    };
+  };
+  // A current code (or recovery code) is needed to turn two-factor off or make new recovery codes.
+  const confirmCode = (req, res) => {
+    const limitKey = `2fa:${tfKey(req.plexUser)}`;
+    if (codeLimiter.blockedFor(limitKey)) { res.status(429).json({ error: 'Too many wrong codes. Try again in a few minutes.' }); return null; }
+    const rec = tfGet(req.plexUser); const code = String((req.body && req.body.code) || '').trim();
+    const step = checkTotp(rec.secret, code, { lastStep: rec.lastStep ?? -1 });
+    if (step !== null) { codeLimiter.succeed(limitKey); return { ...rec, lastStep: step }; }
+    const left = useRecoveryCode(rec.recovery, code);
+    if (left) { codeLimiter.succeed(limitKey); return { ...rec, recovery: left }; }
+    codeLimiter.fail(limitKey); res.status(401).json({ error: 'That code didn’t work.' }); return null;
+  };
+  account.get('/', (req, res) => { if (!enabled) return res.json({ plexAuth: false }); res.set('Cache-Control', 'no-store'); res.json(summary(req)); });
+  account.delete('/sessions/:id', (req, res) => {
+    if (!enabled) return off(res);
+    const target = sessions.get(req.params.id);
+    if (!target || (target.user.toLowerCase() !== tfKey(req.plexUser) && req.plexRole !== 'admin')) return res.status(404).json({ error: 'No such session' });
+    sessions.revoke(req.params.id);
+    if (req.params.id === req.plexSession) { res.setHeader('Set-Cookie', sessionCookie('', 0)); return res.json({ signedOut: true }); }
+    res.json(summary(req));
+  });
+  account.post('/sessions/others', (req, res) => { if (!enabled) return off(res); const n = sessions.revokeUser(req.plexUser, { except: req.plexSession }); res.json({ ...summary(req), removed: n }); });
+  account.post('/2fa/start', (req, res) => {
+    if (!enabled) return off(res);
+    if (req.plexRole !== 'admin') return res.status(403).json({ error: 'Two-factor is for admin accounts.' });
+    const rec = tfGet(req.plexUser);
+    if (rec.secret) return res.status(400).json({ error: 'Two-factor is already on.' });
+    const secret = newSecret();
+    tfSet(req.plexUser, { ...rec, pending: { secret, at: Date.now() } });
+    res.json({ secret, otpauth: otpauthUrl(secret, req.plexUser) });
+  });
+  account.post('/2fa/confirm', (req, res) => {
+    if (!enabled) return off(res);
+    const rec = tfGet(req.plexUser);
+    if (!rec.pending || Date.now() - rec.pending.at > 15 * 60000) return res.status(400).json({ error: 'Start the set-up again.' });
+    const step = checkTotp(rec.pending.secret, req.body && req.body.code);
+    if (step === null) return res.status(401).json({ error: 'That code didn’t work. Check the time on your phone and try the newest code.' });
+    const { codes, hashes } = newRecoveryCodes();
+    tfSet(req.plexUser, { secret: rec.pending.secret, enabledAt: Date.now(), lastStep: step, recovery: hashes });
+    // Other browsers signed in without the code; sign them out.
+    const removed = sessions.revokeUser(req.plexUser, { except: req.plexSession });
+    res.json({ ...summary(req), recoveryCodes: codes, removed });
+  });
+  account.post('/2fa/disable', (req, res) => {
+    if (!enabled) return off(res);
+    if (!tfOn(req.plexUser)) return res.status(400).json({ error: 'Two-factor is not on.' });
+    if (!confirmCode(req, res)) return;
+    tfSet(req.plexUser, null);
+    res.json(summary(req));
+  });
+  account.post('/2fa/recovery', (req, res) => {
+    if (!enabled) return off(res);
+    if (!tfOn(req.plexUser)) return res.status(400).json({ error: 'Two-factor is not on.' });
+    const rec = confirmCode(req, res); if (!rec) return;
+    const { codes, hashes } = newRecoveryCodes();
+    tfSet(req.plexUser, { ...rec, recovery: hashes });
+    res.json({ ...summary(req), recoveryCodes: codes });
+  });
+
   return {
-    enabled, router, middleware, verify, roles,
+    enabled, router, middleware, verify, roles, account, sessions,
     getCookie: (req) => { const s = verify(getCookie(req, COOKIE)); return s ? s.username : null; },
     // Role for a request that passed the gate. Without Plex sign-in there is a
     // single operator (or Basic auth), so everyone is an admin.

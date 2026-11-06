@@ -79,8 +79,43 @@ export function usersRolesCard() {
         idInput, roleSelect(newRole, (r) => { newRole = r; }), h('button', { class: 'btn primary sm', onclick: add }, 'Add')),
       h('datalist', { id: listId }, ...(data.suggestions || []).map((s) => h('option', { value: s }))),
       data.allowAny ? h('p', { class: 'dim settings-copy' }, `Any Plex account may sign in (allowAnyPlexUser); people not listed here get the ${data.defaultRole} role.`) : null,
+      servicesPanel,
     );
   };
+  const servicesPanel = roleServicesPanel();
   call('GET', '/api/users').then(render).catch((e) => mount(card, h('div', { class: 'dim' }, `Could not load users: ${e.message}`)));
   return card;
+}
+
+// Which services users and guests see. Admins always see everything.
+function roleServicesPanel() {
+  const box = h('div', { style: { marginTop: '18px' } });
+  const load = async () => {
+    let d;
+    try { d = await call('GET', '/api/users/services'); } catch (e) { mount(box, h('div', { class: 'dim' }, e.message)); return; }
+    const state = { user: d.settings.user, guest: d.settings.guest };
+    const save = async (role) => {
+      try { await call('PUT', '/api/users/services', { [role]: state[role] }); toast(`${role === 'user' ? 'Users' : 'Guests'} now see ${state[role] === null ? 'every service' : `${state[role].length} ${state[role].length === 1 ? 'service' : 'services'}`}`, 'success'); paint(); }
+      catch (e) { toast(e.message, 'error'); }
+    };
+    const col = (role) => {
+      const all = state[role] === null;
+      const chosen = new Set(all ? d.services.map((s) => s.key) : state[role]);
+      const every = h('input', { type: 'checkbox', role: 'switch', checked: all ? 'checked' : null, onchange: (e) => { state[role] = e.target.checked ? null : d.services.map((s) => s.key); save(role); } });
+      return h('div', { style: { flex: '1', minWidth: '240px' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 6px' } }, h('b', {}, role === 'user' ? 'Users' : 'Guests'), h('span', { style: { flex: '1' } }),
+          h('label', { style: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' } }, every, 'All services')),
+        all ? h('p', { class: 'dim', style: { fontSize: '12px', margin: '0' } }, 'Sees every service, including ones you add later.') :
+          h('div', { style: { display: 'grid', gap: '4px', maxHeight: '240px', overflowY: 'auto' } }, ...d.services.map((s) => h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center', fontSize: '13px' } },
+            h('input', { type: 'checkbox', checked: chosen.has(s.key) ? 'checked' : null, onchange: (e) => { if (e.target.checked) chosen.add(s.key); else chosen.delete(s.key); state[role] = d.services.map((x) => x.key).filter((k) => chosen.has(k)); save(role); } }),
+            s.label, h('span', { class: 'dim', style: { fontSize: '11px' } }, s.type)))));
+    };
+    const paint = () => mount(box,
+      h('div', { class: 'section-title', style: { margin: '0 0 6px' } }, 'Services each role can see'),
+      h('p', { class: 'dim settings-copy' }, 'Hidden services disappear from the sidebar, Home and search for that role, and the server refuses their requests. Admins always see everything.'),
+      h('div', { style: { display: 'flex', gap: '20px', flexWrap: 'wrap' } }, col('user'), col('guest')));
+    paint();
+  };
+  load();
+  return box;
 }
