@@ -123,7 +123,7 @@ export function dashboardSettingsCard(ctx) {
     const attachmentRows = allServices.map((service) => {
       const checked = draftServiceKeys === null || draftServiceKeys.includes(service.key);
       return h('label', { class: 'dashboard-visible' }, h('input', {
-        type: 'checkbox', checked,
+        type: 'checkbox', role: 'switch', checked,
         onchange: (event) => {
           if (draftServiceKeys === null) draftServiceKeys = allServices.map((entry) => entry.key);
           draftServiceKeys = event.target.checked ? [...new Set([...draftServiceKeys, service.key])] : draftServiceKeys.filter((key) => key !== service.key);
@@ -154,7 +154,7 @@ export function dashboardSettingsCard(ctx) {
       },
         h('span', { class: 'drag-handle', title: 'Drag to reorder', html: '<svg viewBox="0 0 12 18" width="10" height="16" aria-hidden="true" fill="currentColor"><circle cx="3" cy="3" r="1.6"/><circle cx="9" cy="3" r="1.6"/><circle cx="3" cy="9" r="1.6"/><circle cx="9" cy="9" r="1.6"/><circle cx="3" cy="15" r="1.6"/><circle cx="9" cy="15" r="1.6"/></svg>' }),
         h('label', { class: 'dashboard-visible' }, h('input', {
-          type: 'checkbox', checked: widget.visible,
+          type: 'checkbox', role: 'switch', checked: widget.visible,
           onchange: (event) => { widget.visible = event.target.checked; },
         }), h('span', {}, widget.label)),
         h('select', {

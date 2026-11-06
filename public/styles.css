@@ -1633,3 +1633,127 @@ html[data-black] .hex-cell.hex-system .hex-face { background: linear-gradient(16
 [data-role="guest"] #view [title="Bulk select"] { display: none !important; }
 [data-role="guest"] [data-needs="write"],
 :is([data-role="user"], [data-role="guest"]) :is([data-needs="delete"], [data-needs="admin"]) { display: none !important; }
+
+/* ---------- Hexagon switch ----------
+   Every on/off control (input[role="switch"], plus the older .pw-toggle and
+   .pw-switch wrappers) is an elongated hexagon track with a hexagon knob.
+   Drawn with backgrounds on the input itself, so it needs no extra markup
+   and works the same in every browser. Plain checkboxes (picking items from
+   a list) keep the normal checkbox look. */
+input[type="checkbox"][role="switch"], .pw-toggle input[type="checkbox"] {
+  -webkit-appearance: none; appearance: none;
+  flex: none; margin: 0; width: 46px; height: 24px; border: 0; border-radius: 0;
+  cursor: pointer; vertical-align: middle;
+  clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 8px 100%, 0 50%);
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 16'%3E%3Cpolygon points='4.5,0 13.5,0 18,8 13.5,16 4.5,16 0,8' fill='white'/%3E%3C/svg%3E") no-repeat 6px 50% / 18px 16px,
+    linear-gradient(var(--border-strong), var(--border-strong));
+  transition: background-position 0.18s var(--ease), filter 0.18s var(--ease);
+}
+input[type="checkbox"][role="switch"]:checked, .pw-toggle input[type="checkbox"]:checked {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 16'%3E%3Cpolygon points='4.5,0 13.5,0 18,8 13.5,16 4.5,16 0,8' fill='white'/%3E%3C/svg%3E") no-repeat calc(100% - 6px) 50% / 18px 16px,
+    var(--grad-primary);
+}
+input[type="checkbox"][role="switch"]:focus-visible, .pw-toggle input[type="checkbox"]:focus-visible { outline: none; filter: drop-shadow(0 0 4px var(--accent)); }
+input[type="checkbox"][role="switch"]:disabled, .pw-toggle input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Prowlarr's indexer switch used a separate track element; the input draws itself now. */
+.pw-switch input[type="checkbox"][role="switch"] { position: static; opacity: 1; width: 46px; height: 24px; }
+.pw-switch .pw-switch-track { display: none; }
+
+/* ---------- Settings: tabs + collapsible rows ----------
+   Desktop: elongated hexagons like the rest of the app. Phones (≤720px):
+   rounded boxes, which read better at that size. */
+.sx-settings { --sx-hx: polygon(20px 0, calc(100% - 20px) 0, 100% 50%, calc(100% - 20px) 100%, 20px 100%, 0 50%); }
+.sx-search { display: flex; align-items: center; gap: 10px; padding: 11px 32px; margin-bottom: 12px; background: var(--surface); color: var(--text-dim);
+  clip-path: polygon(16px 0, calc(100% - 16px) 0, 100% 50%, calc(100% - 16px) 100%, 16px 100%, 0 50%); filter: drop-shadow(0 3px 8px rgba(30, 33, 55, 0.1)); cursor: text; }
+.sx-search-ic { display: inline-flex; flex: none; }
+.sx-search-input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; outline: none; }
+.sx-tabwrap { position: relative; }
+.sx-tabs { display: flex; gap: 8px; padding: 4px 2px 12px; overflow-x: auto; scrollbar-width: none; }
+.sx-tabs::-webkit-scrollbar { display: none; }
+.sx-tab { flex: none; display: inline-flex; align-items: center; gap: 8px; padding: 10px 28px; border: 0; font: inherit; font-weight: 700; font-size: 14px; cursor: pointer;
+  background: var(--surface); color: var(--text-dim); clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%);
+  filter: drop-shadow(0 3px 7px rgba(30, 33, 55, 0.14)); transition: color 0.15s var(--ease), background 0.15s var(--ease); }
+.sx-tab:hover { color: var(--text); background: var(--surface-hover, var(--surface)); }
+.sx-tab.on { background: var(--grad-primary); color: #fff; filter: drop-shadow(0 5px 12px rgba(var(--accent-deep-rgb), 0.45)); }
+.sx-tabs.searching .sx-tab { opacity: 0.55; }
+.sx-n { font-size: 11px; font-weight: 800; padding: 2px 9px; background: #f59e0b; color: #fff; clip-path: polygon(5px 0, calc(100% - 5px) 0, 100% 50%, calc(100% - 5px) 100%, 5px 100%, 0 50%); }
+.sx-list { display: flex; flex-direction: column; gap: 12px; }
+.sx-item[hidden] { display: none; }
+.sx-head { width: 100%; display: flex; align-items: center; gap: 14px; padding: 16px 38px; border: 0; font: inherit; color: var(--text); text-align: left; cursor: pointer;
+  background: var(--surface); clip-path: var(--sx-hx); filter: drop-shadow(0 3px 8px rgba(30, 33, 55, 0.12)); }
+.sx-head:hover { background: linear-gradient(160deg, var(--accent-soft), var(--surface)); }
+.sx-head:focus-visible { outline: none; filter: drop-shadow(0 0 5px var(--accent)); }
+.sx-t { font-weight: 700; font-size: 15px; white-space: nowrap; }
+.sx-v { margin-left: auto; font-size: 12.5px; color: var(--text-dim); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sx-badge { flex: none; font-size: 10px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; padding: 3px 12px; background: #f59e0b; color: #fff;
+  clip-path: polygon(6px 0, calc(100% - 6px) 0, 100% 50%, calc(100% - 6px) 100%, 6px 100%, 0 50%); }
+.sx-badge[hidden], .sx-n[hidden] { display: none; }
+.sx-chev { flex: none; width: 26px; height: 22px; display: grid; place-items: center; color: var(--text-dim); background: var(--surface-2);
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); transition: transform 0.2s var(--ease); }
+.sx-open .sx-head { background: linear-gradient(160deg, var(--accent-soft), var(--surface)); }
+.sx-open .sx-chev { background: var(--grad-primary); color: #fff; }
+.sx-open .sx-chev svg { transform: rotate(180deg); }
+.sx-body { margin: -4px 14px 0; padding: 18px 44px 22px; background: var(--surface);
+  clip-path: polygon(26px 0, calc(100% - 26px) 0, 100% 50%, calc(100% - 26px) 100%, 26px 100%, 0 50%); filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.14));
+}
+.sx-body[hidden] { display: none; }
+.sx-empty { padding: 20px 4px; }
+/* The existing cards sit inside the open panel: drop their own box so it's one surface. */
+#view[data-route="settings"] .sx-body > .card { clip-path: none; filter: none; background: transparent; padding: 0; margin: 0 0 14px; }
+#view[data-route="settings"] .sx-body > .card:last-child { margin-bottom: 0; }
+#view[data-route="settings"] .sx-body > .card > h3:first-child { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
+/* Service cards inside the Services panel keep a box of their own. */
+#view[data-route="settings"] .sx-body .grid > .card { clip-path: none; filter: none; background: var(--surface-2); border-radius: 14px; padding: 16px 18px; }
+
+@media (max-width: 720px) {
+  .sx-search, .sx-tab, .sx-n, .sx-head, .sx-badge, .sx-chev, .sx-body { clip-path: none; }
+  .sx-search { border-radius: 14px; padding: 11px 14px; }
+  .sx-tabwrap::after { content: ''; position: absolute; right: 0; top: 0; bottom: 12px; width: 36px; background: linear-gradient(90deg, transparent, var(--bg)); pointer-events: none; }
+  .sx-tab { border-radius: 999px; padding: 9px 16px; font-size: 13px; }
+  .sx-n, .sx-badge { border-radius: 999px; padding: 2px 8px; }
+  .sx-head { border-radius: 16px; padding: 15px 16px; gap: 10px; }
+  .sx-t { font-size: 16px; white-space: normal; }
+  .sx-v { max-width: 45%; }
+  .sx-chev { border-radius: 8px; width: 28px; height: 28px; }
+  .sx-open .sx-head { border-radius: 16px 16px 0 0; }
+  .sx-body { margin: 0; border-radius: 0 0 16px 16px; padding: 14px 16px 18px; border-top: 1px solid var(--border); }
+  /* Rounded buttons inside phone settings, to match the boxes. */
+  #view[data-route="settings"] .sx-body .btn { clip-path: none; border-radius: 10px; }
+  #view[data-route="settings"] .sx-body .grid > .card { padding: 14px; }
+}
+/* Service cards in Settings → Services: icon, name/version and status on one line. */
+.svc-card-drag .svc-head { display: flex; align-items: center; gap: 12px; }
+.svc-card-drag .svc-head > div { flex: 1; min-width: 0; }
+.svc-card-drag .svc-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svc-card-drag .svc-meta { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svc-card-drag .svc-head .pill.right { margin-left: auto; flex: none; }
+#view[data-route="settings"] .sx-body .grid > .card .btn:not(.primary) { background: var(--surface); }
+
+/* Settings motion: highlights fade instead of snapping (gradients can't be
+   transitioned, so they live on an overlay whose opacity animates), the
+   arrow turns, rows and tabs give a little under the pointer. Opening and
+   closing heights are animated in settingsLayout.js. */
+.sx-head, .sx-tab { position: relative; isolation: isolate; }
+.sx-head::before, .sx-tab::before { content: ''; position: absolute; inset: 0; z-index: -1; opacity: 0; pointer-events: none; transition: opacity 0.22s var(--ease); }
+.sx-head::before { background: linear-gradient(160deg, var(--accent-soft), var(--surface)); }
+.sx-tab::before { background: var(--grad-primary); }
+.sx-head:hover, .sx-open .sx-head { background: var(--surface); }
+.sx-head:hover::before { opacity: 0.7; }
+.sx-open .sx-head::before { opacity: 1; }
+.sx-tab.on { background: var(--surface); }
+.sx-tab.on::before { opacity: 1; }
+.sx-tab { transition: color 0.22s var(--ease), filter 0.22s var(--ease), transform 0.12s var(--ease); }
+.sx-head { transition: transform 0.12s var(--ease), filter 0.2s var(--ease); }
+.sx-head:active, .sx-tab:active { transform: scale(0.985); }
+.sx-chev { transition: background 0.2s var(--ease), color 0.2s var(--ease); }
+.sx-chev svg { transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.sx-v { transition: opacity 0.2s var(--ease); }
+.sx-badge, .sx-n { animation: sxPop 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes sxPop { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .sx-head, .sx-tab, .sx-chev, .sx-chev svg, .sx-head::before, .sx-tab::before, .sx-v { transition: none !important; }
+  .sx-badge, .sx-n { animation: none; }
+  .sx-head:active, .sx-tab:active { transform: none; }
+}

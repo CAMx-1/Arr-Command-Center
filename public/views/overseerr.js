@@ -6,6 +6,7 @@ import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet } from '../lib/cache.js';
 import { api } from '../lib/api.js';
+import { tabNeverWatched } from '../lib/neverWatchedUI.js';
 import { requestStage, findLibraryItem, queueFor, requestedSeasons } from '../lib/requestProgress.js';
 
 // Sonarr/Radarr libraries (shared cache) + live queues, for request progress.
@@ -84,6 +85,7 @@ export async function renderOverseerr(root, ctx) {
     { id: 'all', label: 'All Requests', render: (c) => tabRequests(c, seerr, ctx, 'all') },
     { id: 'issues', label: 'Issues', render: (c) => tabIssues(c, seerr, ctx) },
     { id: 'recent', label: 'Recently Added', render: (c) => tabRecentlyAdded(c, seerr, ctx) },
+    { id: 'unwatched', label: 'Never watched', render: (c) => tabNeverWatched(c, seerr, ctx) },
     { id: 'discover', label: 'Discover', render: (c) => tabDiscover(c, seerr, ctx) },
   ], `tabs-${svc.key}`, {
     activeId: ctx.params.tab,

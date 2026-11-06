@@ -33,7 +33,7 @@ export function loadDotEnv() {
   }
 }
 
-const SERVICE_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex', 'portainer', 'glances', 'pihole', 'adguard', 'syncthing', 'navidrome', 'pulsarr', 'whisparr', 'truenas', 'unraid'];
+const SERVICE_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex', 'portainer', 'glances', 'pihole', 'adguard', 'syncthing', 'navidrome', 'pulsarr', 'whisparr', 'truenas', 'unraid', 'unpackerr', 'speedtest'];
 export const ALLOWED_SERVICE_TYPES = SERVICE_TYPES;
 export const CONFIG_PATH = path.join(ROOT, 'config.json');
 
@@ -201,6 +201,14 @@ export function buildServiceUpdate(key, service, prev = {}, { isHttpUrl = defaul
     else if (prevHasCustomHeaders && !originChanged) clean.customHeaders = normalizeCustomHeaders(prev.customHeaders);
   } catch (error) { return { error: error.message }; }
 
+  // Optional address to open the app in a browser, when it differs from the
+  // one the server uses (for example http://sonarr:8989 inside Docker).
+  if (Object.prototype.hasOwnProperty.call(service, 'webUrl')) {
+    const w = String(service.webUrl || '').trim().slice(0, 300);
+    if (w && !isHttpUrl(w)) return { error: 'Browser URL must be an http(s) URL' };
+    if (w) clean.webUrl = w;
+  } else if (prev.webUrl) clean.webUrl = prev.webUrl;
+
   if (clean.type === 'transmission') {
     const supplied = Object.prototype.hasOwnProperty.call(service, 'rpcPath') ? service.rpcPath : prev.rpcPath;
     try {
@@ -299,6 +307,8 @@ function buildMockConfig() {
       syncthing: mk('syncthing', 'Syncthing', 'syncthing', MOCK_PORTS.syncthing),
       navidrome: mkLogin('Navidrome', 'navidrome', MOCK_PORTS.navidrome, 'admin', 'mock-navidrome'),
       pulsarr: mk('pulsarr', 'Pulsarr', 'pulsarr', MOCK_PORTS.pulsarr),
+      unpackerr: mk('unpackerr', 'Unpackerr', 'unpackerr', MOCK_PORTS.unpackerr),
+      speedtest: mk('speedtest', 'Speedtest Tracker', 'speedtest', MOCK_PORTS.speedtest),
       whisparr: mk('whisparr', 'Whisparr', 'whisparr', MOCK_PORTS.whisparr),
       unraid: mk('unraid', 'Unraid', 'unraid', MOCK_PORTS.unraid),
       // Real TrueNAS needs https (it revokes keys sent over http); the demo
@@ -386,6 +396,7 @@ export function publicConfig(cfg) {
       type: svc.type,
       hasCloudflareAccess: !!(svc.cloudflareAccess && svc.cloudflareAccess.clientId),
       hasCustomHeaders: hasCustomHeaders(svc.customHeaders),
+      hasWebUrl: !!svc.webUrl,
       configured: serviceConfigured(svc),
       // A sample service renders built-in demo data client-side (no backend).
       sample: !!svc.sample,
@@ -409,7 +420,7 @@ const LOCAL_FALLBACK_TYPES = new Set([
   'sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'prowlarr',
   'bazarr', 'sabnzbd', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'tautulli', 'indexer',
   'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr',
-  'whisparr', 'portainer', 'glances', 'adguard', 'syncthing', 'pulsarr', 'unraid',
+  'whisparr', 'portainer', 'glances', 'adguard', 'syncthing', 'pulsarr', 'unraid', 'unpackerr', 'speedtest',
 ]);
 
 function fallbackHttpUrl(value) {

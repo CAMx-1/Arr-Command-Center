@@ -251,6 +251,12 @@ export function classifyLocalPath(pathname) {
     || pathname.startsWith('/api/push/')
     || pathname.startsWith('/api/automation')
     || pathname.startsWith('/api/truenas/')
+    || pathname.startsWith('/api/trash/')
+    || pathname.startsWith('/api/insights/')
+    || pathname === '/api/activity'
+    || pathname.startsWith('/api/backups/')
+    || pathname.startsWith('/api/digest')
+    || pathname.startsWith('/api/bot')
     || pathname === '/api/live' || pathname.startsWith('/api/live/')) return 'server-only';
   return 'passthrough';
 }
@@ -294,6 +300,8 @@ export function statusPath(type) {
     case 'adguard': return 'control/status';
     case 'syncthing': return 'rest/system/version';
     case 'pulsarr': return 'v1/approval/stats';
+    case 'unpackerr': return 'api/stats';
+    case 'speedtest': return 'api/v1/results/latest';
     case 'unraid': return 'graphql';
     default: return 'api/v3/system/status'; // sonarr / radarr
   }

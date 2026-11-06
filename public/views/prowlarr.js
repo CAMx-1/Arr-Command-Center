@@ -1,3 +1,4 @@
+import { tabIndexerHealth } from '../lib/indexerHealthUI.js';
 import { h, mount, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtRelative, timeEl, debounce, openModal, closeModal, confirmModal } from '../lib/ui.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
@@ -26,9 +27,10 @@ export async function renderProwlarr(root, ctx) {
   const body = h('div', {});
   const bar = tabs(body, [
     { id: 'indexers', label: 'Indexers', render: (c) => tabIndexers(c, ctx, px) },
+    { id: 'health', label: 'Health', render: (c) => tabIndexerHealth(c, ctx, px) },
     { id: 'search', label: 'Search', render: (c) => tabSearch(c, ctx, px) },
     { id: 'history', label: 'History', render: (c) => tabHistory(c, ctx, px) },
-  ], `tabs-${svc.key}`);
+  ], `tabs-${svc.key}`, { activeId: ctx.params.tab, onChange: (id) => ctx.setParams({ tab: id === 'indexers' ? '' : id }) });
   mount(root, bar, body);
 }
 
@@ -280,7 +282,7 @@ function field(label, control) {
 }
 function openEdit(ix, px, reload) {
   const model = { ...ix };
-  const enabled = h('input', { type: 'checkbox', checked: model.enable ? 'checked' : null });
+  const enabled = h('input', { type: 'checkbox', role: 'switch', checked: model.enable ? 'checked' : null });
   const priority = h('input', { class: 'input', type: 'number', min: '1', max: '50', value: String(model.priority ?? 25) });
   const status = h('div', { class: 'dim pw-test-status', style: { minHeight: '16px' } }, '');
 

@@ -74,7 +74,7 @@ function renderReleases(root, arr, releases, svcKey) {
   };
   const minIn = num('Min', 'Minimum size in GB', 'minGB');
   const maxIn = num('Max', 'Maximum size in GB', 'maxGB');
-  const hideRej = h('input', { type: 'checkbox' });
+  const hideRej = h('input', { type: 'checkbox', role: 'switch' });
   hideRej.addEventListener('change', () => { filters.hideRejected = hideRej.checked; apply(); });
   const bar = h('div', { class: 'rf-bar' },
     h('div', { class: 'rf-group', role: 'group', 'aria-label': 'Resolution' }, ...resChips),

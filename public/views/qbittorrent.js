@@ -200,7 +200,7 @@ function torrentHex(t, qb, ctx) {
 }
 
 function openDeleteModal(t, qb, ctx) {
-  const delFiles = h('input', { type: 'checkbox' });
+  const delFiles = h('input', { type: 'checkbox', role: 'switch' });
   const confirm = async () => {
     try {
       await qb.post('torrents/delete', { hashes: t.hash, deleteFiles: delFiles.checked ? 'true' : 'false' });

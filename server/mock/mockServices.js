@@ -35,7 +35,7 @@ export const MOCK_PORTS = {
 };
 
 import { createMockFs, sonarrDemoFs, radarrDemoFs, lidarrDemoFs } from './mockFs.js';
-import { INTEGRATION_MOCK_PORTS, makePortainer, makeGlances, makePihole, makeAdguard, makeSyncthing, makeNavidrome, makePulsarr, makeUnraid, makeTruenasServer } from './integrationMocks.js';
+import { INTEGRATION_MOCK_PORTS, makePortainer, makeGlances, makePihole, makeAdguard, makeSyncthing, makeNavidrome, makePulsarr, makeUnraid, makeTruenasServer, makeUnpackerr, makeSpeedtest } from './integrationMocks.js';
 Object.assign(MOCK_PORTS, INTEGRATION_MOCK_PORTS);
 
 const cfSeen = {}; // service -> last seen CF headers
@@ -142,12 +142,12 @@ function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, libr
   const commands = new Map();
   let nextCmd = 1000;
   const qualities = [
-    { id: 1, quality: { id: 1, name: 'SDTV' }, title: 'SDTV' },
-    { id: 2, quality: { id: 4, name: 'HDTV-720p' }, title: 'HDTV-720p' },
-    { id: 3, quality: { id: 6, name: 'WEBDL-1080p' }, title: 'WEBDL-1080p' },
-    { id: 4, quality: { id: 7, name: 'Bluray-1080p' }, title: 'Bluray-1080p' },
-    { id: 5, quality: { id: 18, name: 'WEBDL-2160p' }, title: 'WEBDL-2160p' },
-    { id: 6, quality: { id: 19, name: 'Bluray-2160p' }, title: 'Bluray-2160p' },
+    { id: 1, quality: { id: 1, name: 'SDTV' }, title: 'SDTV', minSize: 2, maxSize: 100 },
+    { id: 2, quality: { id: 4, name: 'HDTV-720p' }, title: 'HDTV-720p', minSize: 17.1, maxSize: 400 },
+    { id: 3, quality: { id: 3, name: 'WEBDL-1080p' }, title: 'WEBDL-1080p', minSize: 12.5, maxSize: 400 },
+    { id: 4, quality: { id: 7, name: 'Bluray-1080p' }, title: 'Bluray-1080p', minSize: 50.4, maxSize: 400 },
+    { id: 5, quality: { id: 18, name: 'WEBDL-2160p' }, title: 'WEBDL-2160p', minSize: 34.5, maxSize: 1000 },
+    { id: 6, quality: { id: 19, name: 'Bluray-2160p' }, title: 'Bluray-2160p', minSize: 102, maxSize: 1000 },
   ];
   app.get('/api/v3/qualitydefinition', (req, res) => res.json(qualities));
   app.get('/api/v3/manualimport', (req, res) => {
@@ -272,9 +272,40 @@ function fsFromItems(items) {
   return fs;
 }
 
+// Backups, like the real apps: GET system/backup lists them, the Backup
+// command makes one, and the zip is served from /backup/<type>/<name> (needs
+// the API key). Mounted first so it sees Backup commands before other routes.
+function mountBackupMock(app, appName, v) {
+  const t0 = Date.now();
+  let backups = [
+    { id: 1, name: `${appName}_backup_v4.0.0_${new Date(t0 - 86400000).toISOString().slice(0, 10).replace(/-/g, '.')}_04.00.00.zip`, path: '', type: 'scheduled', size: 1843200, time: new Date(t0 - 86400000).toISOString() },
+    { id: 2, name: `${appName}_backup_v4.0.0_${new Date(t0 - 8 * 86400000).toISOString().slice(0, 10).replace(/-/g, '.')}_04.00.00.zip`, path: '', type: 'scheduled', size: 1802240, time: new Date(t0 - 8 * 86400000).toISOString() },
+  ];
+  const withPath = (b) => ({ ...b, path: `/backup/${b.type}/${b.name}` });
+  const authed = (req, res) => { if (req.headers['x-api-key'] === 'MOCK_API_KEY' || req.query.apikey === 'MOCK_API_KEY') return true; res.status(401).json({ error: 'Unauthorized' }); return false; };
+  app.get(`/api/${v}/system/backup`, (req, res) => { if (authed(req, res)) res.json(backups.map(withPath).sort((a, b) => b.time.localeCompare(a.time))); });
+  app.delete(`/api/${v}/system/backup/:id`, (req, res) => { if (!authed(req, res)) return; backups = backups.filter((b) => b.id !== Number(req.params.id)); res.json({}); });
+  app.post(`/api/${v}/command`, (req, res, next) => {
+    if (req.body && req.body.name === 'Backup' && req.headers['x-api-key'] === 'MOCK_API_KEY') {
+      const now = new Date();
+      const stampName = now.toISOString().slice(0, 19).replace('T', '_').replace(/-/g, '.').replace(/:/g, '.');
+      backups.push({ id: Math.max(0, ...backups.map((b) => b.id)) + 1, name: `${appName}_backup_v4.0.0_${stampName}.zip`, path: '', type: 'manual', size: 1900544 + backups.length * 4096, time: now.toISOString() });
+    }
+    next();
+  });
+  app.get('/backup/:type/:name', (req, res) => {
+    if (!authed(req, res)) return;
+    const b = backups.find((x) => x.type === req.params.type && x.name === req.params.name);
+    if (!b) return res.status(404).send('Not found');
+    // A tiny valid (empty) zip file.
+    res.type('application/zip').send(Buffer.from([0x50, 0x4b, 0x05, 0x06, ...new Array(18).fill(0)]));
+  });
+}
+
 function makeSonarr(opts = {}) {
   const app = express();
   app.use(express.json());
+  mountBackupMock(app, opts.instanceName && /whisparr/i.test(opts.instanceName) ? 'whisparr' : 'sonarr', 'v3');
   let series = [
     { id: 1, title: 'Severance', year: 2022, tvdbId: 371980, status: 'continuing', monitored: true, seasonCount: 2, network: 'Apple TV+', overview: 'Employees at Lumon undergo a procedure that severs work and personal memories.', path: 'C:\\Media\\TV\\Severance', rootFolderPath: 'C:\\Media\\TV', statistics: { episodeFileCount: 18, episodeCount: 19, percentOfEpisodes: 94.7, sizeOnDisk: 40802189312 }, images: [] },
     { id: 2, title: 'The Bear', year: 2022, tvdbId: 388477, status: 'continuing', monitored: true, seasonCount: 3, network: 'FX', overview: 'A young chef returns to Chicago to run his family sandwich shop.', path: 'C:\\Media\\TV\\The Bear', rootFolderPath: 'C:\\Media\\TV', statistics: { episodeFileCount: 28, episodeCount: 28, percentOfEpisodes: 100, sizeOnDisk: 30064771072 }, images: [] },
@@ -328,11 +359,39 @@ function makeSonarr(opts = {}) {
     ]);
   });
   app.post('/api/v3/series', (req, res) => { const s = { id: series.length + 1, ...req.body, statistics: { episodeFileCount: 0, episodeCount: 0, percentOfEpisodes: 0, sizeOnDisk: 0 } }; series.push(s); res.status(201).json(s); });
+  const importsSince = (req, res) => {
+    const d = (h) => new Date(Date.now() - h * 3600000).toISOString();
+    const since = Date.parse(req.query.date || 0) || 0;
+    const ep = (id, sid, title, year, se, e, name, h, q = 'WEBDL-1080p') => ({ id, eventType: 'downloadFolderImported', date: d(h), quality: { quality: { name: q } }, seriesId: sid, episodeId: id * 10, series: { id: sid, title, year, images: [{ coverType: 'poster', remoteUrl: `https://image.tmdb.org/t/p/w300/${sid}.jpg` }] }, episode: { id: id * 10, seriesId: sid, seasonNumber: se, episodeNumber: e, title: name } });
+    const all = [
+      ep(101, 1, 'Severance', 2022, 2, 10, 'Cold Harbor', 1), ep(102, 1, 'Severance', 2022, 2, 9, 'The After Hours', 30),
+      ep(103, 2, 'The Bear', 2022, 3, 1, 'Tomorrow', 50), ep(104, 2, 'The Bear', 2022, 3, 2, 'Next', 52), ep(105, 2, 'The Bear', 2022, 3, 3, 'Doors', 54),
+      ep(106, 3, 'Foundation', 2021, 2, 1, 'In Seldon’s Shadow', 120, 'WEBDL-2160p'),
+      { id: 107, eventType: 'grabbed', date: d(2), seriesId: 1, series: { id: 1, title: 'Severance' }, episode: { seasonNumber: 2, episodeNumber: 11 } },
+      ep(108, 3, 'Foundation', 2021, 1, 10, 'The Leap', 400),
+    ];
+    res.json(all.filter((r) => Date.parse(r.date) >= since));
+  };
+  app.get('/api/v3/history/since', importsSince);
+  app.get('/api/v3/history', (req, res, next) => {
+    if (!req.query.eventType) return next();
+    importsSince({ query: {} }, { json: (rows) => {
+      const want = rows.filter((r) => String(req.query.eventType) !== '3' || r.eventType === 'downloadFolderImported').sort((a, b) => b.date.localeCompare(a.date))
+        .map((r) => { const o = { ...r }; if (req.query.includeSeries !== 'true') delete o.series; if (req.query.includeEpisode !== 'true') delete o.episode; if (req.query.includeMovie !== 'true') delete o.movie; return o; });
+      const size = Number(req.query.pageSize) || 10; const page = Number(req.query.page) || 1;
+      res.json({ page, pageSize: size, totalRecords: want.length, records: want.slice((page - 1) * size, page * size) });
+    } });
+  });
   app.get('/api/v3/history', (req, res) => res.json({ page: 1, pageSize: 40, totalRecords: 3, records: [
     { id: 1, eventType: 'downloadFolderImported', sourceTitle: 'Severance.S02E10.1080p.WEB-DL', date: new Date(Date.now() - 3600000).toISOString(), quality: { quality: { name: 'WEBDL-1080p' } }, series: { title: 'Severance' }, episode: { seasonNumber: 2, episodeNumber: 10 } },
     { id: 2, eventType: 'downloadFailed', sourceTitle: 'The.Bear.S03E05.1080p', date: new Date(Date.now() - 9000000).toISOString(), quality: { quality: { name: 'WEBDL-1080p' } }, series: { title: 'The Bear' }, episode: { seasonNumber: 3, episodeNumber: 5 } },
     { id: 3, eventType: 'grabbed', sourceTitle: 'Foundation.S02E01.2160p', date: new Date(Date.now() - 18000000).toISOString(), quality: { quality: { name: 'WEBDL-2160p' } }, series: { title: 'Foundation' }, episode: { seasonNumber: 2, episodeNumber: 1 } },
   ] }));
+  app.get('/api/v3/episode', (req, res, next) => {
+    if (!req.query.episodeIds) return next();
+    const ids = new Set([].concat(req.query.episodeIds).map(Number));
+    importsSince({ query: {} }, { json: (rows) => res.json(rows.filter((r) => r.episode && ids.has(r.episode.id)).map((r) => r.episode)) });
+  });
   app.get('/api/v3/episode', (req, res) => {
     const season = Number(req.query.seasonNumber) || 1;
     res.json(Array.from({ length: 8 }, (_, i) => ({ id: 5000 + season * 100 + i + 1, seriesId: Number(req.query.seriesId) || 1, seasonNumber: season, episodeNumber: i + 1, title: `Episode ${i + 1}`, airDateUtc: new Date(Date.now() - (8 - i) * 86400000).toISOString(), hasFile: i % 3 !== 0, monitored: true })));
@@ -365,17 +424,25 @@ function makeSonarr(opts = {}) {
   let tags = [{ id: 1, label: 'anime' }, { id: 2, label: 'kids' }];
   app.get('/api/v3/tag', (req, res) => res.json(tags));
   app.post('/api/v3/tag', (req, res) => { const t = { id: (tags.reduce((mx, x) => Math.max(mx, x.id), 0) || 0) + 1, label: String((req.body && req.body.label) || 'tag') }; tags.push(t); res.status(201).json(t); });
-  mountArrLibraryExtras(app, 'series', { getTags: () => tags, setTags: (t) => { tags = t; }, getItems: () => series });
+  mountArrLibraryExtras(app, 'series', { getTags: () => tags, setTags: (t) => { tags = t; }, getItems: () => series, variant: opts.instanceName ? 'b' : 'a' });
   app.get('/api/v3/rename', (req, res) => res.json([
     { episodeFileId: 501, seriesId: Number(req.query.seriesId) || 1, existingPath: 'Season 02/severance.s02e10.1080p.web.mkv', newPath: 'Season 02/Severance - S02E10 - Cold Harbor [WEBDL-1080p].mkv' },
   ]));
   app.put('/api/v3/episode/monitor', (req, res) => res.json({ updated: ((req.body && req.body.episodeIds) || []).length, monitored: !!(req.body && req.body.monitored) }));
   // Episode files (Severance S01E01-04 at 1080p in the demo) and a recycle bin.
-  const episodeFiles = opts.series ? [] : [1, 2, 3, 4].map((e) => ({ id: 700 + e, seriesId: 1, seasonNumber: 1, relativePath: `Season 1/Severance.S01E0${e}.1080p.WEB-DL.mkv`, path: `/Volumes/Media/TV/Severance/Season 1/Severance.S01E0${e}.1080p.WEB-DL.mkv`, quality: { quality: { id: 3, name: 'WEBDL-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 4e9, episodeIds: [5100 + e] }));
+  const episodeFiles = opts.series ? [] : [1, 2, 3, 4].map((e) => ({ id: 700 + e, seriesId: 1, seasonNumber: 1, relativePath: `Season 1/Severance.S01E0${e}.1080p.WEB-DL.mkv`, path: `/Volumes/Media/TV/Severance/Season 1/Severance.S01E0${e}.1080p.WEB-DL.mkv`, quality: { quality: { id: 3, name: 'WEBDL-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 4e9, episodeIds: [5100 + e], mediaInfo: e === 3 ? null : { videoCodec: 'h264', audioCodec: 'EAC3', audioChannels: 5.1, audioStreamCount: 1, resolution: '1920x1080', runTime: '0:55:10' } }));
   const recycledTv = [];
   app.locals.recycled = recycledTv;
   // Paths are rewritten when Fix paths moves the series; keep files in step.
   const filesFor = (s) => episodeFiles.filter((ef) => ef.seriesId === s.id).map((ef) => ({ ...ef, path: `${s.path}/${ef.relativePath}` }));
+  app.delete('/api/v3/episodefile/:id', (req, res) => {
+    const i = episodeFiles.findIndex((ef) => ef.id === Number(req.params.id));
+    if (i < 0) return res.status(404).json({ message: 'NotFound' });
+    const s = series.find((x) => x.id === episodeFiles[i].seriesId);
+    recycledTv.push(s ? `${s.path}/${episodeFiles[i].relativePath}` : episodeFiles[i].path);
+    episodeFiles.splice(i, 1);
+    res.json({});
+  });
   app.get('/api/v3/episodefile', (req, res) => { const s = series.find((x) => x.id === Number(req.query.seriesId)); res.json(s ? filesFor(s) : []); });
   let mediaManagementTv = { id: 1, recycleBin: opts.series ? '' : '/Volumes/Media/.recycle', recycleBinCleanupDays: 7 };
   app.get('/api/v3/config/mediamanagement', (req, res) => res.json(mediaManagementTv));
@@ -446,6 +513,38 @@ function mountArrLibraryExtras(app, kind, state) {
   app.locals.profiles = structuredClone(MOCK_QUALITY_PROFILES);
   app.locals.formats = structuredClone(MOCK_CUSTOM_FORMATS);
   app.get('/api/v3/customformat', (req, res) => res.json(app.locals.formats));
+  // A second instance (4K / anime) differs a little, like real setups do.
+  if (state.variant === 'b') {
+    app.locals.formats = app.locals.formats.filter((f) => f.name !== 'Bad release group');
+    for (const pr of app.locals.profiles) pr.formatItems = (pr.formatItems || []).filter((fi) => fi.name !== 'Bad release group');
+    app.locals.formats.push({ id: 9, name: 'DV (Dolby Vision)', includeCustomFormatWhenRenaming: true, specifications: [{ name: 'DV', implementation: 'ReleaseTitleSpecification', negate: false, required: true, fields: [{ name: 'value', value: '\\b(dv|dovi|dolby[ .]?vision)\\b' }] }] });
+    const hdr = app.locals.formats.find((f) => f.name === 'HDR');
+    if (hdr) hdr.specifications[0].fields[0].value = '\\bHDR(10)?\\b';
+    const hd = app.locals.profiles.find((p) => p.name === 'HD-1080p');
+    if (hd) { hd.upgradeAllowed = false; (hd.formatItems.find((f) => f.name === 'x265') || {}).score = 100; }
+  }
+  // File naming.
+  let naming = kind === 'series'
+    ? { id: 1, renameEpisodes: true, replaceIllegalCharacters: true, colonReplacementFormat: 4, multiEpisodeStyle: 5, standardEpisodeFormat: '{Series TitleYear} - S{season:00}E{episode:00} - {Episode CleanTitle} [{Quality Full}]', dailyEpisodeFormat: '{Series TitleYear} - {Air-Date} - {Episode CleanTitle}', animeEpisodeFormat: '{Series TitleYear} - S{season:00}E{episode:00} - {absolute:000} - {Episode CleanTitle}', seriesFolderFormat: '{Series TitleYear}', seasonFolderFormat: 'Season {season:00}' }
+    : { id: 1, renameMovies: true, replaceIllegalCharacters: true, colonReplacementFormat: 'dash', standardMovieFormat: '{Movie CleanTitle} ({Release Year}) {Quality Full}', movieFolderFormat: '{Movie CleanTitle} ({Release Year})' };
+  if (state.variant === 'b') naming = kind === 'series' ? { ...naming, standardEpisodeFormat: '{Series Title} - {season:0}x{episode:00} - {Episode Title}' } : { ...naming, standardMovieFormat: '{Movie CleanTitle} ({Release Year}) {Edition Tags} [{Quality Full}][{MediaInfo VideoDynamicRangeType}]' };
+  app.get('/api/v3/config/naming', (req, res) => res.json(naming));
+  app.put('/api/v3/config/naming', (req, res) => { naming = { ...naming, ...req.body, id: 1 }; res.status(202).json(naming); });
+  // Delay profiles (the default one has order 2147483647 and no tags).
+  let delays = [{ id: 1, enableUsenet: true, enableTorrent: true, preferredProtocol: 'usenet', usenetDelay: 0, torrentDelay: state.variant === 'b' ? 120 : 60, bypassIfHighestQuality: true, bypassIfAboveCustomFormatScore: false, minimumCustomFormatScore: 0, order: 2147483647, tags: [] }];
+  if (state.variant !== 'b') delays.push({ id: 2, enableUsenet: true, enableTorrent: false, preferredProtocol: 'usenet', usenetDelay: 30, torrentDelay: 0, bypassIfHighestQuality: true, order: 1, tags: [2] });
+  const nextId = (l) => Math.max(0, ...l.map((x) => x.id)) + 1;
+  app.get('/api/v3/delayprofile', (req, res) => res.json(delays));
+  app.post('/api/v3/delayprofile', (req, res) => { const d = { ...req.body, id: nextId(delays), order: delays.length }; delays.push(d); res.status(201).json(d); });
+  app.put('/api/v3/delayprofile/:id', (req, res) => { const i = delays.findIndex((d) => d.id === Number(req.params.id)); if (i < 0) return res.status(404).json({ message: 'NotFound' }); delays[i] = { ...delays[i], ...req.body, id: delays[i].id }; res.status(202).json(delays[i]); });
+  app.delete('/api/v3/delayprofile/:id', (req, res) => { const d = delays.find((x) => x.id === Number(req.params.id)); if (!d) return res.status(404).json({ message: 'NotFound' }); if (d.order === 2147483647) return res.status(400).json({ message: 'Cannot delete the default delay profile' }); delays = delays.filter((x) => x !== d); res.json({}); });
+  // Release profiles (Sonarr v4 / Radarr v5 shape: required/ignored are arrays).
+  let releases = [{ id: 1, name: 'No cams', enabled: true, required: [], ignored: ['CAM', 'TS', 'HDTS'], indexerId: 0, tags: [] }];
+  if (state.variant === 'b') releases.push({ id: 2, name: 'Only HDR', enabled: true, required: ['HDR', 'DV'], ignored: [], indexerId: 0, tags: [] });
+  app.get('/api/v3/releaseprofile', (req, res) => res.json(releases));
+  app.post('/api/v3/releaseprofile', (req, res) => { const r = { ...req.body, id: nextId(releases) }; if (!(r.required || []).length && !(r.ignored || []).length) return res.status(400).json([{ propertyName: '', errorMessage: "'Must contain' or 'Must not contain' is required" }]); releases.push(r); res.status(201).json(r); });
+  app.put('/api/v3/releaseprofile/:id', (req, res) => { const i = releases.findIndex((r) => r.id === Number(req.params.id)); if (i < 0) return res.status(404).json({ message: 'NotFound' }); releases[i] = { ...releases[i], ...req.body, id: releases[i].id }; res.status(202).json(releases[i]); });
+  app.delete('/api/v3/releaseprofile/:id', (req, res) => { releases = releases.filter((r) => r.id !== Number(req.params.id)); res.json({}); });
   app.put('/api/v3/qualityprofile/:id', (req, res) => {
     const id = Number(req.params.id);
     const i = app.locals.profiles.findIndex((p) => p.id === id);
@@ -460,6 +559,16 @@ function mountArrLibraryExtras(app, kind, state) {
     if (errors.length) return res.status(400).json(errors);
     app.locals.profiles[i] = { ...body, id };
     res.status(202).json(app.locals.profiles[i]);
+  });
+  app.post('/api/v3/customformat', (req, res) => {
+    const name = String((req.body && req.body.name) || '').trim();
+    if (!name) return res.status(400).json([{ propertyName: 'Name', errorMessage: "'Name' must not be empty." }]);
+    if (app.locals.formats.some((f) => f.name.toLowerCase() === name.toLowerCase())) return res.status(400).json([{ propertyName: 'Name', errorMessage: 'Must be unique.' }]);
+    const f = { ...req.body, id: Math.max(0, ...app.locals.formats.map((x) => x.id)) + 1 };
+    app.locals.formats.push(f);
+    // Like Sonarr/Radarr: every profile gets the new format at score 0.
+    for (const p of app.locals.profiles) (p.formatItems = p.formatItems || []).push({ format: f.id, name: f.name, score: 0 });
+    res.status(201).json(f);
   });
   app.put('/api/v3/customformat/:id', (req, res) => {
     const id = Number(req.params.id);
@@ -494,12 +603,13 @@ function mountArrLibraryExtras(app, kind, state) {
 function makeRadarr(opts = {}) {
   const app = express();
   app.use(express.json());
+  mountBackupMock(app, 'radarr', 'v3');
   let movies = [
-    { id: 1, title: 'Dune: Part Two', year: 2024, tmdbId: 693134, status: 'released', monitored: true, hasFile: true, runtime: 166, overview: 'Paul Atreides unites with the Fremen to wage war against House Harkonnen.', path: 'C:\\Media\\Movies\\Dune Part Two (2024)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 32212254720, studio: 'Legendary', images: [], movieFile: { id: 101, movieId: 1, relativePath: 'Dune.Part.Two.mkv', quality: { quality: { id: 7, name: 'Bluray-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 32212254720 } },
-    { id: 2, title: 'Oppenheimer', year: 2023, tmdbId: 872585, status: 'released', monitored: true, hasFile: true, runtime: 180, overview: 'The story of J. Robert Oppenheimer and the atomic bomb.', path: 'C:\\Media\\Movies2\\Oppenheimer (2023)', rootFolderPath: 'C:\\Media\\Movies2', sizeOnDisk: 27917287424, studio: 'Universal', images: [] },
+    { id: 1, title: 'Dune: Part Two', year: 2024, tmdbId: 693134, status: 'released', monitored: true, hasFile: true, runtime: 166, overview: 'Paul Atreides unites with the Fremen to wage war against House Harkonnen.', path: 'C:\\Media\\Movies\\Dune Part Two (2024)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 32212254720, studio: 'Legendary', images: [], movieFile: { id: 101, movieId: 1, relativePath: 'Dune.Part.Two.mkv', quality: { quality: { id: 7, name: 'Bluray-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 32212254720, mediaInfo: { videoCodec: 'x264', audioCodec: 'DTS-HD MA', audioChannels: 7.1, audioStreamCount: 2, resolution: '1920x804', runTime: '2:46:12', videoBitrate: 24000000 } } },
+    { id: 2, title: 'Oppenheimer', year: 2023, tmdbId: 872585, status: 'released', monitored: true, hasFile: true, runtime: 180, overview: 'The story of J. Robert Oppenheimer and the atomic bomb.', path: 'C:\\Media\\Movies2\\Oppenheimer (2023)', rootFolderPath: 'C:\\Media\\Movies2', sizeOnDisk: 27917287424, studio: 'Universal', images: [], movieFile: { id: 102, movieId: 2, relativePath: 'Oppenheimer.2023.1080p.mkv', quality: { quality: { id: 7, name: 'Bluray-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 27917287424, mediaInfo: { videoCodec: 'x265', audioCodec: '', audioChannels: 0, audioStreamCount: 0, resolution: '1920x1080', runTime: '3:00:21' } } },
     { id: 3, title: 'Furiosa', year: 2024, tmdbId: 786892, status: 'released', monitored: true, hasFile: false, runtime: 148, overview: 'The origin story of Furiosa before Mad Max: Fury Road.', path: 'C:\\Media\\Movies3\\Furiosa (2024)', rootFolderPath: 'C:\\Media\\Movies3', sizeOnDisk: 0, studio: 'Warner Bros', images: [] },
     { id: 4, title: 'Dune: Part Two', year: 2024, tmdbId: 693134, status: 'released', monitored: false, hasFile: false, runtime: 166, overview: 'Duplicate entry added on another drive.', path: 'C:\\Media\\Movies2\\Dune Part Two (2024)', rootFolderPath: 'C:\\Media\\Movies2', sizeOnDisk: 0, studio: 'Legendary', images: [] },
-    { id: 5, title: '1917', year: 2019, tmdbId: 530915, status: 'released', monitored: true, hasFile: true, runtime: 119, overview: 'Two soldiers race against time to deliver a message.', path: 'C:\\Media\\Movies\\1917 (2019)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 8589934592, studio: 'DreamWorks', images: [] },
+    { id: 5, title: '1917', year: 2019, tmdbId: 530915, status: 'released', monitored: true, hasFile: true, runtime: 119, overview: 'Two soldiers race against time to deliver a message.', path: 'C:\\Media\\Movies\\1917 (2019)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 8589934592, studio: 'DreamWorks', images: [], movieFile: { id: 105, movieId: 5, relativePath: '1917.mkv', quality: { quality: { id: 19, name: 'Bluray-2160p', resolution: 2160 }, revision: { version: 1, real: 0, isRepack: false } }, size: 734003200, mediaInfo: { videoCodec: 'XviD', audioCodec: 'MP3', audioChannels: 2, audioStreamCount: 1, resolution: '720x304', runTime: '0:21:40' } } },
   ];
   if (opts.movies) movies = opts.movies.map((m) => ({ ...m }));
   else movies = fillRadarrLibrary(movies, opts.librarySize);
@@ -535,6 +645,23 @@ function makeRadarr(opts = {}) {
     { id: 2, title: 'Gladiator II', year: 2024, inCinemas: new Date(Date.now() + 15 * 86400000).toISOString(), hasFile: false, images: [] },
     { id: 3, title: 'Nosferatu', year: 2024, physicalRelease: new Date(Date.now() + 25 * 86400000).toISOString(), hasFile: false, images: [] },
   ]));
+  const importsSince = (req, res) => {
+    const d = (h) => new Date(Date.now() - h * 3600000).toISOString();
+    const since = Date.parse(req.query.date || 0) || 0;
+    const mv = (id, mid, title, year, h, q) => ({ id, eventType: 'downloadFolderImported', date: d(h), movieId: mid, quality: { quality: { name: q } }, movie: { id: mid, title, year, images: [{ coverType: 'poster', remoteUrl: `https://image.tmdb.org/t/p/w300/m${mid}.jpg` }] } });
+    const all = [mv(201, 1, 'Dune: Part Two', 2024, 1, 'WEBDL-2160p'), mv(202, 3, 'Furiosa', 2024, 70, 'Bluray-1080p'), mv(203, 5, '1917', 2019, 140, 'Bluray-2160p'), { id: 204, eventType: 'downloadFailed', date: d(3), movieId: 2, movie: { id: 2, title: 'Oppenheimer' } }, mv(205, 2, 'Oppenheimer', 2023, 600, 'Bluray-1080p')];
+    res.json(all.filter((r) => Date.parse(r.date) >= since));
+  };
+  app.get('/api/v3/history/since', importsSince);
+  app.get('/api/v3/history', (req, res, next) => {
+    if (!req.query.eventType) return next();
+    importsSince({ query: {} }, { json: (rows) => {
+      const want = rows.filter((r) => String(req.query.eventType) !== '3' || r.eventType === 'downloadFolderImported').sort((a, b) => b.date.localeCompare(a.date))
+        .map((r) => { const o = { ...r }; if (req.query.includeSeries !== 'true') delete o.series; if (req.query.includeEpisode !== 'true') delete o.episode; if (req.query.includeMovie !== 'true') delete o.movie; return o; });
+      const size = Number(req.query.pageSize) || 10; const page = Number(req.query.page) || 1;
+      res.json({ page, pageSize: size, totalRecords: want.length, records: want.slice((page - 1) * size, page * size) });
+    } });
+  });
   app.get('/api/v3/history', (req, res) => res.json({ page: 1, pageSize: 40, totalRecords: 2, records: [
     { id: 1, eventType: 'downloadFolderImported', sourceTitle: 'Dune.Part.Two.2024.2160p.WEB-DL', date: new Date(Date.now() - 3600000).toISOString(), quality: { quality: { name: 'WEBDL-2160p' } }, movie: { title: 'Dune: Part Two' } },
     { id: 2, eventType: 'downloadFailed', sourceTitle: 'Furiosa.2024.1080p.WEBRip', date: new Date(Date.now() - 10800000).toISOString(), quality: { quality: { name: 'WEBRip-1080p' } }, movie: { title: 'Furiosa' } },
@@ -576,13 +703,21 @@ function makeRadarr(opts = {}) {
   let tags = [{ id: 1, label: '4k' }, { id: 2, label: 'kids' }];
   app.get('/api/v3/tag', (req, res) => res.json(tags));
   app.post('/api/v3/tag', (req, res) => { const t = { id: (tags.reduce((mx, x) => Math.max(mx, x.id), 0) || 0) + 1, label: String((req.body && req.body.label) || 'tag') }; tags.push(t); res.status(201).json(t); });
-  mountArrLibraryExtras(app, 'movie', { getTags: () => tags, setTags: (t) => { tags = t; }, getItems: () => movies });
+  mountArrLibraryExtras(app, 'movie', { getTags: () => tags, setTags: (t) => { tags = t; }, getItems: () => movies, variant: opts.instanceName ? 'b' : 'a' });
   app.get('/api/v3/rename', (req, res) => res.json([
     { movieFileId: 601, movieId: Number(req.query.movieId) || 1, existingPath: 'furiosa.2024.2160p.mkv', newPath: 'Furiosa A Mad Max Saga (2024) [Bluray-2160p].mkv' },
   ]));
   // Movie files and media management (recycle bin) for upgrades.
   const recycled = [];
   app.locals.recycled = recycled;
+  app.delete('/api/v3/moviefile/:id', (req, res) => {
+    const m = movies.find((x) => x.movieFile && x.movieFile.id === Number(req.params.id));
+    if (!m) return res.status(404).json({ message: 'NotFound' });
+    recycled.push(`${m.path}/${m.movieFile.relativePath}`);
+    if (fs) fs.remove(`${m.path}/${m.movieFile.relativePath}`);
+    delete m.movieFile; m.hasFile = false; m.sizeOnDisk = 0;
+    res.json({});
+  });
   app.get('/api/v3/moviefile', (req, res) => { const m = movies.find((x) => x.id === Number(req.query.movieId)); res.json(m && m.movieFile ? [m.movieFile] : []); });
   let mediaManagement = { id: 1, recycleBin: opts.movies ? '' : '/Volumes/Movies/.recycle', recycleBinCleanupDays: 7, deleteEmptyFolders: false, autoUnmonitorPreviouslyDownloadedMovies: false };
   app.get('/api/v3/config/mediamanagement', (req, res) => res.json(mediaManagement));
@@ -613,6 +748,12 @@ function makeOverseerr() {
     { id: 12, status: 1, type: 'tv', createdAt: new Date(Date.now() - 7200000).toISOString(), seasons: [{ seasonNumber: 1 }, { seasonNumber: 2 }], media: { tmdbId: 94997, status: 2, title: 'House of the Dragon', mediaType: 'tv' }, requestedBy: { displayName: 'guest', email: 'guest@example.com' } },
     { id: 13, status: 2, type: 'movie', createdAt: new Date(Date.now() - 172800000).toISOString(), media: { tmdbId: 786892, status: 5, title: 'Furiosa', mediaType: 'movie' }, requestedBy: { displayName: 'cameron', email: 'cameron@example.com' } },
     { id: 14, status: 2, type: 'movie', createdAt: new Date(Date.now() - 5400000).toISOString(), media: { tmdbId: 693134, status: 3, mediaType: 'movie', externalServiceId: 4 }, requestedBy: { displayName: 'alex' } },
+    // Older, available requests with Plex rating keys (for "never watched").
+    { id: 21, status: 2, type: 'movie', createdAt: new Date(Date.now() - 210 * 86400000).toISOString(), media: { id: 501, tmdbId: 872585, status: 5, mediaType: 'movie', ratingKey: '10', mediaAddedAt: new Date(Date.now() - 200 * 86400000).toISOString() }, requestedBy: { id: 4, displayName: 'jamie', plexUsername: 'jamie', plexId: 4004 } },
+    { id: 22, status: 2, type: 'movie', createdAt: new Date(Date.now() - 160 * 86400000).toISOString(), media: { id: 502, tmdbId: 530915, status: 5, mediaType: 'movie', ratingKey: '15', mediaAddedAt: new Date(Date.now() - 150 * 86400000).toISOString() }, requestedBy: { id: 3, displayName: 'alex', plexUsername: 'alex', plexId: 3003 } },
+    { id: 23, status: 2, type: 'tv', createdAt: new Date(Date.now() - 320 * 86400000).toISOString(), seasons: [{ seasonNumber: 1 }], media: { id: 503, tmdbId: 93740, tvdbId: 358711, status: 5, mediaType: 'tv', ratingKey: '30', mediaAddedAt: new Date(Date.now() - 300 * 86400000).toISOString() }, requestedBy: { id: 4, displayName: 'jamie', plexUsername: 'jamie', plexId: 4004 } },
+    { id: 24, status: 2, type: 'tv', createdAt: new Date(Date.now() - 130 * 86400000).toISOString(), seasons: [{ seasonNumber: 1 }], media: { id: 504, tmdbId: 136315, tvdbId: 388477, status: 4, mediaType: 'tv', ratingKey: '40', mediaAddedAt: new Date(Date.now() - 120 * 86400000).toISOString() }, requestedBy: { id: 5, displayName: 'guest', plexUsername: 'guest', plexId: 5005 } },
+    { id: 25, status: 2, type: 'movie', createdAt: new Date(Date.now() - 20 * 86400000).toISOString(), media: { id: 505, tmdbId: 786892, status: 5, mediaType: 'movie', ratingKey: '16', mediaAddedAt: new Date(Date.now() - 10 * 86400000).toISOString() }, requestedBy: { id: 3, displayName: 'alex', plexUsername: 'alex', plexId: 3003 } },
     { id: 15, status: 2, type: 'tv', createdAt: new Date(Date.now() - 86400000).toISOString(), seasons: [{ seasonNumber: 2 }], media: { tmdbId: 95396, tvdbId: 371980, status: 3, mediaType: 'tv', externalServiceId: 1 }, requestedBy: { displayName: 'jamie' } },
     { id: 16, status: 2, type: 'tv', createdAt: new Date(Date.now() - 4000000).toISOString(), media: { tmdbId: 136315, tvdbId: 388477, status: 3, mediaType: 'tv' }, requestedBy: { displayName: 'alex' } },
   ];
@@ -677,6 +818,8 @@ function makeOverseerr() {
     if (filter === 'pending') results = requests.filter(r => r.status === 1);
     res.json({ pageInfo: { pages: 1, pageSize: 20, results: results.length, page: 1 }, results });
   });
+  app.delete('/api/v1/request/:id', (req, res) => { requests = requests.filter((r) => r.id !== Number(req.params.id)); res.status(204).end(); });
+  app.delete('/api/v1/media/:id', (req, res) => { requests = requests.filter((r) => !(r.media && r.media.id === Number(req.params.id))); res.status(204).end(); });
   app.get('/api/v1/request/count', (req, res) => res.json({ total: requests.length, pending: requests.filter(r => r.status === 1).length, approved: requests.filter(r => r.status === 2).length, declined: requests.filter(r => r.status === 3).length }));
   app.get('/api/v1/media', (req, res) => {
     const results = [
@@ -699,14 +842,40 @@ function makeOverseerr() {
     { id: 1184918, mediaType: 'movie', title: 'The Wild Robot', overview: 'A robot learns to survive.', releaseDate: '2024-09-12', voteAverage: 8.3, posterPath: null },
     { id: 94605, mediaType: 'tv', name: 'Arcane', overview: 'League champions origins.', firstAirDate: '2021-11-06', voteAverage: 8.7, posterPath: null },
   ] }));
+  // A small catalogue so searches return sensible matches.
+  const CATALOG = [
+    { id: 438631, mediaType: 'movie', title: 'Dune', releaseDate: '2021-09-15', overview: 'Paul Atreides travels to Arrakis.' },
+    { id: 693134, mediaType: 'movie', title: 'Dune: Part Two', releaseDate: '2024-02-27', overview: 'Paul unites with the Fremen.', mediaInfo: { status: 5 } },
+    { id: 90228, mediaType: 'tv', name: 'Dune: Prophecy', firstAirDate: '2024-11-17', overview: 'The Bene Gesserit, 10,000 years before Paul.' },
+    { id: 1184918, mediaType: 'movie', title: 'The Wild Robot', releaseDate: '2024-09-12', overview: 'A robot learns to survive in the wilderness.' },
+    { id: 94605, mediaType: 'tv', name: 'Arcane', firstAirDate: '2021-11-06', overview: 'The origins of two iconic League champions.' },
+    { id: 95396, mediaType: 'tv', name: 'Severance', firstAirDate: '2022-02-17', overview: 'Work and life, surgically divided.', mediaInfo: { status: 4 } },
+    { id: 1064213, mediaType: 'movie', title: 'Anora', releaseDate: '2024-10-14', overview: 'A young sex worker marries the son of an oligarch.' },
+  ];
+  const seerrUsers = [{ id: 1, displayName: 'cameron', plexUsername: 'cameron' }, { id: 3, displayName: 'alex', plexUsername: 'alex' }, { id: 4, displayName: 'jamie', plexUsername: 'jamie' }];
+  app.get('/api/v1/user', (req, res) => res.json({ pageInfo: { pages: 1, results: seerrUsers.length }, results: seerrUsers }));
   app.get('/api/v1/search', (req, res) => {
-    const q = (req.query.query || '').toString();
-    res.json({ page: 1, totalPages: 1, totalResults: 2, results: [
-      { id: 1184918, mediaType: 'movie', title: q || 'The Wild Robot', overview: 'A robot learns to survive in the wilderness.', releaseDate: '2024-09-12', voteAverage: 8.3, posterPath: null },
-      { id: 94605, mediaType: 'tv', name: q || 'Arcane', overview: 'The origins of two iconic League champions.', firstAirDate: '2021-11-06', voteAverage: 8.7, posterPath: null },
-    ] });
+    const q = (req.query.query || '').toString().toLowerCase().trim();
+    const words = q.split(/\s+/).filter(Boolean);
+    let results = CATALOG.filter((c) => words.every((w) => String(c.title || c.name).toLowerCase().includes(w)));
+    if (!q) results = CATALOG.slice(3, 5);
+    results = results.map((c) => {
+      const r = requests.find((x) => x.media && x.media.tmdbId === c.id && x.type === c.mediaType);
+      return r && !c.mediaInfo ? { ...c, mediaInfo: { status: r.media.status || 2 } } : c;
+    });
+    res.json({ page: 1, totalPages: 1, totalResults: results.length, results });
   });
-  app.post('/api/v1/request', (req, res) => { const nr = { id: 100 + requests.length, status: 1, type: req.body.mediaType, createdAt: new Date().toISOString(), media: { tmdbId: req.body.mediaId, status: 2, mediaType: req.body.mediaType }, requestedBy: { displayName: 'you' } }; requests.push(nr); res.status(201).json(nr); });
+  app.get('/api/v1/request/:id', (req, res, next) => { if (!/^\d+$/.test(req.params.id)) return next(); const r = requests.find((x) => x.id === Number(req.params.id)); return r ? res.json(r) : res.status(404).json({ message: 'Request not found' }); });
+  app.post('/api/v1/request', (req, res) => {
+    const b = req.body || {};
+    if (!b.mediaType || !b.mediaId) return res.status(400).json({ message: 'mediaType and mediaId are required' });
+    if (requests.some((x) => x.media && x.media.tmdbId === b.mediaId && x.type === b.mediaType)) return res.status(409).json({ message: 'Request for this media already exists.' });
+    const cat = CATALOG.find((c) => c.id === b.mediaId) || {};
+    const user = seerrUsers.find((u) => u.id === b.userId) || { id: 1, displayName: 'cameron' };
+    const nr = { id: 100 + requests.length, status: 1, type: b.mediaType, createdAt: new Date().toISOString(), seasons: b.mediaType === 'tv' ? [{ seasonNumber: 1 }] : undefined, media: { tmdbId: b.mediaId, status: 2, mediaType: b.mediaType, title: cat.title || cat.name }, requestedBy: user };
+    requests.push(nr);
+    res.status(201).json(nr);
+  });
   app.get('/api/v1/service/:type', (req, res) => res.json([
     { id: 0, name: req.params.type, is4k: false, isDefault: true, activeProfileId: 1, activeDirectory: '/data/media' },
   ]));
@@ -800,13 +969,16 @@ function makeTautulli() {
     }
     if (cmd === 'get_history') {
       const ago = (d) => Math.floor((Date.now() - d * 86400000) / 1000);
-      return res.json(wrap({ recordsFiltered: 5, recordsTotal: 5, data: [
-        { full_title: 'Oppenheimer', title: 'Oppenheimer', year: 2023, user: 'cameron', player: 'Apple TV', media_type: 'movie', thumb: '/library/metadata/10/thumb/10', date: Math.floor((Date.now() - 3600000) / 1000), watched_status: 1, percent_complete: 100, duration: 10800 },
-        { full_title: 'Dune: Part Two', title: 'Dune: Part Two', year: 2024, user: 'alex', player: 'Roku', media_type: 'movie', date: ago(420), watched_status: 1, percent_complete: 100, duration: 9960 },
-        { full_title: 'The Bear - S03E01', grandparent_title: 'The Bear', user: 'cameron', player: 'iOS', media_type: 'episode', date: ago(2), watched_status: 1, percent_complete: 100, duration: 1800 },
-        { full_title: 'Foundation - S01E01', grandparent_title: 'Foundation', user: 'jamie', player: 'Apple TV', media_type: 'episode', date: ago(300), watched_status: 1, percent_complete: 100, duration: 3600 },
-        { full_title: 'Severance - S02E01', user: 'guest', player: 'Chrome', media_type: 'episode', grandparent_thumb: '/library/metadata/11/thumb/11', date: Math.floor((Date.now() - 86400000) / 1000), watched_status: 1, percent_complete: 96, duration: 3600 },
-      ] }));
+      let data = [
+        { full_title: 'Oppenheimer', title: 'Oppenheimer', year: 2023, user: 'cameron', friendly_name: 'cameron', user_id: 1001, rating_key: 10, player: 'Apple TV', media_type: 'movie', thumb: '/library/metadata/10/thumb/10', date: Math.floor((Date.now() - 3600000) / 1000), watched_status: 1, percent_complete: 100, duration: 10800 },
+        { full_title: 'Dune: Part Two', title: 'Dune: Part Two', year: 2024, user: 'alex', friendly_name: 'alex', user_id: 3003, rating_key: 12, player: 'Roku', media_type: 'movie', date: ago(420), watched_status: 1, percent_complete: 100, duration: 9960 },
+        { full_title: 'The Bear - S03E01', grandparent_title: 'The Bear', user: 'cameron', friendly_name: 'cameron', user_id: 1001, rating_key: 41, grandparent_rating_key: 40, player: 'iOS', media_type: 'episode', date: ago(2), watched_status: 1, percent_complete: 100, duration: 1800 },
+        { full_title: 'Foundation - S01E01', grandparent_title: 'Foundation', user: 'jamie', friendly_name: 'jamie', user_id: 4004, rating_key: 31, grandparent_rating_key: 30, player: 'Apple TV', media_type: 'episode', date: ago(300), watched_status: 1, percent_complete: 100, duration: 3600 },
+        { full_title: 'Severance - S02E01', user: 'guest', friendly_name: 'Guest', user_id: 5005, rating_key: 21, grandparent_rating_key: 20, player: 'Chrome', media_type: 'episode', grandparent_thumb: '/library/metadata/11/thumb/11', date: Math.floor((Date.now() - 86400000) / 1000), watched_status: 1, percent_complete: 96, duration: 3600 },
+      ];
+      if (req.query.rating_key) data = data.filter((d) => String(d.rating_key) === String(req.query.rating_key));
+      if (req.query.grandparent_rating_key) data = data.filter((d) => String(d.grandparent_rating_key) === String(req.query.grandparent_rating_key));
+      return res.json(wrap({ recordsFiltered: data.length, recordsTotal: data.length, data }));
     }
     if (cmd === 'get_home_stats') {
       const days = Number(req.query.time_range) || 30;
@@ -842,6 +1014,7 @@ function makeTautulli() {
 function makeProwlarr() {
   const app = express();
   app.use(express.json());
+  mountBackupMock(app, 'prowlarr', 'v1');
   const cats = (names) => ({ categories: names.map((name, i) => ({ id: 2000 + i * 1000, name })) });
   let indexers = [
     { id: 1, name: 'NZBgeek', protocol: 'usenet', enable: true, priority: 10, implementation: 'Newznab', capabilities: cats(['Movies', 'TV', 'Audio']) },
@@ -857,12 +1030,21 @@ function makeProwlarr() {
   const failing = new Set([3]);
   let commandId = 100;
   app.get('/api/v1/indexer', (req, res) => res.json(indexers));
+  app.get('/api/v1/indexer/:id', (req, res) => { const ix = indexers.find((x) => x.id === Number(req.params.id)); return ix ? res.json(ix) : res.status(404).json({ message: 'Not found' }); });
   app.put('/api/v1/indexer/:id', (req, res) => {
     const id = Number(req.params.id); const i = indexers.findIndex((x) => x.id === id);
     if (i < 0) return res.status(404).json({ message: 'Not found' });
     indexers[i] = { ...indexers[i], ...req.body, id }; res.status(202).json(indexers[i]);
   });
-  app.get('/api/v1/indexerstats', (req, res) => res.json({ indexers: indexers.map((ix) => ({ indexerId: ix.id, indexerName: ix.name, numberOfQueries: 400 + ix.id * 37, numberOfGrabs: 30 + ix.id * 4, averageResponseTime: 180 + ix.id * 55, numberOfFailedQueries: failing.has(ix.id) ? 12 : 0 })) }));
+  // Realistic spread: one healthy, one slow, one failing (and paused), one disabled.
+  const STATS = {
+    1: { numberOfQueries: 1840, numberOfRssQueries: 2900, numberOfAuthQueries: 3, numberOfGrabs: 212, numberOfFailedQueries: 9, numberOfFailedGrabs: 1, averageResponseTime: 410, averageGrabResponseTime: 380 },
+    2: { numberOfQueries: 1610, numberOfRssQueries: 2880, numberOfAuthQueries: 2, numberOfGrabs: 4, numberOfFailedQueries: 70, numberOfFailedGrabs: 0, averageResponseTime: 4300, averageGrabResponseTime: 900 },
+    3: { numberOfQueries: 1200, numberOfRssQueries: 2700, numberOfAuthQueries: 40, numberOfGrabs: 61, numberOfFailedQueries: 1590, numberOfFailedGrabs: 9, numberOfFailedAuthQueries: 38, averageResponseTime: 1200, averageGrabResponseTime: 700 },
+    4: { numberOfQueries: 0, numberOfGrabs: 0, averageResponseTime: 0 },
+  };
+  app.get('/api/v1/indexerstats', (req, res) => res.json({ indexers: indexers.map((ix) => ({ indexerId: ix.id, indexerName: ix.name, numberOfQueries: 0, numberOfGrabs: 0, numberOfFailedQueries: 0, averageResponseTime: 0, ...(STATS[ix.id] || {}) })), userAgents: [], hosts: [] }));
+  app.get('/api/v1/indexerstatus', (req, res) => res.json([...failing].map((id) => ({ id, indexerId: id, initialFailure: new Date(Date.now() - 2 * 86400000).toISOString(), mostRecentFailure: new Date(Date.now() - 1800000).toISOString(), disabledTill: new Date(Date.now() + 3 * 3600000).toISOString() }))));
   app.post('/api/v1/indexer/test', (req, res) => {
     if (failing.has(Number(req.body?.id))) return res.status(400).json([{ propertyName: 'BaseUrl', errorMessage: 'Unable to connect to indexer: 401 Unauthorized. Check your API key.' }]);
     res.json({});
@@ -1438,6 +1620,7 @@ function makeIndexer() {
 function makeLidarr(opts = {}) {
   const app = express();
   app.use(express.json());
+  mountBackupMock(app, 'lidarr', 'v1');
   const now = Date.now();
   let artists = [
     { id: 1, artistName: 'Radiohead', foreignArtistId: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', monitored: true, overview: 'English rock band formed in Abingdon.', path: '/music/Radiohead', rootFolderPath: '/music', added: new Date(now - 90 * 86400000).toISOString(), statistics: { albumCount: 9, trackFileCount: 120, trackCount: 130, percentOfTracks: 92.3, sizeOnDisk: 8589934592 }, images: [] },
@@ -1481,6 +1664,7 @@ function makeLidarr(opts = {}) {
   ] }));
   app.get('/api/v1/wanted/cutoff', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 0, records: [] }));
   app.post('/api/v1/command', (req, res) => res.status(201).json({ id: Math.floor(Math.random() * 1000), name: (req.body && req.body.name) || 'Command', status: 'queued' }));
+  app.get('/api/v1/command/:id', (req, res) => res.json({ id: Number(req.params.id), status: 'completed', message: 'Completed' }));
   app.get('/api/v1/health', (req, res) => res.json([]));
   return app;
 }
@@ -1489,6 +1673,7 @@ function makeLidarr(opts = {}) {
 function makeReadarr(opts = {}) {
   const app = express();
   app.use(express.json());
+  mountBackupMock(app, 'readarr', 'v1');
   const now = Date.now();
   let authors = [
     { id: 1, authorName: 'Brandon Sanderson', foreignAuthorId: 'b1', monitored: true, overview: 'American fantasy author.', path: '/books/Brandon Sanderson', rootFolderPath: '/books', added: new Date(now - 120 * 86400000).toISOString(), statistics: { bookCount: 20, bookFileCount: 18, sizeOnDisk: 1073741824 }, images: [] },
@@ -1517,6 +1702,7 @@ function makeReadarr(opts = {}) {
   ] }));
   app.get('/api/v1/wanted/cutoff', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 0, records: [] }));
   app.post('/api/v1/command', (req, res) => res.status(201).json({ id: Math.floor(Math.random() * 1000), name: (req.body && req.body.name) || 'Command', status: 'queued' }));
+  app.get('/api/v1/command/:id', (req, res) => res.json({ id: Number(req.params.id), status: 'completed', message: 'Completed' }));
   app.get('/api/v1/health', (req, res) => res.json([]));
   return app;
 }
@@ -1661,6 +1847,8 @@ export function startMockServices() {
     ['syncthing', makeSyncthing(), MOCK_PORTS.syncthing],
     ['navidrome', makeNavidrome(), MOCK_PORTS.navidrome],
     ['pulsarr', makePulsarr(), MOCK_PORTS.pulsarr],
+    ['unpackerr', makeUnpackerr(), MOCK_PORTS.unpackerr],
+    ['speedtest', makeSpeedtest(), MOCK_PORTS.speedtest],
     ['whisparr', makeSonarr({ instanceName: 'Whisparr (mock)' }), MOCK_PORTS.whisparr],
     ['unraid', makeUnraid(), MOCK_PORTS.unraid],
     ['truenas', makeTruenasServer(), MOCK_PORTS.truenas],
@@ -1676,4 +1864,4 @@ export function startMockServices() {
 }
 
 // Exposed for tests (in-process, ephemeral ports).
-export { makeLidarr as _makeLidarrMock, makeSonarr as _makeSonarrMock, makeRadarr as _makeRadarrMock, makeBazarr as _makeBazarrMock, makeQbittorrent as _makeQbittorrentMock, makeTransmission as _makeTransmissionMock, makeDeluge as _makeDelugeMock, makeNzbget as _makeNzbgetMock, makeFlood as _makeFloodMock };
+export { makeLidarr as _makeLidarrMock, makeSonarr as _makeSonarrMock, makeRadarr as _makeRadarrMock, makeBazarr as _makeBazarrMock, makeQbittorrent as _makeQbittorrentMock, makeTransmission as _makeTransmissionMock, makeDeluge as _makeDelugeMock, makeNzbget as _makeNzbgetMock, makeFlood as _makeFloodMock, makeOverseerr as _makeOverseerrMock, makeTautulli as _makeTautulliMock, makeProwlarr as _makeProwlarrMock };

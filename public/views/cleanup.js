@@ -78,8 +78,8 @@ export async function renderCleanup(root, ctx) {
   }
 
   function confirmRemove(s) {
-    const del = h('input', { type: 'checkbox', checked: prefs.deleteFiles ? 'checked' : null });
-    const excl = h('input', { type: 'checkbox' });
+    const del = h('input', { type: 'checkbox', role: 'switch', checked: prefs.deleteFiles ? 'checked' : null });
+    const excl = h('input', { type: 'checkbox', role: 'switch' });
     openModal({
       title: `Remove “${s.item.title}”?`,
       body: h('div', { class: 'grid', style: { gap: '12px' } },

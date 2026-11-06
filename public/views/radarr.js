@@ -324,7 +324,7 @@ async function confirmAdd(r, arr, ctx) {
   const remembered = initialAddChoices(getAddDefaults(ctx.service.key), profiles, folders);
   const folderSel = h('select', { class: 'input' }, ...folders.map((f) => h('option', { value: f.path, selected: f.path === remembered.rootFolderPath ? 'selected' : null }, rootFolderLabel(f))));
   const profileSel = h('select', { class: 'input' }, ...profiles.map((p) => h('option', { value: p.id, selected: p.id === remembered.qualityProfileId ? 'selected' : null }, p.name)));
-  const searchChk = h('input', { type: 'checkbox', checked: true });
+  const searchChk = h('input', { type: 'checkbox', role: 'switch', checked: true });
 
   const doAdd = async () => {
     const payload = {
@@ -364,9 +364,9 @@ async function openEditMovie(arr, ctx, m) {
   const tagIds = [...(m.tags || [])];
   const tagsEl = tagEditor(allTags, tagIds, arr);
   const cmdBar = arrCommandBar(arr, 'movie', m.id);
-  const monitorChk = h('input', { type: 'checkbox', checked: m.monitored ? 'checked' : null });
+  const monitorChk = h('input', { type: 'checkbox', role: 'switch', checked: m.monitored ? 'checked' : null });
   const profileSel = h('select', { class: 'input' }, ...profiles.map((p) => h('option', { value: p.id, selected: p.id === m.qualityProfileId ? 'selected' : null }, p.name)));
-  const deleteFilesChk = h('input', { type: 'checkbox' });
+  const deleteFilesChk = h('input', { type: 'checkbox', role: 'switch' });
 
   const save = async () => {
     const payload = { ...m, monitored: monitorChk.checked, qualityProfileId: Number(profileSel.value) || m.qualityProfileId, tags: tagIds };

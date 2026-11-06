@@ -129,8 +129,12 @@ function authFor(svc) {
     if (svc.apiKey) headers['X-API-Key'] = svc.apiKey;
   } else if (type === 'syncthing') {
     if (svc.apiKey) headers['X-API-Key'] = svc.apiKey;
-  } else if (type === 'pulsarr') {
+  } else if (type === 'pulsarr' || type === 'unpackerr') {
     if (svc.apiKey) headers['X-API-Key'] = svc.apiKey;
+  } else if (type === 'speedtest') {
+    // Speedtest Tracker: Bearer API token; its API only answers JSON requests.
+    if (svc.apiKey) headers.Authorization = `Bearer ${svc.apiKey}`;
+    headers.Accept = 'application/json';
   } else if (type === 'glances' || type === 'adguard') {
     // Glances (when started with --password) and AdGuard Home use Basic auth.
     if (svc.username || svc.password) headers.Authorization = `Basic ${Buffer.from(`${svc.username || ''}:${svc.password || ''}`).toString('base64')}`;
@@ -691,6 +695,8 @@ function buildTargetUrl(svc, subPath, incomingQuery) {
   return new URL(`${base}/${cleanSub}${qs ? `?${qs}` : ''}`);
 }
 
+const BACKUP_APPS = new Set(['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'prowlarr', 'whisparr', 'listenarr']);
+
 async function forward(svc, serviceKey, subPath, req, res) {
   if (svc.type === 'qbittorrent') return forwardQbit(svc, serviceKey, subPath, req, res);
   if (svc.type === 'transmission') return forwardTransmission(svc, serviceKey, subPath, req, res);
@@ -710,6 +716,11 @@ async function forward(svc, serviceKey, subPath, req, res) {
   if (svc.type === 'portainer' && !['GET', 'HEAD'].includes(req.method.toUpperCase()) && !isPortainerContainerAction(req.method, subPath)) {
     return res.status(405).json({ error: 'Only start, stop and restart are allowed for Portainer' });
   }
+  // Backup zips are downloaded in the app itself (Settings → Backups links
+  // there); they never pass through the proxy.
+  if (BACKUP_APPS.has(svc.type) && /^\/*backup\//i.test(subPath)) {
+    return res.status(403).json({ error: 'Download backups in the app: Settings → Backups → Open' });
+  }
   const incomingQs = (req.originalUrl.split('?')[1]) || '';
   const target = buildTargetUrl(svc, subPath, incomingQs);
   const { headers: authHeaders } = authFor(svc);
@@ -717,7 +728,7 @@ async function forward(svc, serviceKey, subPath, req, res) {
   const headers = { ...authHeaders };
   // Pass through content negotiation headers only.
   if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
-  if (req.headers['accept']) headers['accept'] = req.headers['accept'];
+  if (req.headers['accept'] && !headers.Accept) headers['accept'] = req.headers['accept'];
 
   const method = req.method.toUpperCase();
   const hasBody = !['GET', 'HEAD'].includes(method);
@@ -784,6 +795,8 @@ const HEALTH_PATH = {
   syncthing: 'rest/system/version',
   navidrome: 'rest/ping.view',
   pulsarr: 'v1/approval/stats',
+  unpackerr: 'api/stats',
+  speedtest: 'api/v1/results/latest',
   whisparr: 'api/v3/system/status',
   indexer: 'api?t=caps&o=json',
 };

@@ -85,7 +85,7 @@ function successMessage({ blocklist, search }) {
 // defaults (remove from client, no blocklist), one confirm button.
 export function openRemoveQueueDialog(client, record, { onDone, rowEl } = {}) {
   const box = (label, hint, checked) => {
-    const input = h('input', { type: 'checkbox', checked: checked ? 'checked' : null });
+    const input = h('input', { type: 'checkbox', role: 'switch', checked: checked ? 'checked' : null });
     const row = h('label', { class: 'queue-remove-opt' }, input,
       h('span', {}, h('strong', {}, label), h('span', { class: 'dim' }, hint)));
     return { input, row };

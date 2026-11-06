@@ -13,7 +13,7 @@ async function fetchJSON(url, opts) {
 function postJSON(url, body) { return fetchJSON(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); }
 
 function toggle(label, checked, onChange) {
-  const cb = h('input', { type: 'checkbox', checked: checked ? 'checked' : null });
+  const cb = h('input', { type: 'checkbox', role: 'switch', checked: checked ? 'checked' : null });
   cb.addEventListener('change', () => onChange(cb.checked));
   return h('label', { class: 'setting-row', style: { cursor: 'pointer' } }, h('span', {}, label), h('span', { class: 'right' }, cb));
 }

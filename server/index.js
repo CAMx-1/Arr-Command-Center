@@ -18,6 +18,10 @@ import * as plex from './plex.js';
 import * as push from './push.js';
 import * as channels from './channels.js';
 import { startPoller, pollOnce } from './poller.js';
+import { createInsightsRecorder, seedDemoHistory } from './insights.js';
+import { createActivityLog } from './activity.js';
+import { createDigest, describeSchedule } from './digest.js';
+import { createBotCore, createTelegramPoller, createDiscordHandler, publicBot, applyBotSettings, upsertBotUser } from './chatBot.js';
 import * as automation from './automation.js';
 import { getOperations } from './operations.js';
 import { getSystemStats } from './system.js';
@@ -29,6 +33,7 @@ import { safeEqual, createAuthLimiter } from './authGuard.js';
 import { createRoleGuard, mountUserRoutes } from './roleRoutes.js';
 import { createLiveHub } from './live.js';
 import { truenasOverview } from './truenas.js';
+import { createTrashSource, demoTrashSource } from './trash.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -158,6 +163,14 @@ function actionsFor(e) {
   return [mk('approve', 'Approve'), mk('decline', 'Decline')];
 }
 const actionLimiter = createAuthLimiter({ maxFailures: 20, windowMs: 10 * 60000, baseLockMs: 5 * 60000 });
+// Chat requests. Discord calls this endpoint itself (no dashboard session),
+// so it sits before sign-in; every call must carry a valid Discord signature.
+const bot = createBotCore({ cfg, store });
+// TELEGRAM_API_BASE lets you use a self-hosted Telegram Bot API server.
+const telegramBot = createTelegramPoller({ core: bot, apiBase: process.env.TELEGRAM_API_BASE || 'https://api.telegram.org', onError: (e) => console.warn('[bot] telegram:', e.message) });
+const discordBot = createDiscordHandler({ core: bot });
+app.post('/api/bot/discord/interactions', express.raw({ type: '*/*', limit: '64kb' }), (req, res) => { discordBot.interactions(req, res).catch(() => { if (!res.headersSent) res.status(500).end(); }); });
+
 app.post('/api/notify/action/:token', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const client = req.socket.remoteAddress || 'unknown';
@@ -209,7 +222,12 @@ if (plexAuth.enabled) console.log('[startup] Plex authentication is ENABLED.');
 // Roles: every /api request is checked against the caller's role (admin /
 // user / guest). Without Plex sign-in everyone is an admin.
 const roleGuard = createRoleGuard(plexAuth);
+// Activity log hooks in before the role guard so refused attempts are logged too.
+const activity = createActivityLog({ store, cfg, roleOf: (req) => plexAuth.roleOf(req) });
+app.use(activity.middleware);
 app.use(roleGuard.app);
+app.get('/api/activity', (req, res) => res.json(activity.list(req.query)));
+app.delete('/api/activity', (req, res) => { activity.clear(); res.json({ ok: true }); });
 mountUserRoutes(app, plexAuth, { plex, cfg });
 
 // Fail closed: refuse to expose the secret-injecting proxy on a public
@@ -523,6 +541,90 @@ app.use('/api/proxy', createProxyRouter(cfg, { authorize: roleGuard.proxy }));
 const liveHub = createLiveHub({ getService: (key) => cfg.services[key], fetchJson: (svc, p) => serviceGet(svc, p, { timeout: 8000 }), fetchClient: (svc, key) => liveClientFetch(svc, key) });
 app.get('/api/live', liveHub.multiHandler(roleGuard.read));
 
+// TRaSH Guides (public data, cached a day). Demo mode uses a bundled sample.
+const trash = cfg.mock ? demoTrashSource() : createTrashSource();
+app.get('/api/trash/:app/profiles', async (req, res) => {
+  try { res.json((await trash.profiles(req.params.app)).map(({ profile, ...p }) => p)); }
+  catch (e) { res.status(e.status || 502).json({ error: e.message }); }
+});
+app.get('/api/trash/:app/profile/:slug', async (req, res) => {
+  try { res.json(await trash.profileWithFormats(req.params.app, req.params.slug)); }
+  catch (e) { res.status(e.status || 502).json({ error: e.message }); }
+});
+
+// Library growth: one size snapshot per Sonarr/Radarr/Lidarr instance per day.
+const insights = createInsightsRecorder({ cfg, store });
+app.get('/api/insights/history/:key', (req, res) => {
+  if (!cfg.services[req.params.key]) return res.status(404).json({ error: 'Unknown service' });
+  res.json(insights.history(req.params.key));
+});
+
+// Backups are downloaded in the app itself: Sonarr/Radarr only serve the zip
+// to their own web login, not to the API key. This sends an admin to the
+// app's System → Backup page (browser URL if set, else the server's URL).
+const BACKUP_TYPES = new Set(['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'prowlarr', 'whisparr', 'listenarr']);
+app.get('/api/backups/:key/open', (req, res) => {
+  const svc = cfg.services[req.params.key];
+  if (!svc || !BACKUP_TYPES.has(svc.type)) return res.status(404).json({ error: 'Unknown service' });
+  const base = String(svc.webUrl || svc.baseUrl || '').replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(base)) return res.status(404).json({ error: 'No address set for this service' });
+  res.set('Cache-Control', 'no-store');
+  res.redirect(302, `${base}/system/backup`);
+});
+
+// Weekly "recently added" digest (admins configure; off by default).
+async function sendDigestMessage(msg) {
+  const out = { channels: null, push: null };
+  try { out.channels = await channels.sendToChannels(msg, { globalEnabled: (c) => push.categoryEnabled(c) }); } catch (e) { out.channels = { error: e.message }; }
+  if (push.categoryEnabled('digest')) {
+    try { out.push = await push.sendToAll(push.notification({ title: msg.title, body: msg.body.split('\n').slice(0, 6).join('\n'), url: msg.url, tag: 'digest' })); } catch (e) { out.push = { error: e.message }; }
+  }
+  return out;
+}
+const digest = createDigest({ cfg, store, send: sendDigestMessage, logLine: (e) => console.log(JSON.stringify({ level: e.ok ? 'info' : 'warn', src: 'digest', ...e })) });
+app.get('/api/bot', async (req, res) => {
+  const svc = bot.seerrSvc();
+  const seerrUsers = svc ? await serviceGet(svc, 'api/v1/user?take=100').then((d) => ((d && d.results) || []).map((u) => ({ id: u.id, name: u.displayName || u.plexUsername || u.email }))).catch(() => []) : [];
+  const seerrs = Object.entries(cfg.services).filter(([, v]) => v.type === 'overseerr').map(([k, v]) => ({ key: k, label: v.label || k }));
+  res.json({ ...publicBot(bot.settings(), { telegram: telegramBot.status() }), seerrUsers, seerrs, interactionsPath: '/api/bot/discord/interactions' });
+});
+app.put('/api/bot', express.json({ limit: '4kb' }), (req, res) => {
+  const r = applyBotSettings(bot.settings(), req.body || {});
+  if (r.error) return res.status(400).json({ error: r.error });
+  bot.save(r.settings);
+  if (req.body && req.body.telegram) telegramBot.restart();
+  res.json(publicBot(r.settings, { telegram: telegramBot.status() }));
+});
+app.put('/api/bot/users', express.json({ limit: '2kb' }), (req, res) => {
+  const r = upsertBotUser(bot.settings(), req.body || {});
+  if (r.error) return res.status(400).json({ error: r.error });
+  bot.save(r.settings); res.json({ ok: true });
+});
+app.delete('/api/bot/users/:platform/:id', (req, res) => {
+  const s = bot.settings();
+  const match = (x) => x.platform === req.params.platform && String(x.id) === req.params.id;
+  bot.save({ ...s, users: s.users.filter((x) => !match(x)), pending: s.pending.filter((x) => !match(x)) });
+  res.json({ ok: true });
+});
+app.post('/api/bot/discord/register', async (req, res) => {
+  try { res.json({ ok: true, commands: await discordBot.registerCommands() }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/digest', async (req, res) => {
+  const s = digest.settings();
+  let preview = null;
+  if (req.query.preview) { try { preview = await digest.build(); } catch (e) { preview = { error: e.message }; } }
+  res.json({ settings: s, schedule: describeSchedule(s), preview });
+});
+app.put('/api/digest', express.json({ limit: '2kb' }), (req, res) => {
+  const r = digest.save(req.body || {});
+  if (r.error) return res.status(400).json({ error: r.error });
+  res.json({ settings: r.settings, schedule: describeSchedule(r.settings) });
+});
+app.post('/api/digest/send', async (req, res) => {
+  try { res.json(await digest.sendNow()); } catch (e) { res.status(e.status || 502).json({ error: e.message }); }
+});
+
 // TrueNAS: WebSocket JSON-RPC, so the server makes the calls and returns one
 // read-only overview (pools, disks, apps, alerts). Reading is allowed for
 // every role, like any other dashboard read.
@@ -632,6 +734,13 @@ if (!process.env.NOTIFY_DISABLE) {
 // only runs when enabled and its configured interval has elapsed. Disable with
 // AUTOMATION_DISABLE=1.
 let automationTimer = null;
+const insightsFirst = setTimeout(() => insights.tick().then(() => { if (cfg.mock) seedDemoHistory(store); }).catch(() => {}), cfg.mock ? 3000 : 60000);
+const insightsTimer = setInterval(() => insights.tick().catch(() => {}), 3600000);
+telegramBot.start();
+const digestTimer = setInterval(() => digest.tick().catch(() => {}), 5 * 60000);
+if (digestTimer.unref) digestTimer.unref();
+if (insightsFirst.unref) insightsFirst.unref();
+if (insightsTimer.unref) insightsTimer.unref();
 if (!process.env.AUTOMATION_DISABLE) {
   automationTimer = setInterval(() => { automation.tick(cfg).catch(() => {}); }, 60000);
   if (automationTimer.unref) automationTimer.unref();
@@ -641,6 +750,7 @@ function shutdown() {
   console.log('\n[shutdown] closing servers...');
   if (poller) poller.stop();
   if (automationTimer) clearInterval(automationTimer);
+  clearInterval(insightsTimer); clearTimeout(insightsFirst); clearInterval(digestTimer); telegramBot.stop();
   statusCache.stop();
   uptime.flush();
   server.close();

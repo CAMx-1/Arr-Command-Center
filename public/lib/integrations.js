@@ -324,3 +324,75 @@ export function unraidClient(api, key) {
     },
   };
 }
+
+// ------------------------------------------------------------------ Unpackerr
+// Unpackerr v1 web server API (X-Api-Key). Status words from its source.
+export const UNPACKERR_STATUS = {
+  waiting: ['Waiting', 'muted'], queued: ['Queued', 'info'], extracting: ['Extracting', 'info'], extractfailed: ['Failed', 'down'],
+  extracted: ['Waiting for import', 'warn'], imported: ['Imported', 'ok'], deleting: ['Cleaning up', 'muted'], deletefailed: ['Delete failed', 'down'],
+  deleted: ['Done', 'ok'], extractednothing: ['Nothing to extract', 'muted'],
+};
+
+// Plain reason an item is stuck, with what to do. Returns null when it's fine.
+export function unpackerrDiagnosis(item, { now = Date.now() } = {}) {
+  const err = String(item.error || '');
+  const age = now - Date.parse(item.updated || item.started || 0);
+  const mins = Number.isFinite(age) ? Math.round(age / 60000) : 0;
+  if (item.status === 'extractfailed') {
+    if (/password|encrypted/i.test(err)) return { level: 'down', reason: 'The archive is password protected and none of the passwords Unpackerr knows worked.', fix: 'Add the password to Unpackerr’s passwords list, or blocklist the release and search again.' };
+    if (/missing volume|continues in next volume|unexpected end|EOF/i.test(err)) return { level: 'down', reason: 'Part of the archive is missing or the download is incomplete.', fix: 'Blocklist this release and search for another, or repair it in the download client.' };
+    if (/crc|checksum|corrupt|bad (archive|header)|not a valid/i.test(err)) return { level: 'down', reason: 'The archive is damaged.', fix: 'Blocklist this release and search for another.' };
+    if (/no space|disk full|ENOSPC/i.test(err)) return { level: 'down', reason: 'The disk ran out of space while extracting.', fix: 'Free some space, then retry.' };
+    if (/permission denied|EACCES|read-only/i.test(err)) return { level: 'down', reason: 'Unpackerr can’t write to the download folder.', fix: 'Check the folder permissions and the user Unpackerr runs as, then retry.' };
+    return { level: 'down', reason: err ? `Extraction failed: ${err}` : 'Extraction failed.', fix: item.dueKind === 'retry' ? 'Unpackerr will retry on its own; you can retry now.' : 'Retry, or blocklist the release if it keeps failing.' };
+  }
+  if (item.status === 'extracted' && mins >= 30) return { level: 'warn', reason: `Extracted ${mins} minutes ago but the app hasn’t imported it yet.`, fix: 'Check the item in the app’s queue (often a path mapping or naming problem).' };
+  if (item.status === 'extracting' && mins >= 30) return { level: 'warn', reason: `No progress for ${mins} minutes.`, fix: 'The archive may be very large or the disk slow. Check Unpackerr’s log.' };
+  if (item.status === 'waiting' && item.note) return { level: 'muted', reason: `Waiting for ${item.note} to finish downloading.`, fix: '' };
+  return null;
+}
+
+export function unpackerrClient(api, key) {
+  const get = (p) => api.proxy(key, `api/${p}`);
+  const post = (p, id) => api.proxy(key, `api/${p}`, { method: 'POST', body: { id } });
+  return {
+    stats: async () => (await get('stats')) || {},
+    queue: async () => arr(await get('queue')),
+    history: async () => arr(await get('history')),
+    retry: (id) => post('queue/retry', id),
+    forget: (id) => post('queue/forget', id),
+    deleteHistory: (id) => post('history/delete', id),
+  };
+}
+
+// ---------------------------------------------------------- Speedtest Tracker
+// download/upload are bytes per second; ping is milliseconds.
+export const toMbps = (bytesPerSec) => (bytesPerSec == null ? null : Math.round((Number(bytesPerSec) * 8) / 1e5) / 10);
+
+export function normalizeSpeedtest(r) {
+  return { id: r.id, at: r.created_at, ok: r.status === 'completed', status: r.status, healthy: r.healthy, down: toMbps(r.download), up: toMbps(r.upload), ping: r.ping == null ? null : Number(r.ping),
+    server: r.data && r.data.server ? [r.data.server.name, r.data.server.location].filter(Boolean).join(' · ') : '', isp: (r.data && r.data.isp) || '', error: (r.data && r.data.message) || '' };
+}
+
+export function speedSummary(results) {
+  const ok = results.filter((r) => r.ok && r.down != null);
+  if (!ok.length) return null;
+  const avg = (k) => Math.round((ok.reduce((s, r) => s + r[k], 0) / ok.length) * 10) / 10;
+  const sorted = ok.map((r) => r.down).sort((a, b) => a - b);
+  return { count: results.length, failed: results.filter((r) => !r.ok).length, unhealthy: ok.filter((r) => r.healthy === false).length,
+    avgDown: avg('down'), avgUp: avg('up'), avgPing: avg('ping'), minDown: sorted[0], maxDown: sorted[sorted.length - 1] };
+}
+
+export function speedtestClient(api, key) {
+  return {
+    latest: async () => normalizeSpeedtest(await api.proxy(key, 'api/v1/results/latest')),
+    results: async ({ days = 14, max = 500 } = {}) => {
+      const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+      const d = await api.proxy(key, `api/v1/results?per_page=${max}&sort=-created_at&filter[start_at]=${since}`);
+      // The API filters by date only, so trim to the exact window here.
+      const from = Date.now() - days * 86400000;
+      return arr(d && d.data).map(normalizeSpeedtest).filter((r) => Date.parse(r.at) >= from).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    },
+    run: () => api.proxy(key, 'api/v1/speedtests/run', { method: 'POST', body: {} }),
+  };
+}

@@ -24,6 +24,21 @@ export async function integrationEvents(key, svc, { allowInsecureTruenas = false
       }
       break;
     }
+    case 'unpackerr': {
+      const q = await serviceGet(s, 'api/queue');
+      for (const i of q || []) {
+        if (i.status !== 'extractfailed') continue;
+        const name = (i.ids && i.ids.title) || String(i.path || '').split(/[\\/]/).filter(Boolean).pop();
+        out.push(ev(key, svc, 'extract-failed', i.id, 'Extraction failed', `${name}${i.error ? `: ${String(i.error).slice(0, 140)}` : ''}`));
+      }
+      break;
+    }
+    case 'speedtest': {
+      const r = await serviceGet(s, 'api/v1/results/latest');
+      if (r && r.status === 'failed') out.push(ev(key, svc, 'failed', r.id, 'Speedtest failed', (r.data && r.data.message) || 'The latest test failed'));
+      else if (r && r.healthy === false) out.push(ev(key, svc, 'slow', r.id, 'Internet slower than usual', `${Math.round((r.download * 8) / 1e6)} Mbps down, ${Math.round((r.upload * 8) / 1e6)} Mbps up`));
+      break;
+    }
     case 'pulsarr': {
       const r = await serviceGet(s, 'v1/approval/requests?status=pending&limit=50');
       for (const a of (r && r.approvalRequests) || []) out.push(ev(key, svc, 'approval', a.id, 'Request needs approval', `${a.contentTitle}${a.userName ? ` · ${a.userName}` : ''}`, 'approval'));

@@ -92,6 +92,7 @@ export function removeChannel(id) {
 // Build the HTTP request for a channel (pure; exported for tests).
 export function buildRequest(c, msg) {
   const { title, body, url, category } = msg;
+  const image = msg.image && /^https:\/\//.test(msg.image) ? msg.image : '';
   const text = body ? `${title}\n${body}` : title;
   const link = url && /^https?:\/\//.test(url) ? url : '';
   if (c.type === 'ntfy') {
@@ -101,13 +102,13 @@ export function buildRequest(c, msg) {
     // Optional action buttons (e.g. Approve/Decline): each POSTs to a
     // signed single-use URL on this server. ntfy allows up to 3.
     const ntfyActions = (msg.actions || []).slice(0, 3).map((a) => ({ action: 'http', label: a.label, url: a.url, method: 'POST', clear: true }));
-    return { url: c.server.replace(/\/+$/, ''), init: { method: 'POST', headers, body: JSON.stringify({ topic: c.topic, title, message: body || title, priority: c.priority, tags: category ? [category] : [], ...(link ? { click: link } : {}), ...(ntfyActions.length ? { actions: ntfyActions } : {}) }) } };
+    return { url: c.server.replace(/\/+$/, ''), init: { method: 'POST', headers, body: JSON.stringify({ topic: c.topic, title, message: body || title, priority: c.priority, tags: category ? [category] : [], ...(link ? { click: link } : {}), ...(image ? { icon: image } : {}), ...(ntfyActions.length ? { actions: ntfyActions } : {}) }) } };
   }
   if (c.type === 'gotify') {
     return { url: `${c.server.replace(/\/+$/, '')}/message`, init: { method: 'POST', headers: { 'content-type': 'application/json', 'x-gotify-key': c.token }, body: JSON.stringify({ title, message: body || title, priority: c.priority, ...(link ? { extras: { 'client::notification': { click: { url: link } } } } : {}) }) } };
   }
   if (c.type === 'discord') {
-    return { url: c.webhookUrl, init: { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'Arr Command Center', embeds: [{ title: title.slice(0, 256), description: (body || '').slice(0, 4000), ...(link ? { url: link } : {}), color: 0x7c3aed, timestamp: new Date().toISOString() }] }) } };
+    return { url: c.webhookUrl, init: { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'Arr Command Center', embeds: [{ title: title.slice(0, 256), description: (body || '').slice(0, 4000), ...(link ? { url: link } : {}), ...(image ? { thumbnail: { url: image } } : {}), color: 0x7c3aed, timestamp: new Date().toISOString() }] }) } };
   }
   if (c.type === 'telegram') {
     return { url: `https://api.telegram.org/bot${c.botToken}/sendMessage`, init: { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: c.chatId, text: text.slice(0, 4000), disable_web_page_preview: true }) } };

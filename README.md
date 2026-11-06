@@ -4,7 +4,8 @@ A single, locally-hosted web dashboard to view and manage your whole media stack
 **Sonarr**, **Radarr**, **Lidarr**, **Bindery** (with legacy **Readarr** fallback), **Overseerr/Seerr**, **SABnzbd**,
 **qBittorrent**, **Transmission**, **Deluge**, **NZBGet**, **Flood**, **Tautulli**, **Bazarr**, **Prowlarr**, **Plex**, **Jellyfin**, **Emby**,
 **Audiobookshelf**, **Autobrr**, **Maintainerr**, **Tdarr**, **Portainer** (read-only), **Glances**, **Pi-hole**,
-**AdGuard Home**, **Syncthing**, **Navidrome**, **Pulsarr**, **Whisparr**, **TrueNAS**, **Unraid**, and any Newznab **indexer** — from one place.
+**AdGuard Home**, **Syncthing**, **Navidrome**, **Pulsarr**, **Whisparr**, **TrueNAS**, **Unraid**, **Unpackerr**,
+**Speedtest Tracker**, and any Newznab **indexer** — from one place.
 
 Built as a self-hosted replacement for the now-discontinued **LunaSea** iOS app. Because
 it's a responsive web app, it works from your phone's browser (and you can "Add to Home
@@ -321,6 +322,9 @@ DELUGE_...    NZBGET_...   FLOOD_...    JELLYFIN_... EMBY_...
 AUDIOBOOKSHELF_... AUTOBRR_... MAINTAINERR_... TDARR_... INDEXER_...
 ```
 
+`TELEGRAM_API_BASE` points the chat-request bot at a self-hosted Telegram Bot API server
+(default `https://api.telegram.org`).
+
 Env values **override** the matching value in `config.json`.
 
 ---
@@ -471,6 +475,75 @@ internal traffic typically bypasses Cloudflare Access — in that case just omit
   recently added, and a library scan. Uses salted Subsonic tokens, never the raw password.
 - **Pulsarr** — approval queue (admins approve or reject) and recent watchlist requests.
 - **Whisparr v2** — uses the Sonarr screens, since it speaks the Sonarr v3 API.
+- **Unpackerr** (v1+, the version with the web UI on port 5656) — the extract queue and
+  history, with a plain reason for each stuck item (wrong password, missing archive part,
+  damaged archive, disk full, permissions, extracted but not imported) and what to do.
+  Users can retry a failed extract; forgetting an item needs delete rights. Auth: an API key
+  from Settings → Web server (queue and history read, plus queue write to retry).
+- **Speedtest Tracker** (v1 API) — latest down/up/ping, averages and a chart of past tests,
+  with a line for what your download clients are pulling right now. Users can start a test.
+  Auth: an API token from Admin → API tokens ("Read results", plus "Run speedtest").
+
+**Sync from TRaSH Guides** (Sonarr, Radarr → System → Custom formats, admins) — pick one of
+TRaSH's quality profiles; the preview lists each custom format as new, rules differ or up to
+date, with the score change on the quality profile you choose (or formats only). Untick
+anything you don't want, then Apply. Formats are matched by name. The guide data comes from
+the public TRaSH-Guides GitHub repository and is cached for a day.
+
+**Compare with…** (System tab, when you have two instances of the same app) — differences in
+custom formats, quality profiles (settings, qualities, cutoff and scores), file naming, media
+management, delay and release profiles between, say, Radarr and Radarr 4K.
+
+**Check files** (System tab) — uses the media info Sonarr/Radarr already store to flag files
+with no media info, no audio or video, a runtime far shorter than expected, a size far below
+the quality's minimum, a 2160p label on an HD picture, or an old codec like XviD. Search again,
+or Replace (deletes the file through the app, to its Recycle Bin if set, and searches; asks
+first). CSV export.
+
+**Insights** (System tab) — storage by quality, resolution and video codec, the largest titles,
+a rough HEVC saving estimate (assumes re-encoded H.264 ends up half the size) and growth over
+time from a size snapshot the server saves once a day per instance.
+
+**Never watched** (Seerr tab) — requests that have been available for 30–365 days but the
+person who asked hasn't played, using Tautulli history matched by Plex rating key. Shows who
+asked and who else watched. Unmonitor (users) or Delete with files (admins, asks first; also
+clears the request in Seerr).
+
+**Release and delay profiles** (System tab) — view everyone; admins add, edit and delete.
+The default delay profile can't be deleted.
+
+**Indexer health** (Prowlarr → Health) — searches, failure rate, grabs, grab failures and
+response time per indexer for a chosen period, flags paused, failing, slow and never-grabbing
+indexers with suggestions. Admins can Test or Disable an indexer.
+
+**Backups** (Settings → Automation, admins) — Back up all runs each Sonarr/Radarr/Lidarr/Readarr/
+Whisparr/Prowlarr's own Backup and lists the zips it keeps. **Open in …** takes you to that app's
+System → Backup page to download one: the apps only hand backup files to their own web login, not
+to the API key, so the zips never pass through Arr Command Center. If the server reaches an app at
+an internal address (for example `http://sonarr:8989` in Docker), set the service's optional
+**Browser URL** so the link opens the address you use in a browser.
+
+**Activity log** (Settings, admins) — every change, delete, request, restart and refused
+attempt: who, which role, which service, what, and the result. Filters and CSV. Only a short
+description is stored, never request bodies or keys. Keeps the last 1,000.
+
+**Weekly digest** (Settings, admins; off by default) — a list of what Sonarr and Radarr
+imported in the last 7/14/30 days, sent on a chosen day and hour to your notification channels
+and push (category "Weekly digest"). Discord and ntfy get a poster. Empty weeks are skipped;
+Send now sends one straight away.
+
+**Chat requests** (Settings, admins) — `/search`, `/request` and `/status` from Telegram or
+Discord, going through Seerr. Nobody can use it until you allow their chat: an unknown chat is
+told its id and appears under "Waiting to be allowed". Allowed chats get a role (guest can
+search only; user and admin can request) and optionally a Seerr user to request as.
+- Telegram: create a bot with @BotFather and paste its token. The server asks Telegram for new
+  messages, so it doesn't need to be reachable from the internet. Only one program can read a
+  bot's messages, so use a bot dedicated to this.
+- Discord: Discord sends slash commands to this server, so it must be reachable over https
+  (reverse proxy or Cloudflare Tunnel). Set the app's Interactions Endpoint URL to
+  `https://<your host>/api/bot/discord/interactions`, enter the application ID and public key,
+  and press Register slash commands (needs the bot token). Every call is checked against
+  Discord's signature. If you use Cloudflare Access, exclude that one path from it.
 
 **Fix paths** (Sonarr, Radarr, Lidarr → System tab, or from a "missing root folder" health
 warning) — after moving drives or hosts, checks every item's folder through the app's own
@@ -502,8 +575,8 @@ drives.
 
 **Problem notifications** — besides downloads and requests, the poller reports unhealthy Portainer
 containers, unreachable Docker environments, degraded TrueNAS pools, Unraid disk problems or a
-stopped array, Syncthing folder errors, ad blocking left off in Pi-hole/AdGuard, and Pulsarr
-requests awaiting approval (category "Problems", on by default). Each problem notifies once.
+stopped array, Syncthing folder errors, ad blocking left off in Pi-hole/AdGuard, failed Unpackerr
+extractions, a failed or below-benchmark speedtest, and Pulsarr requests awaiting approval (category "Problems", on by default). Each problem notifies once.
 
 **Live updates** — Sonarr/Radarr/Lidarr/Readarr/Whisparr queues, SABnzbd, qBittorrent,
 Transmission, Deluge, Flood, NZBGet, Tautulli and Jellyfin/Emby now-playing update over

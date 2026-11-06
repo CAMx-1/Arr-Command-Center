@@ -126,8 +126,8 @@ export function quickAddControls({ services, mediaType, title, resolveItem, extr
       : null;
     const profileSel = h('select', { class: 'input', 'aria-label': 'Quality profile' });
     const folderSel = h('select', { class: 'input', 'aria-label': 'Root folder' });
-    const monitorChk = h('input', { type: 'checkbox' });
-    const searchChk = h('input', { type: 'checkbox' });
+    const monitorChk = h('input', { type: 'checkbox', role: 'switch' });
+    const searchChk = h('input', { type: 'checkbox', role: 'switch' });
     const go = h('button', { class: 'btn sm primary', type: 'button', onclick: async () => {
       if (busy || !profileSel.value || !folderSel.value) return;
       const choice = { qualityProfileId: Number(profileSel.value), rootFolderPath: folderSel.value, monitored: monitorChk.checked, searchOnAdd: searchChk.checked };

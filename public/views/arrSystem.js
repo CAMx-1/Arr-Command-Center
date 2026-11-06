@@ -3,6 +3,12 @@
 import { h, mount, skeletonList, empty, toast, fmtBytes, pct, timeEl, openModal, closeModal, confirmModal } from '../lib/ui.js';
 import { profileSummary, formatSpecSummary, tagUsage, profileRows, applyProfileEdits, applyFormatEdits, moveProfileItem, removeFormatSpec, duplicateFormatSpec } from '../lib/arrProfiles.js';
 import { roleAllows } from '../lib/roleUi.js';
+import { openTrashSync } from '../lib/trashUI.js';
+import { openCompare, sameTypeInstances } from '../lib/compareUI.js';
+import { openFileHealth } from '../lib/fileHealthUI.js';
+import { openInsights } from '../lib/insightsUI.js';
+import { releaseSection, delaySection } from '../lib/releaseDelay.js';
+import { isLocalMode } from '../lib/connections.js';
 import { openPathFix } from '../lib/pathFix.js';
 import { openDuplicates } from '../lib/duplicates.js';
 
@@ -26,7 +32,7 @@ function openRequestedTool(arr, ctx, kind) {
 export async function tabSystem(root, arr, ctx, kind) {
   mount(root, skeletonList());
   try {
-    const [health, disks, status, blocklist, tags, profiles, formats] = await Promise.all([
+    const [health, disks, status, blocklist, tags, profiles, formats, releases, delays, indexers] = await Promise.all([
       arr.get('health').catch(() => []),
       arr.get('diskspace').catch(() => []),
       arr.get('system/status').catch(() => ({})),
@@ -34,6 +40,9 @@ export async function tabSystem(root, arr, ctx, kind) {
       arr.get('tag/detail').catch(() => arr.get('tag').catch(() => [])),
       arr.get('qualityprofile').catch(() => []),
       arr.get('customformat').catch(() => []),
+      arr.get('releaseprofile').catch(() => null),
+      arr.get('delayprofile').catch(() => null),
+      roleAllows('admin') ? arr.get('indexer').catch(() => []) : Promise.resolve([]),
     ]);
     const reload = () => tabSystem(root, arr, ctx, kind);
     setTimeout(() => openRequestedTool(arr, ctx, kind), 0);
@@ -51,6 +60,9 @@ export async function tabSystem(root, arr, ctx, kind) {
         ...commands.map(([name, label]) => h('button', { class: 'btn sm', onclick: () => run(name) }, label)),
         h('button', { class: 'btn sm primary', title: 'Re-point moved libraries to the real disk (e.g. after a Windows → Mac move)', onclick: () => openPathFix(arr, ctx, kind) }, '🛠 Fix paths'),
         h('button', { class: 'btn sm', title: 'Find duplicate entries and choose which to delete', onclick: () => openDuplicates(arr, ctx, kind) }, '🔍 Find duplicates'),
+        h('button', { class: 'btn sm', title: 'Find files that look broken or mislabelled', onclick: () => openFileHealth(arr, ctx, kind) }, '🩺 Check files'),
+        h('button', { class: 'btn sm', title: 'Where the space goes, largest titles and growth', onclick: () => openInsights(arr, ctx, kind) }, '📊 Insights'),
+        sameTypeInstances(ctx).length ? h('button', { class: 'btn sm', title: 'Compare profiles, formats, naming and more with another instance', onclick: () => openCompare(arr, ctx) }, '⇄ Compare with…') : null,
       ),
       h('div', { class: 'section-title' }, 'Health'),
       (health && health.length)
@@ -95,8 +107,14 @@ export async function tabSystem(root, arr, ctx, kind) {
       tagsSection(tags, arr, reload, kind),
       h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Quality profiles'),
       profilesSection(profiles, formats, arr, reload),
-      h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Custom formats'),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '16px' } },
+        h('div', { class: 'section-title', style: { margin: '0', flex: '1' } }, 'Custom formats'),
+        roleAllows('admin') && !isLocalMode() ? h('button', { class: 'btn sm', onclick: () => openTrashSync(arr, ctx, kind, reload) }, 'Sync from TRaSH Guides…') : null),
       formatsSection(formats, profiles, arr, reload),
+      releases ? h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Release profiles') : null,
+      releases ? releaseSection({ releases, tags, indexers, arr, reload }) : null,
+      delays ? h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Delay profiles') : null,
+      delays ? delaySection({ delays, tags, arr, reload }) : null,
     );
   } catch (err) {
     mount(root, empty('', 'Failed to load system info', err.message, { label: 'Retry', onClick: () => tabSystem(root, arr, ctx, kind) }));
@@ -108,7 +126,7 @@ export async function tabSystem(root, arr, ctx, kind) {
 function editFormat(original, arr, reload) {
   let format = JSON.parse(JSON.stringify(original));
   const name = h('input', { class: 'input', value: format.name || '' });
-  const rename = h('input', { type: 'checkbox', checked: format.includeCustomFormatWhenRenaming ? 'checked' : null });
+  const rename = h('input', { type: 'checkbox', role: 'switch', checked: format.includeCustomFormatWhenRenaming ? 'checked' : null });
   let specs = {};
   const specList = h('div', { class: 'list' });
   // Apply pending edits before a structural change so nothing typed is lost.
@@ -120,8 +138,8 @@ function editFormat(original, arr, reload) {
   const paintSpecs = () => mount(specList, ...(format.specifications || []).map((sp, i) => {
     const value = (sp.fields || []).find((f) => f && f.name === 'value');
     const valueInput = value ? h('input', { class: 'input mono', value: value.value == null ? '' : String(value.value), spellcheck: 'false', autocapitalize: 'off' }) : null;
-    const negate = h('input', { type: 'checkbox', checked: sp.negate ? 'checked' : null });
-    const required = h('input', { type: 'checkbox', checked: sp.required ? 'checked' : null });
+    const negate = h('input', { type: 'checkbox', role: 'switch', checked: sp.negate ? 'checked' : null });
+    const required = h('input', { type: 'checkbox', role: 'switch', checked: sp.required ? 'checked' : null });
     const sync = () => { specs[i] = { negate: negate.checked, required: required.checked, ...(valueInput ? { value: valueInput.value } : {}) }; };
     [negate, required].forEach((el) => el.addEventListener('change', sync));
     if (valueInput) valueInput.addEventListener('input', sync);
@@ -265,7 +283,7 @@ function editProfile(original, formats, arr, reload) {
   let rows = profileRows(profile);
   const allowed = {};
   const name = h('input', { class: 'input', value: profile.name || '' });
-  const upgrades = h('input', { type: 'checkbox', checked: profile.upgradeAllowed ? 'checked' : null });
+  const upgrades = h('input', { type: 'checkbox', role: 'switch', checked: profile.upgradeAllowed ? 'checked' : null });
   const cutoff = h('select', { class: 'input' });
   const paintCutoff = () => {
     const current = Number(cutoff.value || profile.cutoff);

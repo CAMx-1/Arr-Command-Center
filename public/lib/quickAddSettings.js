@@ -43,8 +43,8 @@ export function quickAddSettingsCard(state) {
           ...opts.profiles.map((p) => h('option', { value: p.id, selected: p.id === c.qualityProfileId ? 'selected' : null }, p.name)));
         const folderSel = h('select', { class: 'input', 'aria-label': `${svc.label} root folder` },
           ...opts.folders.map((f) => h('option', { value: f.path, selected: f.path === c.rootFolderPath ? 'selected' : null }, rootFolderLabel(f))));
-        const monitorChk = h('input', { type: 'checkbox', checked: c.monitored ? 'checked' : null });
-        const searchChk = h('input', { type: 'checkbox', checked: c.searchOnAdd ? 'checked' : null });
+        const monitorChk = h('input', { type: 'checkbox', role: 'switch', checked: c.monitored ? 'checked' : null });
+        const searchChk = h('input', { type: 'checkbox', role: 'switch', checked: c.searchOnAdd ? 'checked' : null });
         const save = () => {
           if (!profileSel.value || !folderSel.value) return;
           setAddDefaults(svc.key, { qualityProfileId: Number(profileSel.value), rootFolderPath: folderSel.value, monitored: monitorChk.checked, searchOnAdd: searchChk.checked });

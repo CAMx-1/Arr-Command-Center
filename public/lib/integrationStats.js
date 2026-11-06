@@ -1,7 +1,7 @@
 // Two-number summaries for the Home hexes of the newer integrations:
 // [[value, label], [value, label]]. Each uses the same client as its page.
 import {
-  portainerClient, glancesClient, piholeClient, adguardClient, syncthingClient, navidromeClient, pulsarrClient, truenasClient, unraidClient,
+  portainerClient, glancesClient, piholeClient, adguardClient, syncthingClient, navidromeClient, pulsarrClient, truenasClient, unraidClient, unpackerrClient, unpackerrDiagnosis, speedtestClient,
 } from './integrations.js';
 
 const pct = (n) => `${Math.round(Number(n) || 0)}%`;
@@ -19,6 +19,12 @@ export const integrationStats = {
   async syncthing(api, key) { const o = await syncthingClient(api, key).overview(); return [[o.folders.filter((f) => f.needBytes > 0 || f.state === 'error').length, 'Out of sync'], [`${o.devices.filter((d) => d.connected).length}/${o.devices.length}`, 'Devices']]; },
   async navidrome(api, key) { const n = await navidromeClient(api, key).overview(); return [[n.playing.length, 'Playing'], [n.artists ?? '—', 'Artists']]; },
   async pulsarr(api, key) { const s = await pulsarrClient(api, key).stats(); return [[s.pending ?? 0, 'Pending'], [s.auto_approved ?? 0, 'Auto-approved']]; },
+  async unpackerr(api, key) {
+    const c = unpackerrClient(api, key);
+    const [s, q] = await Promise.all([c.stats(), c.queue().catch(() => [])]);
+    return [[s.extracting ?? 0, 'Extracting'], [q.filter((i) => { const d = unpackerrDiagnosis(i); return d && d.level !== 'muted'; }).length, 'Stuck']];
+  },
+  async speedtest(api, key) { const l = await speedtestClient(api, key).latest(); return [[l.ok ? `${Math.round(l.down)}` : '—', 'Mbps down'], [l.ok && l.ping != null ? `${Math.round(l.ping)} ms` : '—', 'Ping']]; },
   async truenas(api, key) { const d = await truenasClient(key).overview(); return [[d.pools.filter((p) => !p.healthy || p.status !== 'ONLINE').length, 'Pool issues'], [d.alerts.length, 'Alerts']]; },
   async unraid(api, key) { const u = await unraidClient(api, key).overview(); return [[pct(u.percent), 'Array used'], [u.disks.filter((x) => x.status !== 'DISK_OK' && x.status !== 'DISK_NP').length, 'Disk issues']]; },
 };

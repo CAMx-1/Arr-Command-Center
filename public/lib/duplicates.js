@@ -127,9 +127,9 @@ async function scanInto(body, arr, ctx, kind) {
   function renderFoot() {
     if (!scan.groups.length || !canDelete) { mount(footEl, scan.groups.length ? h('p', { class: 'dim settings-copy' }, 'Only admins can delete entries.') : null); return; }
     const { plan, warnings } = deletePlan(scan.groups, selected, { deleteFiles: opts.deleteFiles });
-    const df = h('input', { type: 'checkbox', checked: opts.deleteFiles ? 'checked' : null });
+    const df = h('input', { type: 'checkbox', role: 'switch', checked: opts.deleteFiles ? 'checked' : null });
     df.addEventListener('change', () => { opts.deleteFiles = df.checked; renderFoot(); });
-    const ex = h('input', { type: 'checkbox', checked: opts.exclude ? 'checked' : null });
+    const ex = h('input', { type: 'checkbox', role: 'switch', checked: opts.exclude ? 'checked' : null });
     ex.addEventListener('change', () => { opts.exclude = ex.checked; });
     const shared = warnings.filter((w) => w.type === 'shared-folder');
     const allGone = warnings.filter((w) => w.type === 'all-copies');

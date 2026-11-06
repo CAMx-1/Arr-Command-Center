@@ -1,6 +1,12 @@
 import { showcaseEnabled, setShowcase } from '../lib/showcase.js';
+import { backupsCard } from '../lib/backupsUI.js';
+import { activityCard } from '../lib/activityUI.js';
+import { digestCard } from '../lib/digestUI.js';
+import { botCard } from '../lib/botUI.js';
+import { settingsLayout } from '../lib/settingsLayout.js';
 import { clearPersistedCache } from '../lib/cache.js';
 import { h, mount, clear, spinner, svcIcon, confirmModal, openModal, closeModal, toast, tabs, fmtBytes } from '../lib/ui.js';
+import { api as apiClient } from '../lib/api.js';
 import { SERVICE_META, calendarIcon } from '../app.js';
 import { getTheme, getAccent, applyTheme, applyAccent, ACCENTS, ACCENT_NAMES } from '../lib/theme.js';
 import { globalMode, setGlobalMode } from '../lib/viewMode.js';
@@ -153,49 +159,53 @@ export async function renderSettings(root, ctx) {
       'A green dot means the service is reachable through the proxy (including Cloudflare Access, when enabled). A red dot means a connection or auth problem.'),
   );
 
-  mount(root,
-    settingsJumpNav(),
-    h('div', { class: 'section-title', id: 'settings-general' }, 'General'),
-    general,
-    h('div', { class: 'section-title', id: 'settings-tools' }, 'Tools'),
-    toolsCard(ctx),
-    h('div', { class: 'section-title', id: 'settings-mobile' }, 'Mobile app'),
-    h('div', { class: 'card', id: 'mobile-app-panel' }, h('div', { class: 'dim' }, 'Loading app information…')),
-    appLockAvailable() ? h('div', { class: 'card', id: 'app-lock-panel' }, h('div', { class: 'dim' }, 'Loading passcode settings…')) : null,
-    h('div', { class: 'section-title', id: 'settings-favorites' }, 'Favorites & navigation'),
-    favoriteNavigationCard(ctx),
-    h('div', { class: 'section-title', id: 'settings-connection' }, 'Connection'),
-    connectionModeCard(root, ctx),
-    h('div', { class: 'section-title', id: 'settings-appearance' }, 'Appearance'),
-    appearanceCard(root, ctx),
-    h('div', { class: 'section-title', id: 'settings-quick-add' }, 'Quick Add'),
-    quickAddSettingsCard(state),
-    h('div', { class: 'section-title' }, 'System monitor'),
-    localMode ? serverOnlyCard('The system monitor') : systemMonitorCard(root, ctx),
-    h('div', { class: 'section-title' }, 'Overview Layout'),
-    dashboardSettingsCard(ctx),
-    h('div', { class: 'section-title', id: 'settings-notifications' }, 'Notifications'),
-    localMode ? serverOnlyCard('Notifications') : h('div', { class: 'card', id: 'push-panel' }, h('div', { class: 'dim' }, 'Loading…')),
-    (localMode || !admin) ? null : channelsCard(),
-    admin ? h('div', { class: 'section-title' }, 'Automation') : null,
-    localMode ? serverOnlyCard('Automation') : admin ? h('div', { class: 'card', id: 'automation-panel' }, h('div', { class: 'dim' }, 'Loading…')) : null,
-    (plexAuth && admin) ? h('div', { class: 'section-title', id: 'settings-users' }, 'Users & roles') : null,
-    (plexAuth && admin) ? usersRolesCard() : null,
-    h('div', { class: 'section-title', id: 'settings-services' }, 'Services'),
-    h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', margin: '-4px 0 12px' } },
-      h('div', { class: 'dim', style: { fontSize: '13px', flex: '1' } }, (localMode ? 'Manage local connections under “Connection” above. Drag a service card to reorder it, or Hide it from the sidebar and Home.' : 'Drag a service card to reorder it, and use Hide to remove one from the sidebar and Home (it stays configured and reachable directly).') + ' Add up to four favorites to the mobile bottom bar.'),
-      (cfg.mock || localMode || !admin) ? null : h('button', { class: 'btn sm primary hex-btn', onclick: () => openServiceForm(root, ctx, null, null) }, '+ Add service'),
-    ),
+  const cap = (x) => String(x || '').replace(/^./, (c) => c.toUpperCase());
+  const offline = state.services.filter((svc) => status[svc.key] && !status[svc.key].ok).length;
+  const pushState = typeof Notification === 'undefined' ? 'Not supported here' : Notification.permission === 'granted' ? 'On for this device' : Notification.permission === 'denied' ? 'Blocked in this browser' : 'Off for this device';
+  const fetchJson = (path) => apiClient.getJson(path);
+  const arrCount = state.services.filter((svc) => ['sonarr', 'radarr', 'lidarr', 'readarr', 'whisparr', 'prowlarr'].includes(svc.type) && svc.configured !== false).length;
+  const pinned = (() => { try { return pinnedServices().length; } catch { return 0; } })();
+  const servicesNodes = [
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', margin: '0 0 12px' } },
+      h('div', { class: 'dim', style: { fontSize: '13px', flex: '1' } }, (localMode ? 'Manage local connections under “Connection”. Drag a service card to reorder it, or Hide it from the sidebar and Home.' : 'Drag a service card to reorder it, or Hide it from the sidebar and Home.')),
+      (cfg.mock || localMode || !admin) ? null : h('button', { class: 'btn sm primary hex-btn', onclick: () => openServiceForm(root, ctx, null, null) }, '+ Add service')),
     h('div', { class: 'grid cols-2' }, ...serviceCards),
-    h('div', { class: 'section-title' }, 'About'),
-    note,
-    admin ? h('div', { class: 'section-title', id: 'settings-diagnostics' }, 'Server diagnostics') : null,
-    localMode ? serverOnlyCard('Server diagnostics') : admin ? h('div', { class: 'card', id: 'diag-panel' }, h('div', { class: 'dim' }, 'Loading diagnostics…')) : null,
-    admin ? h('div', { class: 'section-title' }, 'Custom Links') : null,
-    localMode ? serverOnlyCard('Custom Links') : admin ? h('div', { class: 'card', id: 'links-admin' }, h('div', { class: 'dim' }, 'Loading…')) : null,
-    (plexAuth && admin) ? h('div', { class: 'section-title' }, 'Login log') : null,
-    (plexAuth && admin) ? h('div', { class: 'card', id: 'loginlog-panel' }, h('div', { class: 'dim' }, 'Loading…')) : null,
-  );
+  ];
+
+  // Each section: which tab it's in, its row title, a short current value,
+  // and the existing card(s) as its body. Old anchor ids stay as aliases.
+  const sections = [
+    { id: 'appearance', tab: 'you', title: 'Appearance', nodes: [appearanceCard(root, ctx)], summary: `${cap(getTheme())} · ${cap(getAccent())} · ${cap(getDensity())}`, keywords: ['theme', 'dark', 'accent', 'colour', 'color', 'density', 'view mode'], aliases: ['settings-appearance'] },
+    { id: 'favorites', tab: 'you', title: 'Favorites & navigation', nodes: [favoriteNavigationCard(ctx)], summary: pinned ? `${pinned} in the bottom bar` : '', keywords: ['bottom bar', 'sidebar', 'pin'], aliases: ['settings-favorites'] },
+    { id: 'quick-add', tab: 'you', title: 'Quick Add', nodes: [quickAddSettingsCard(state)], summary: arrCount ? `Defaults for ${arrCount} ${arrCount === 1 ? 'app' : 'apps'}` : '', keywords: ['add', 'profile', 'root folder', 'monitor'], aliases: ['settings-quick-add'] },
+    { id: 'overview', tab: 'you', title: 'Overview layout', nodes: [dashboardSettingsCard(ctx)], summary: 'Home widgets', keywords: ['home', 'widgets', 'dashboard', 'workspace'] },
+    { id: 'device', tab: 'you', title: 'This device', nodes: [h('div', { class: 'card', id: 'mobile-app-panel' }, h('div', { class: 'dim' }, 'Loading app information…')), appLockAvailable() ? h('div', { class: 'card', id: 'app-lock-panel' }, h('div', { class: 'dim' }, 'Loading passcode settings…')) : null], summary: isNativeApp() ? 'iPhone app' : 'Web app', keywords: ['mobile', 'app', 'passcode', 'face id', 'version', 'server'], aliases: ['settings-mobile'] },
+
+    { id: 'push', tab: 'notifications', title: 'Push notifications', nodes: [localMode ? serverOnlyCard('Notifications') : h('div', { class: 'card', id: 'push-panel' }, h('div', { class: 'dim' }, 'Loading…'))], summary: localMode ? 'Needs the server' : pushState, keywords: ['alerts', 'categories', 'notify'], aliases: ['settings-notifications'] },
+    (localMode || !admin) ? null : { id: 'channels', tab: 'notifications', title: 'Channels', nodes: [channelsCard()], summary: () => fetchJson('/api/notify/channels').then((d) => { const list = (d && d.channels) || []; return list.length ? list.map((c) => c.name || c.type).slice(0, 3).join(', ') + (list.length > 3 ? ` +${list.length - 3}` : '') : 'None'; }), keywords: ['ntfy', 'gotify', 'discord', 'telegram', 'webhook'] },
+    (localMode || !admin) ? null : { id: 'digest', tab: 'notifications', title: 'Weekly digest', nodes: [digestCard()], summary: () => fetchJson('/api/digest').then((d) => (d.settings.enabled ? d.schedule : 'Off')), keywords: ['recently added', 'weekly', 'summary'], aliases: ['settings-digest'] },
+    (localMode || !admin) ? null : { id: 'bot', tab: 'notifications', title: 'Chat requests', nodes: [botCard()], summary: () => fetchJson('/api/bot').then((d) => [d.telegram.enabled ? 'Telegram on' : '', d.discord.enabled ? 'Discord on' : '', `${d.users.length} ${d.users.length === 1 ? 'chat' : 'chats'}`].filter(Boolean).join(' · ') || 'Off'), badge: () => fetchJson('/api/bot').then((d) => d.pending.length), badgeLabel: 'waiting', keywords: ['telegram', 'discord', 'bot', 'request'], aliases: ['settings-bot'] },
+
+    { id: 'services', tab: 'services', title: 'Services', nodes: servicesNodes, summary: `${state.services.length} connected`, badge: offline, badgeLabel: 'offline', keywords: ['api key', 'url', 'sonarr', 'radarr', 'add service', 'hide'], aliases: ['settings-services'] },
+    { id: 'connection', tab: 'services', title: 'Connection', nodes: [connectionModeCard(root, ctx)], summary: localMode ? 'Local only' : 'Through the server', keywords: ['local', 'server', 'mode', 'fallback'], aliases: ['settings-connection'] },
+    admin ? { id: 'links', tab: 'services', title: 'Custom links', nodes: [localMode ? serverOnlyCard('Custom Links') : h('div', { class: 'card', id: 'links-admin' }, h('div', { class: 'dim' }, 'Loading…'))], summary: '', keywords: ['bookmarks', 'organizr'] } : null,
+
+    admin ? { id: 'automation', tab: 'automation', title: 'Automation', nodes: [localMode ? serverOnlyCard('Automation') : h('div', { class: 'card', id: 'automation-panel' }, h('div', { class: 'dim' }, 'Loading…'))], summary: 'Queue cleaner and hunting', keywords: ['queue cleaner', 'hunt', 'stalled', 'missing'] } : null,
+    admin ? { id: 'backups', tab: 'automation', title: 'Backups', nodes: [backupsCard(ctx)], summary: arrCount ? `${arrCount} ${arrCount === 1 ? 'app' : 'apps'}` : '', keywords: ['backup', 'restore', 'zip'], aliases: ['settings-backups'] } : null,
+
+    (plexAuth && admin) ? { id: 'users', tab: 'admin', title: 'Users & roles', nodes: [usersRolesCard()], summary: 'Sign in with Plex', keywords: ['roles', 'guest', 'admin', 'plex'], aliases: ['settings-users'] } : null,
+    (!localMode && admin) ? { id: 'activity', tab: 'admin', title: 'Activity log', nodes: [activityCard()], summary: () => fetchJson('/api/activity?limit=1000').then((list) => { const week = list.filter((e) => Date.now() - Date.parse(e.at) < 7 * 86400000).length; return `${week} ${week === 1 ? 'change' : 'changes'} this week`; }), keywords: ['audit', 'who', 'history', 'log'], aliases: ['settings-activity'] } : null,
+    (plexAuth && admin) ? { id: 'login-log', tab: 'admin', title: 'Login log', nodes: [h('div', { class: 'card', id: 'loginlog-panel' }, h('div', { class: 'dim' }, 'Loading…'))], summary: '', keywords: ['sign in', 'login'] } : null,
+
+    { id: 'general', tab: 'system', title: 'General', nodes: [general], summary: cfg.mock ? 'Demo mode' : `Live${cfg.auth && cfg.auth.user ? ` · signed in as ${cfg.auth.user}` : ''}`, keywords: ['sign out', 'role', 'mode'], aliases: ['settings-general'] },
+    { id: 'tools', tab: 'system', title: 'Tools', nodes: [toolsCard(ctx)], summary: 'Cleanup, Calendar', keywords: ['cleanup', 'calendar'], aliases: ['settings-tools'] },
+    { id: 'sysmon', tab: 'system', title: 'System monitor', nodes: [localMode ? serverOnlyCard('The system monitor') : systemMonitorCard(root, ctx)], summary: '', keywords: ['cpu', 'memory', 'disks'] },
+    admin ? { id: 'diagnostics', tab: 'system', title: 'Server diagnostics', nodes: [localMode ? serverOnlyCard('Server diagnostics') : h('div', { class: 'card', id: 'diag-panel' }, h('div', { class: 'dim' }, 'Loading diagnostics…'))], summary: '', keywords: ['debug', 'logs', 'report'], aliases: ['settings-diagnostics'] } : null,
+    { id: 'about', tab: 'system', title: 'About', nodes: [note], summary: 'Configuration', keywords: ['config.json', 'version'] },
+  ].filter(Boolean);
+
+  const layout = settingsLayout(sections, { params: ctx.params, setParams: (patch) => ctx.setParams(patch) });
+  mount(root, layout.el);
 
   hydrateMobileAppPanel(ctx);
   hydrateUptime(root);
@@ -210,18 +220,6 @@ export async function renderSettings(root, ctx) {
   if (plexAuth && admin) hydrateLoginLog(ctx);
 }
 
-function settingsJumpNav() {
-  const links = [
-    ['settings-tools', 'Tools'], ['settings-mobile', 'App'], ['settings-favorites', 'Favorites'], ['settings-connection', 'Connection'], ['settings-quick-add', 'Quick Add'],
-    ['settings-notifications', 'Notifications'], ['settings-services', 'Services'], ['settings-diagnostics', 'Diagnostics'],
-  ];
-  return h('nav', { class: 'settings-jump', 'aria-label': 'Settings sections' },
-    ...links.map(([id, label]) => h('button', {
-      class: 'btn sm hex-btn', type: 'button',
-      onclick: () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
-    }, label)),
-  );
-}
 
 // Shortcuts to app-wide pages that aren't services (also in the phone's
 // All services sheet and the ⌘K command palette).
@@ -1168,7 +1166,7 @@ async function hydrateNotifications(ctx) {
       if (list) {
         clear(list);
         categories.forEach((c) => {
-          const cb = h('input', { type: 'checkbox', checked: prefs[c.id] !== false ? 'checked' : null });
+          const cb = h('input', { type: 'checkbox', role: 'switch', checked: prefs[c.id] !== false ? 'checked' : null });
           cb.addEventListener('change', async () => {
             try { await push.setPrefs({ [c.id]: cb.checked }); toast(`${c.label}: ${cb.checked ? 'on' : 'off'}`, 'success'); }
             catch (e) { toast(e.message, 'error'); cb.checked = !cb.checked; }
@@ -1182,7 +1180,7 @@ async function hydrateNotifications(ctx) {
   render();
 }
 
-const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex', 'portainer', 'glances', 'pihole', 'adguard', 'syncthing', 'navidrome', 'pulsarr', 'whisparr', 'truenas', 'unraid'];
+const SERVICE_TYPE_OPTIONS = ['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'listenarr', 'overseerr', 'sabnzbd', 'tautulli', 'prowlarr', 'bazarr', 'qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'jellyfin', 'emby', 'audiobookshelf', 'autobrr', 'maintainerr', 'tdarr', 'indexer', 'plex', 'portainer', 'glances', 'pihole', 'adguard', 'syncthing', 'navidrome', 'pulsarr', 'whisparr', 'truenas', 'unraid', 'unpackerr', 'speedtest'];
 // Where to find the API key / what auth each newer integration expects.
 const SERVICE_KEY_HINTS = {
   autobrr: 'Autobrr → Settings → API keys (sent as X-API-Token).',
@@ -1194,6 +1192,8 @@ const SERVICE_KEY_HINTS = {
   portainer: 'Portainer → My account → Access tokens (sent as X-API-Key). Arr Command Center only reads from Portainer.',
   syncthing: 'Syncthing → Actions → Settings → General → API Key.',
   pulsarr: 'Pulsarr → System → API keys (sent as X-API-Key).',
+  unpackerr: 'Unpackerr v1+ → Settings → Web server → API keys. Give the key the queue and history read permissions (plus queue write to retry). Older versions without the web UI aren’t supported.',
+  speedtest: 'Speedtest Tracker → Admin → API tokens. “Read results” is enough; add “Run speedtest” to start tests from here.',
   whisparr: 'Whisparr v2 → Settings → General → API Key.',
   maintainerr: 'Maintainerr has no API authentication; leave blank. Keep it off the public internet and rely on ACC’s own login.',
 };
@@ -1212,6 +1212,7 @@ function openServiceForm(root, ctx, existingKey, existing) {
   const label = h('input', { class: 'input', value: (existing && existing.label) || '' });
   const typeSel = h('select', { class: 'input' }, ...SERVICE_TYPE_OPTIONS.map((t) => h('option', { value: t, selected: existing && existing.type === t ? 'selected' : null }, t)));
   const baseUrl = h('input', { class: 'input', type: 'url', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'go', placeholder: existing && existing.configured ? '•••• (leave blank to keep)' : 'https://sonarr.example.com' });
+  const webUrl = h('input', { class: 'input', type: 'url', inputmode: 'url', autocapitalize: 'off', spellcheck: 'false', placeholder: existing && existing.hasWebUrl ? '•••• (leave blank to keep)' : 'Only if different, e.g. https://sonarr.example.com' });
   const apiKey = h('input', { class: 'input', type: 'password', placeholder: existing && existing.configured ? '•••• (leave blank to keep)' : 'API key' });
   const username = h('input', { class: 'input', placeholder: 'WebUI username' });
   const password = h('input', { class: 'input', type: 'password', placeholder: existing && existing.type === 'qbittorrent' ? '•••• (leave blank to keep)' : 'WebUI password' });
@@ -1220,7 +1221,7 @@ function openServiceForm(root, ctx, existingKey, existing) {
   const customHeaders = h('textarea', { class: 'input', rows: '5', spellcheck: 'false', placeholder: existing && existing.hasCustomHeaders ? '•••• (leave blank to keep; enter {} to clear)' : '{ "X-Custom-Token": "value" }' });
   const rpcPath = h('input', { class: 'input', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: DEFAULT_RPC_PATH, value: (existing && existing.rpcPath && existing.rpcPath !== DEFAULT_RPC_PATH) ? existing.rpcPath : '' });
   const rpcPathWrap = h('div', {}, field('RPC path', rpcPath, 'Leave as /transmission/rpc unless Transmission’s rpc-url or your seedbox uses another path (e.g. /rpc).'));
-  const enabled = h('input', { type: 'checkbox', checked: (existing ? existing : { }) && (!existing || existing.enabled !== false) ? 'checked' : null });
+  const enabled = h('input', { type: 'checkbox', role: 'switch', checked: (existing ? existing : { }) && (!existing || existing.enabled !== false) ? 'checked' : null });
 
   const credentialTypes = new Set(['qbittorrent', 'transmission', 'deluge', 'nzbget', 'flood', 'glances', 'pihole', 'adguard', 'navidrome']);
   const apiKeyHint = h('span', {});
@@ -1266,6 +1267,7 @@ function openServiceForm(root, ctx, existingKey, existing) {
       baseUrl: baseUrl.value.trim(),
       apiKey: apiKey.value.trim(),
     };
+    if (webUrl.value.trim()) service.webUrl = webUrl.value.trim();
     if (username.value.trim()) service.username = username.value.trim();
     if (password.value.trim()) service.password = password.value.trim();
     if (typeSel.value === 'transmission') {
@@ -1302,6 +1304,7 @@ function openServiceForm(root, ctx, existingKey, existing) {
     field('Label', label),
     field('Type', typeSel),
     field('URL', baseUrl),
+    field('Browser URL', webUrl, 'Optional. The address you open this app at in a browser, if it differs from the URL above (used by Open in … links).'),
     apiKeyWrap,
     maintainerrWarn,
     loginCreds,

@@ -28,6 +28,7 @@ import { renderIndexer } from './views/indexer.js';
 import { renderPlex } from './views/plex.js';
 import { renderMediaServer } from './views/mediaServer.js';
 import { renderAutobrr, renderMaintainerr, renderTdarr, renderAudiobookshelf } from './views/extraServices.js';
+import { renderUnpackerr, renderSpeedtest } from './views/unpackSpeed.js';
 import { renderPortainer, renderGlances, renderPihole, renderAdguard, renderSyncthing, renderNavidrome, renderPulsarr, renderTruenas, renderUnraid } from './views/integrations.js';
 import { renderEmbed } from './views/embed.js';
 import { renderSettings } from './views/settings.js';
@@ -84,6 +85,8 @@ export const SERVICE_META = {
   syncthing: { logo: '/icons/syncthing.svg', emoji: '🔄', renderer: renderSyncthing },
   navidrome: { logo: '/icons/navidrome.svg', emoji: '🎶', renderer: renderNavidrome },
   pulsarr: { logo: '/icons/pulsarr.svg', emoji: '📝', renderer: renderPulsarr },
+  unpackerr: { logo: '/icons/unpackerr.svg', emoji: '📦', renderer: renderUnpackerr },
+  speedtest: { logo: '/icons/speedtest.svg', emoji: '⏱', renderer: renderSpeedtest },
   truenas: { logo: '/icons/truenas.svg', emoji: '🗄', renderer: renderTruenas },
   unraid: { logo: '/icons/unraid.svg', emoji: '🗄', renderer: renderUnraid },
   // Whisparr v2 speaks the Sonarr v3 API, so it uses the Sonarr screens.
@@ -498,7 +501,7 @@ const QUICK_ACTIONS = {
   audiobookshelf: [['listening', 'Listening'], ['recent', 'Recently added'], ['libraries', 'Libraries']],
   overseerr: [['pending', 'Pending'], ['all', 'All Requests'], ['issues', 'Issues'], ['recent', 'Recently Added'], ['discover', 'Discover']],
   bazarr: [['series', 'Series'], ['movies', 'Movies'], ['wanted', 'Wanted'], ['history', 'History'], ['blacklist', 'Blacklist'], ['providers', 'Providers'], ['system', 'System']],
-  prowlarr: [['indexers', 'Indexers'], ['search', 'Search'], ['history', 'History']],
+  prowlarr: [['indexers', 'Indexers'], ['health', 'Health'], ['search', 'Search'], ['history', 'History']],
   plex: [['watchlist', 'Watchlist'], ['duplicates', 'Duplicates'], ['users', 'Users'], ['friends', 'Friends'], ['sessions', 'Now Playing']],
   jellyfin: [['libraries', 'Libraries'], ['latest', 'Recently Added'], ['sessions', 'Now Playing'], ['users', 'Users']],
   emby: [['libraries', 'Libraries'], ['latest', 'Recently Added'], ['sessions', 'Now Playing'], ['users', 'Users']],
@@ -506,6 +509,7 @@ const QUICK_ACTIONS = {
   glances: [['overview', 'Overview'], ['sensors', 'Temperatures'], ['containers', 'Containers']],
   syncthing: [['folders', 'Folders'], ['devices', 'Devices']],
   pulsarr: [['approvals', 'Approvals'], ['recent', 'Recent requests']],
+  unpackerr: [['queue', 'Queue'], ['history', 'History']],
   truenas: [['pools', 'Pools'], ['disks', 'Disks'], ['apps', 'Apps'], ['alerts', 'Alerts']],
   unraid: [['array', 'Array'], ['docker', 'Docker'], ['vms', 'VMs']],
   whisparr: [['series', 'Library'], ['calendar', 'Calendar'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['history', 'History']],

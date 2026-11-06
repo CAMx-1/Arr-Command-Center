@@ -61,6 +61,9 @@ export const api = {
   async addLink(link) { return parse(await fetch('/api/links', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(link) })); },
   async removeLink(id) { return parse(await fetch(`/api/links/${encodeURIComponent(id)}`, { method: 'DELETE' })); },
   async loginLog() { return parse(await fetch('/api/login-log')); },
+  // Plain JSON from one of this server's own /api routes.
+  async getJson(path) { return parse(await fetch(path, { cache: 'no-store' })); },
+  async sendJson(path, body, method = 'POST') { return parse(await fetch(path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) })); },
   async saveService(key, service) { return parse(await fetch('/api/config/service', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, service }) })); },
   async deleteService(key) { return parse(await fetch(`/api/config/service/${encodeURIComponent(key)}`, { method: 'DELETE' })); },
   async exportLocalFallback() { return parse(await fetch('/api/config/local-fallback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true }) })); },
@@ -127,6 +130,7 @@ export const api = {
     return {
       get: (p) => this.proxy(service, `api/v1/${p}`),
       post: (p, body) => this.proxy(service, `api/v1/${p}`, { method: 'POST', body }),
+      del: (p) => this.proxy(service, `api/v1/${p}`, { method: 'DELETE' }),
     };
   },
 

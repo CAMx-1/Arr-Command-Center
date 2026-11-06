@@ -212,7 +212,7 @@ export function bulkLibrary(root, opts) {
     let roots = [];
     try { roots = await arr.get('rootfolder'); } catch { /* ignore */ }
     const sel = h('select', { class: 'input' }, ...roots.map((r) => h('option', { value: r.path }, rootFolderLabel(r))));
-    const moveChk = h('input', { type: 'checkbox' });
+    const moveChk = h('input', { type: 'checkbox', role: 'switch' });
     const apply = async () => {
       const rootFolderPath = sel.value;
       if (!rootFolderPath) { toast('Pick a root folder', 'info'); return; }

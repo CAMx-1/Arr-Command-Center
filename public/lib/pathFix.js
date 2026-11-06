@@ -234,7 +234,7 @@ async function scanInto(body, arr, ctx, kind) {
   function renderFoot() {
     const ch = changes();
     const roots = rootChanges(scan.roots, scan.items, ch);
-    const check = (key, text) => { const b = h('input', { type: 'checkbox', checked: opts[key] ? 'checked' : null }); b.addEventListener('change', () => { opts[key] = b.checked; }); return h('label', { style: { display: 'flex', gap: '8px', alignItems: 'flex-start' } }, b, h('span', {}, text)); };
+    const check = (key, text) => { const b = h('input', { type: 'checkbox', role: 'switch', checked: opts[key] ? 'checked' : null }); b.addEventListener('change', () => { opts[key] = b.checked; }); return h('label', { style: { display: 'flex', gap: '8px', alignItems: 'flex-start' } }, b, h('span', {}, text)); };
     if (!canApply) { mount(footEl, h('p', { class: 'dim settings-copy' }, 'Only admins can change paths.')); return; }
     if (!rows.length) { mount(footEl, h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '12px' } }, h('button', { class: 'btn', onclick: closeModal }, 'Close'))); return; }
     const csvBtn = h('button', { class: 'btn', onclick: () => downloadCsv(`fix-paths-plan-${serviceKey}-${stamp()}.csv`, toCsv(PATH_CSV_HEADERS, planCsvRows(rows))) }, 'Export CSV');

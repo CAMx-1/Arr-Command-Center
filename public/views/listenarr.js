@@ -153,7 +153,7 @@ function addTab(root, client, ctx) {
   const input = h('input', { class: 'input', type: 'search', enterkeyhint: 'search', placeholder: 'Title, author or ASIN…', value: ctx.params.q || '', 'aria-label': 'Search audiobooks' });
   const profileSel = h('select', { class: 'input', 'aria-label': 'Quality profile' }, h('option', {}, 'Loading…'));
   const rootSel = h('select', { class: 'input', 'aria-label': 'Root folder' }, h('option', {}, 'Loading…'));
-  const searchChk = h('input', { type: 'checkbox', checked: 'checked' });
+  const searchChk = h('input', { type: 'checkbox', role: 'switch', checked: 'checked' });
   const results = h('div', { class: 'search-results' });
   let library = [];
   const form = h('form', { class: 'search-form', role: 'search', onsubmit: (e) => { e.preventDefault(); input.blur(); run(); } },

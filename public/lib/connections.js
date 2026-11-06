@@ -46,6 +46,8 @@ export const LOCAL_SERVICE_DEFS = [
   { type: 'adguard', name: 'AdGuard Home', urlPlaceholder: 'http://adguard.local:3000', credentialMode: 'basic' },
   { type: 'syncthing', name: 'Syncthing', urlPlaceholder: 'http://nas.local:8384', keyHint: 'Actions → Settings → API Key' },
   { type: 'pulsarr', name: 'Pulsarr', urlPlaceholder: 'http://pulsarr.local:3003', keyHint: 'System → API keys' },
+  { type: 'unpackerr', name: 'Unpackerr', urlPlaceholder: 'http://unpackerr.local:5656', keyHint: 'Settings → Web server → API keys' },
+  { type: 'speedtest', name: 'Speedtest Tracker', urlPlaceholder: 'http://speedtest.local:8080', keyHint: 'Admin → API tokens (Read results)' },
   { type: 'unraid', name: 'Unraid', urlPlaceholder: 'http://tower.local', keyHint: 'Settings → Management Access → API Keys' },
 ];
 export const LOCAL_SUPPORTED = LOCAL_SERVICE_DEFS.map((d) => d.type);
@@ -118,8 +120,11 @@ export function authFor(conn, { baseUrl } = {}) {
     if (conn.apiKey) generated.Authorization = `Bearer ${conn.apiKey}`;
     const origin = trimSlash(baseUrl || conn.baseUrl || conn.localUrl || conn.remoteUrl);
     if (origin) { generated.Referer = origin; generated.Origin = origin; }
-  } else if (type === 'portainer' || type === 'syncthing' || type === 'pulsarr') {
+  } else if (type === 'portainer' || type === 'syncthing' || type === 'pulsarr' || type === 'unpackerr') {
     if (conn.apiKey) generated['X-API-Key'] = conn.apiKey;
+  } else if (type === 'speedtest') {
+    if (conn.apiKey) generated.Authorization = `Bearer ${conn.apiKey}`;
+    generated.Accept = 'application/json';
   } else if (type === 'unraid') {
     if (conn.apiKey) generated['x-api-key'] = conn.apiKey;
   } else if (type === 'glances' || type === 'adguard') {

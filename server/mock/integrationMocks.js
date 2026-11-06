@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 
 export const INTEGRATION_MOCK_PORTS = {
-  truenas: 16443, unraid: 18088, portainer: 19443, glances: 16120, pihole: 18053, adguard: 13000, syncthing: 18384, navidrome: 14533, pulsarr: 13003, whisparr: 16969,
+  truenas: 16443, unraid: 18088, portainer: 19443, glances: 16120, pihole: 18053, adguard: 13000, syncthing: 18384, navidrome: 14533, pulsarr: 13003, whisparr: 16969, unpackerr: 15656, speedtest: 18765,
 };
 export const MOCK_KEY = 'MOCK_API_KEY';
 const basic = (req) => {
@@ -356,4 +356,75 @@ export function makeTruenasServer({ apiKey = MOCK_KEY } = {}) {
     socket.on('error', () => {});
   });
   return server;
+}
+
+// ------------------------------------------------------------------ Unpackerr
+// v1 web server API: /api/stats, /api/queue, /api/history, retry/forget.
+export function makeUnpackerr() {
+  const app = express();
+  app.use(express.json());
+  app.use('/api', (req, res, next) => (req.headers['x-api-key'] === MOCK_KEY || req.headers.authorization === `Bearer ${MOCK_KEY}` ? next() : res.status(401).json({ error: 'unauthorized' })));
+  const now = Date.now();
+  const iso = (msAgo) => new Date(now - msAgo).toISOString();
+  let queue = [
+    { id: '/downloads/complete/tv/Severance.S02E05.1080p.WEB.H264-NTb', app: 'Sonarr', kind: 'Sonarr', path: '/downloads/complete/tv/Severance.S02E05.1080p.WEB.H264-NTb', status: 'extracting', retries: 0, updated: iso(5000), started: iso(40000), percent: 62.5, archives: 1, extracted: 0, files: 31, speedBps: 98000000, eta: iso(-25000), archive: 'severance.s02e05.rar', ids: { title: 'Severance.S02E05.1080p.WEB.H264-NTb' } },
+    { id: '/downloads/complete/movies/Nosferatu.2024.2160p.UHD.BluRay-TERMiNAL', app: 'Radarr', kind: 'Radarr', path: '/downloads/complete/movies/Nosferatu.2024.2160p.UHD.BluRay-TERMiNAL', status: 'extractfailed', retries: 2, updated: iso(1800000), started: iso(1900000), error: 'extracting: nosferatu.part03.rar: rardecode: archive continues in next volume, missing volume: nosferatu.part04.rar', archives: 1, files: 0, ids: { title: 'Nosferatu.2024.2160p.UHD.BluRay-TERMiNAL' } },
+    { id: '/downloads/complete/movies/The.Brutalist.2024.1080p.BluRay.x264-SPARKS', app: 'Radarr', kind: 'Radarr', path: '/downloads/complete/movies/The.Brutalist.2024.1080p.BluRay.x264-SPARKS', status: 'extractfailed', retries: 1, updated: iso(600000), started: iso(660000), error: 'extracting: brutalist.rar: rardecode: incorrect password', archives: 1, files: 0, due: iso(-240000), dueKind: 'retry', ids: { title: 'The.Brutalist.2024.1080p.BluRay.x264-SPARKS' } },
+    { id: '/downloads/complete/tv/Andor.S02E01.1080p.WEB-DL', app: 'Sonarr', kind: 'Sonarr', path: '/downloads/complete/tv/Andor.S02E01.1080p.WEB-DL', status: 'extracted', retries: 0, updated: iso(5400000), started: iso(5500000), archives: 1, files: 1, bytes: 2900000000, elapsed: '41s', ids: { title: 'Andor.S02E01.1080p.WEB-DL' } },
+    { id: '/downloads/complete/tv/Shogun.S01E03.1080p.WEB', app: 'Sonarr', kind: 'Sonarr', path: '/downloads/complete/tv/Shogun.S01E03.1080p.WEB', status: 'queued', retries: 0, updated: iso(20000), ids: { title: 'Shogun.S01E03.1080p.WEB' } },
+  ];
+  let history = [
+    { id: '/downloads/complete/movies/Conclave.2024.1080p.WEB', app: 'Radarr', kind: 'Radarr', path: '/downloads/complete/movies/Conclave.2024.1080p.WEB', status: 'deleted', started: iso(86400000), finished: iso(86300000), archives: 1, files: 1, bytes: 9100000000, elapsed: '1m12s' },
+    { id: '/downloads/complete/tv/The.Bear.S03E02.1080p', app: 'Sonarr', kind: 'Sonarr', path: '/downloads/complete/tv/The.Bear.S03E02.1080p', status: 'imported', started: iso(172800000), finished: iso(172700000), archives: 1, files: 1, bytes: 1700000000, elapsed: '22s' },
+  ];
+  const count = (st) => queue.filter((q) => q.status === st).length;
+  app.get('/api/stats', (req, res) => res.json({ waiting: count('waiting'), queued: count('queued'), extracting: count('extracting'), failed: count('extractfailed'), extracted: count('extracted'), imported: count('imported'), deleted: count('deleted'), retries: 3, finished: 214, hookOK: 12, hookFail: 0, starrs: 3, folders: 1, webhooks: 1, cmdhooks: 0,
+    starrQueues: [{ app: 'Radarr', name: '', url: 'http://radarr:7878', queued: 2, complete: 2, error: '' }, { app: 'Sonarr', name: '', url: 'http://sonarr:8989', queued: 3, complete: 3, error: '' }] }));
+  app.get('/api/system', (req, res) => res.json({ version: '1.0.2', uptime: '3d4h', auth: 'password', hostname: 'unpackerr' }));
+  app.get('/api/queue', (req, res) => res.json(queue));
+  app.get('/api/history', (req, res) => res.json(history));
+  const byId = (req, res) => { const id = req.body && req.body.id; if (!id) { res.status(400).json({ error: 'missing id' }); return null; } const q = queue.find((x) => x.id === id); if (!q) { res.status(404).json({ error: 'item not found' }); return null; } return q; };
+  app.post('/api/queue/retry', (req, res) => { const q = byId(req, res); if (!q) return; if (q.status !== 'extractfailed') return res.status(409).json({ error: 'item is not in extractfailed' }); q.status = 'queued'; q.error = ''; q.retries += 1; delete q.due; delete q.dueKind; res.json({ status: 'ok', id: q.id }); });
+  app.post('/api/queue/forget', (req, res) => { const q = byId(req, res); if (!q) return; queue = queue.filter((x) => x !== q); res.json({ status: 'ok', id: q.id }); });
+  app.post('/api/history/delete', (req, res) => { history = history.filter((x) => x.id !== (req.body && req.body.id)); res.json({ status: 'ok' }); });
+  return app;
+}
+
+// ---------------------------------------------------------- Speedtest Tracker
+// v1 API: Bearer token, Accept: application/json required.
+export function makeSpeedtest({ now = Date.now() } = {}) {
+  const app = express();
+  app.use('/api', (req, res, next) => {
+    if (req.headers.authorization !== `Bearer ${MOCK_KEY}`) return res.status(401).json({ message: 'Unauthenticated.' });
+    if (!/application\/json/.test(req.headers.accept || '')) return res.status(406).json({ message: 'Not Acceptable', error: 'This API only accepts and returns JSON' });
+    next();
+  });
+  // Every 6 hours for 14 days. Download in bytes per second (~ 900 Mbps
+  // line with a dip one evening and one failed test).
+  const results = [];
+  for (let i = 0; i < 56; i++) {
+    const t = now - (55 - i) * 6 * 3600000;
+    const dip = i === 41 ? 0.35 : 1;
+    const wave = 0.9 + 0.08 * Math.sin(i * 1.7);
+    const failed = i === 23;
+    const down = failed ? null : Math.round(112500000 * wave * dip);
+    const up = failed ? null : Math.round(4375000 * (0.95 + 0.04 * Math.cos(i)));
+    results.push({ id: i + 1, service: 'ookla', ping: failed ? null : Math.round((9 + (i % 5) * 1.3 + (dip < 1 ? 30 : 0)) * 100) / 100, download: down, upload: up, download_bits: down && down * 8, upload_bits: up && up * 8,
+      healthy: failed ? null : dip === 1, status: failed ? 'failed' : 'completed', scheduled: true, comments: null,
+      data: failed ? { message: 'Ookla CLI: Cannot open socket' } : { isp: 'Example Fiber', server: { id: 1234, name: 'Example Fiber', location: 'Chicago, IL', country: 'United States' }, packetLoss: 0, ping: { jitter: 0.8 } },
+      created_at: new Date(t).toISOString(), updated_at: new Date(t + 30000).toISOString() });
+  }
+  const done = () => results.filter((r) => r.status === 'completed');
+  app.get('/api/v1/results/latest', (req, res) => res.json(results[results.length - 1]));
+  app.get('/api/v1/results', (req, res) => {
+    let list = results.slice();
+    const start = req.query['filter[start_at]'] || (req.query.filter && req.query.filter.start_at);
+    if (start) list = list.filter((r) => r.created_at >= start);
+    if (String(req.query.sort || '') === '-created_at') list.reverse();
+    const per = Math.min(500, Number(req.query.per_page) || 25);
+    res.json({ data: list.slice(0, per), meta: { current_page: 1, last_page: 1, total: list.length } });
+  });
+  app.get('/api/v1/stats', (req, res) => { const d = done(); const avg = (k) => d.reduce((s, r) => s + r[k], 0) / d.length; res.json({ data: { total_results: results.length, download: { avg: avg('download') }, upload: { avg: avg('upload') }, ping: { avg: avg('ping') } } }); });
+  app.post('/api/v1/speedtests/run', (req, res) => { const r = { id: results.length + 1, service: 'ookla', status: 'started', scheduled: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }; res.status(201).json({ data: r, message: 'Speedtest added to the queue.' }); });
+  return app;
 }

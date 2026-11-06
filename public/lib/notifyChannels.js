@@ -76,7 +76,7 @@ export function channelsCard() {
         return h('label', { class: 'quick-add-field' }, h('span', { class: 'quick-add-label' }, label), el);
       });
       const name = h('input', { class: 'input', type: 'text', value: c.name || TYPE_INFO[c.type].label, maxlength: '60' });
-      const enabled = h('input', { type: 'checkbox', checked: c.enabled !== false ? 'checked' : null });
+      const enabled = h('input', { type: 'checkbox', role: 'switch', checked: c.enabled !== false ? 'checked' : null });
       const catBoxes = categories.map((cat) => { const b = h('input', { type: 'checkbox', value: cat.id, checked: c.categories.includes(cat.id) ? 'checked' : null }); return [b, h('label', {}, b, ` ${cat.label}`)]; });
       const save = async () => {
         const body = { id: c.id, type: c.type, name: name.value, enabled: enabled.checked, categories: catBoxes.filter(([b]) => b.checked).map(([b]) => b.value) };

@@ -133,6 +133,10 @@ const ADMIN_ROUTES = [
   /^\/api\/push\/(prefs|poll|status)$/,
   /^\/api\/plex\/(users|friends)$/,
   /^\/api\/users(\/|$)/,
+  /^\/api\/activity$/,
+  /^\/api\/digest(\/|$)/,
+  /^\/api\/bot(\/|$)/,
+  /^\/api\/backups(\/|$)/,
 ];
 const SELF_ROUTES = [/^\/api\/push\/(subscribe|unsubscribe|test|public-key)$/];
 
@@ -151,7 +155,8 @@ export function classifyAppRoute(method, path) {
 // ---------------------------------------------------- proxied requests
 const ARR_TYPES = new Set(['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'prowlarr', 'listenarr', 'whisparr']);
 // Arr resources whose GET responses contain secrets (API keys, passwords).
-const ARR_SECRET_READ = /^(config(\/|$)|downloadclient|indexer(?!stats|status)|notification|importlist|applications|indexerproxy|metadata|system\/backup|update|log\/file)/;
+// backup/... is the backup zip itself, which holds the app's config and keys.
+const ARR_SECRET_READ = /^(config(\/|$)|downloadclient|indexer(?!stats|status)|notification|importlist|applications|indexerproxy|metadata|system\/backup|backup\/|update|log\/file)/;
 // Arr resources that are settings: any change is admin-only.
 const ARR_SETTINGS = /^(config|downloadclient|indexer|notification|importlist|applications|indexerproxy|metadata|remotepathmapping|delayprofile|releaseprofile|qualityprofile|qualitydefinition|customformat|rootfolder|autotagging|appprofile|system|update|health)(\/|$)/;
 const ADMIN_COMMANDS = /delete|backup|update|restart|shutdown|clear|reset|cleanup/i;
@@ -332,6 +337,21 @@ export function classifyProxyRequest(type, method, subPath, query = {}, body = n
       const view = lower.replace(/^rest\//, '').replace(/\.view$/, '');
       if (/^(ping|getlicense|getscanstatus|getartists|getartist|getalbum|getalbumlist2?|getnowplaying|getmusicfolders|getgenres|search3|getcoverart|getplaylists|getplaylist|getsong|getrandomsongs|getstarred2?)$/.test(view)) return 'read';
       if (/^startscan$/.test(view)) return 'write';
+      return 'admin';
+    }
+    case 'unpackerr': {
+      const rest = lower.replace(/^api\//, '');
+      // Config, logs, file browsing and auth are settings-level.
+      if (/^(config|logs|browse|auth|system\/export)(\/|$)/.test(rest)) return 'admin';
+      if (read) return 'read';
+      if (rest === 'queue/retry') return 'write';
+      if (/^(queue\/forget|history\/(delete|clear))$/.test(rest)) return 'delete';
+      return 'admin';
+    }
+    case 'speedtest': {
+      const rest = lower.replace(/^api\/v1\//, '');
+      if (read) return /^(settings|users|tokens)/.test(rest) ? 'admin' : 'read';
+      if (rest === 'speedtests/run') return 'write';
       return 'admin';
     }
     case 'pulsarr': {

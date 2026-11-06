@@ -157,7 +157,7 @@ function itemHex(item, adapter, ctx) {
 }
 
 function openRemoveModal(item, adapter, ctx) {
-  const deleteData = h('input', { type: 'checkbox' });
+  const deleteData = h('input', { type: 'checkbox', role: 'switch' });
   const confirm = async () => {
     try {
       await adapter.remove(item, { deleteData: adapter.capabilities.deleteData && deleteData.checked });
