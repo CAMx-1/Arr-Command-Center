@@ -570,15 +570,33 @@ auth; with no sign-in it's off. Only those settings are saved, never service add
 
 **Year in review** (Home in December and January; Settings → You; Tautulli → Year in review) —
 a year of watching from Tautulli: hours watched, plays, top five shows and films, the busiest
-night, the longest binge and streak, what you rewatched and what you watched on, with a picture
-to save or share: a hexagon (a 1232 × 1410 PNG with see-through corners) or a box (1080 × 1350,
-easier to read on a phone). Hex is the default on desktop and Box on phones; the **Hex / Box**
-switch changes it on that device only. **Month by month** shows a tower of hexagons for each
-month, with the busiest month lit up; point at or tap a month for its hours. Everyone sees their own year, matched to
-Tautulli by Plex username, email or friendly name; admins can pick anyone, or everyone together.
-Plays shorter than a minute don't count, times are in your browser's time zone, and plays after
-midnight count for the evening before, until 5 am. Earlier years are there too, and before
-December the year so far. **Hide** removes the Home card for that year.
+night, the longest binge and streak, what you rewatched and what you watched on, and how it
+compares with last year (up to the same day while the year is still going). It comes with a
+picture to save or share, with the top show's and top film's posters: a hexagon (a 1232 × 1410
+PNG with see-through corners), a box (1080 × 1350, easier to read on a phone) or, with the
+**Picture / Story** switch, a story (1080 × 1920, the size of a phone story). Hex is the default
+on desktop and Box on phones; the **Hex / Box** switch changes it on that device only. Tap the
+picture to see it full screen: pinch, double-tap, scroll or press + and − to zoom, drag to move
+around, and swipe down or press Escape to close. On phones the hours, top shows and films are
+also written out under the picture. **Month by month** shows a tower of hexagons for each month,
+with the busiest month lit up; tap a month for its hours and its three most watched titles.
+
+**Play the year** shows the year as a slideshow, one card at a time: tap the right side to go on
+and the left to go back, hold to pause and swipe down to close (or use the arrow keys and space).
+With reduced motion turned on, it waits for you instead of moving on by itself. The last card
+has the picture, with Save and Share.
+
+Everyone sees their own year, matched to Tautulli by Plex username, email or friendly name;
+admins can pick anyone, or everyone together. Plays shorter than a minute don't count, times are
+in your browser's time zone, and plays after midnight count for the evening before, until 5 am.
+Earlier years are there too, and before December the year so far. On Home, **Play** starts the
+slideshow, **Open** shows the year and **Hide** removes the card for that year.
+
+In December there's a push notification, "Your 2026 in review is ready", once a year after
+10 am (server time), for anyone who watched at least an hour; tapping it plays the year. With
+Sign in with Plex, each person's own devices get it; with a shared sign-in, every device gets it
+if anyone watched an hour. Turn it off with the push category "Year in review is ready
+(December)". It isn't sent to notification channels, because it's addressed to one person.
 
 **Disk-full forecast** (Home; System tab) — the server notes each disk's free space once a day
 (through Sonarr, Radarr, Whisparr, Lidarr and Readarr) and works out when it will fill from the
@@ -921,6 +939,10 @@ any change for guests). The server still enforces every rule.
   else. Making and restoring backups are admin-only.
 - Settings that follow you saves only look-and-layout settings from a fixed list, never service
   addresses or keys.
+- Posters in the year in review come from Tautulli through the server, behind sign-in. The server
+  signs each poster link it hands out, only for titles in a year it's showing you; any other
+  link gets "not found". Only images are passed on, with a Content-Security-Policy that blocks
+  scripts.
 - Email channels check the mail server's certificate, and only send a password over an encrypted
   connection (or to a mail server on the same machine).
 - The setup doctor and the compatibility check only read from your apps; they never change a

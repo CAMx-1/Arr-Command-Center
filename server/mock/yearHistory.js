@@ -66,7 +66,7 @@ export function demoYearRows(year, now = Date.now()) {
       if (pr.season > s.seasons.length) { pr.season = 1; pr.ep = 1; }
       const secs = Math.round((s.mins * (0.92 + rand() * 0.1)) * 60);
       const partial = rand() < 0.06;
-      push({ media_type: 'episode', title: `Episode ${pr.ep}`, full_title: `${s.title} - S${pr.season}E${pr.ep}`, grandparent_title: s.title, parent_media_index: pr.season, media_index: pr.ep, rating_key: s.key * 1000 + pr.season * 100 + pr.ep, grandparent_rating_key: s.key, thumb: `/library/metadata/${s.key}/thumb/1`, grandparent_thumb: `/library/metadata/${s.key}/thumb/1`, percent_complete: partial ? 40 : 100, watched_status: partial ? 0.5 : 1 }, at, partial ? Math.round(secs * 0.4) : secs, player);
+      push({ media_type: 'episode', title: `Episode ${pr.ep}`, full_title: `${s.title} - S${pr.season}E${pr.ep}`, grandparent_title: s.title, parent_media_index: pr.season, media_index: pr.ep, rating_key: s.key * 1000 + pr.season * 100 + pr.ep, grandparent_rating_key: s.key, parent_rating_key: s.key * 100 + pr.season, thumb: `/library/metadata/${s.key * 100 + pr.season}/thumb/1`, percent_complete: partial ? 40 : 100, watched_status: partial ? 0.5 : 1 }, at, partial ? Math.round(secs * 0.4) : secs, player);
       if (!partial) { pr.ep += 1; if (pr.ep > s.seasons[pr.season - 1]) { pr.season += 1; pr.ep = 1; } }
       return partial ? Math.round(secs * 0.4) : secs;
     };
@@ -116,7 +116,7 @@ export function demoYearRows(year, now = Date.now()) {
       const bear = SHOWS[0];
       for (const [m, d] of [[4, 10], [8, 27]]) {
         const at = Math.floor(new Date(year, m, d, 21, 40).getTime() / 1000);
-        if (at * 1000 <= now) push({ media_type: 'episode', title: 'Fishes', full_title: 'The Bear - S2E6', grandparent_title: bear.title, parent_media_index: 2, media_index: 6, rating_key: bear.key * 1000 + 206, grandparent_rating_key: bear.key, thumb: `/library/metadata/${bear.key}/thumb/1`, grandparent_thumb: `/library/metadata/${bear.key}/thumb/1`, percent_complete: 100, watched_status: 1 }, at, 66 * 60, who.players[0]);
+        if (at * 1000 <= now) push({ media_type: 'episode', title: 'Fishes', full_title: 'The Bear - S2E6', grandparent_title: bear.title, parent_media_index: 2, media_index: 6, rating_key: bear.key * 1000 + 206, grandparent_rating_key: bear.key, parent_rating_key: bear.key * 100 + 2, thumb: `/library/metadata/${bear.key * 100 + 2}/thumb/1`, percent_complete: 100, watched_status: 1 }, at, 66 * 60, who.players[0]);
       }
     }
   }
@@ -138,4 +138,46 @@ export function demoHistoryPage(query, now = Date.now()) {
   if (String(query.order_dir || 'desc') === 'desc') rows = [...rows].reverse();
   const start = Number(query.start) || 0; const length = Number(query.length) || 25;
   return { draw: 1, recordsTotal: rows.length, recordsFiltered: rows.length, data: rows.slice(start, start + length) };
+}
+
+// Demo posters for the Tautulli mock's pms_image_proxy: a made-up poster per
+// title (gradient, shapes and the title), so the demo has artwork to show.
+const POSTER_TITLES = Object.fromEntries([
+  ...SHOWS.map((s) => [s.key, { title: s.title, kind: 'Series' }]),
+  ...FILMS.map((f) => [f.key, { title: f.title, kind: String(f.year) }]),
+  [11, { title: 'Dune: Part Two', kind: '2024' }], [21, { title: 'Severance', kind: 'Series' }], [31, { title: 'Foundation', kind: 'Series' }], [41, { title: 'The Bear', kind: 'Series' }],
+]);
+// Season posters (key: show key × 100 + season). Like Tautulli's history, an
+// episode's thumb is its season's poster; there's no grandparent_thumb.
+const SEASON_POSTERS = Object.fromEntries(SHOWS.flatMap((sh) => sh.seasons.map((_, i) => [sh.key * 100 + i + 1, { title: sh.title, kind: `Season ${i + 1}` }])));
+const esc = (t) => String(t).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+function wrapWords(title, max = 11) {
+  const out = []; let line = '';
+  for (const w of String(title).split(/\s+/)) {
+    if (!line) line = w; else if ((`${line} ${w}`).length <= max) line = `${line} ${w}`; else { out.push(line); line = w; }
+  }
+  if (line) out.push(line);
+  return out.slice(0, 4);
+}
+export function demoPosterSvg(img) {
+  const key = Number((/\/library\/metadata\/(\d+)/.exec(String(img)) || [])[1]) || 0;
+  const info = POSTER_TITLES[key] || SEASON_POSTERS[key] || { title: 'Arr Command Center', kind: '' };
+  let hash = 0; for (const ch of info.title) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  const h1 = hash % 360; const h2 = (h1 + 40 + (hash % 80)) % 360;
+  const lines = wrapWords(info.title.toUpperCase());
+  const size = lines.some((l) => l.length > 9) ? 34 : 40;
+  const y0 = 410 - (lines.length - 1) * (size + 4);
+  const shapes = [0, 1, 2].map((i) => {
+    const cx = 60 + ((hash >> (i * 4)) % 180); const cy = 70 + ((hash >> (i * 5)) % 200); const r = 46 + ((hash >> (i * 3)) % 70);
+    const pts = [0, 1, 2, 3, 4, 5].map((k) => { const a = (Math.PI / 3) * k - Math.PI / 2; return `${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`; }).join(' ');
+    return `<polygon points="${pts}" fill="none" stroke="#fff" stroke-opacity="${0.18 + i * 0.08}" stroke-width="${3 + i * 2}"/>`;
+  }).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">`
+    + `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${h1},70%,46%)"/><stop offset="1" stop-color="hsl(${h2},75%,18%)"/></linearGradient>`
+    + `<radialGradient id="l" cx="0.3" cy="0.25" r="0.8"><stop offset="0" stop-color="#fff" stop-opacity="0.35"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>`
+    + `<linearGradient id="f" x1="0" y1="0" x2="0" y2="1"><stop offset="0.45" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.7"/></linearGradient></defs>`
+    + `<rect width="300" height="450" fill="url(#g)"/><rect width="300" height="450" fill="url(#l)"/>${shapes}<rect width="300" height="450" fill="url(#f)"/>`
+    + (info.kind ? `<text x="22" y="40" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="3" fill="#fff" fill-opacity="0.8">${esc(info.kind.toUpperCase())}</text>` : '')
+    + lines.map((l, i) => `<text x="22" y="${y0 + i * (size + 4)}" font-family="Helvetica, Arial, sans-serif" font-size="${size}" font-weight="800" fill="#fff">${esc(l)}</text>`).join('')
+    + '</svg>';
 }

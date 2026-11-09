@@ -54,15 +54,29 @@ export function labelOf(r) {
 const bump = (map, key, make) => { let v = map.get(key); if (!v) { v = make(); map.set(key, v); } return v; };
 const top = (map, n, by = (x) => x.seconds) => [...map.values()].sort((a, b) => by(b) - by(a) || String(a.title).localeCompare(String(b.title))).slice(0, n);
 
-// The numbers for one person (or everyone) and one year. Pure.
-export function summarizeYear(rows, { year, tz = 'UTC' } = {}) {
+// The show's own poster for an episode. Tautulli's history has no
+// grandparent_thumb (an episode's thumb is its season's poster), so it's
+// built from the show's rating key, which is what Tautulli's image proxy
+// does with a rating key too.
+function showPoster(r) {
+  if (r.grandparent_thumb) return r.grandparent_thumb;
+  const key = String(r.grandparent_rating_key ?? '');
+  if (/^\d{1,12}$/.test(key)) return `/library/metadata/${key}/thumb`;
+  return r.thumb || '';
+}
+
+// The numbers for one person (or everyone) and one year. Pure. `until`
+// (unix seconds) leaves out plays from then on, for "this time last year".
+export function summarizeYear(rows, { year, tz = 'UTC', until = null } = {}) {
   const local = localClock(tz);
+  const monthTitles = Array.from({ length: 12 }, () => new Map()); const monthPlays = Array(12).fill(0);
   const months = Array(12).fill(0); const weekdays = Array(7).fill(0); const hours = Array(24).fill(0);
   const films = new Map(); const shows = new Map(); const episodes = new Map(); const artists = new Map();
   const days = new Map(); const devices = new Map(); const people = new Set(); const binges = new Map();
   let seconds = 0; let plays = 0; let musicSeconds = 0; let first = null;
   for (const r of rows || []) {
     const at = startOf(r); if (!at) continue;
+    if (until != null && at >= until) continue;
     const p = local(at); if (p.y !== year) continue;
     const secs = playSeconds(r);
     const person = String(r.user_id ?? r.user ?? '');
@@ -82,15 +96,20 @@ export function summarizeYear(rows, { year, tz = 'UTC' } = {}) {
     d.seconds += secs; if (p.hour >= 17 || p.hour < 5) d.night += secs;
     const lbl = r.media_type === 'episode' ? (r.grandparent_title || 'Unknown show') : labelOf(r);
     d.titles.set(lbl, (d.titles.get(lbl) || 0) + secs);
+    const kind = r.media_type === 'episode' ? 'show' : r.media_type === 'live' ? 'live' : 'film';
+    const mt = bump(monthTitles[p.m - 1], `${kind}:${lbl}`, () => ({ title: lbl, kind, seconds: 0 }));
+    mt.seconds += secs; monthPlays[p.m - 1] += 1;
     const dev = r.player || r.platform || r.product;
     if (dev) bump(devices, dev, () => ({ title: dev, seconds: 0 })).seconds += secs;
     if (!first || at < first.at) first = { at, title: labelOf(r) };
     if (r.media_type === 'movie') {
       const f = bump(films, String(r.rating_key || norm(r.title)), () => ({ title: r.title || r.full_title || 'Unknown', year: r.year ? Number(r.year) || null : null, seconds: 0, plays: 0, by: new Map(), thumb: r.thumb || '' }));
+      if (!f.thumb && r.thumb) f.thumb = r.thumb;
       f.seconds += secs; f.plays += 1; if (finished(r)) f.by.set(person, (f.by.get(person) || 0) + 1);
     } else if (r.media_type === 'episode') {
       const showKey = String(r.grandparent_rating_key || norm(r.grandparent_title));
-      const s = bump(shows, showKey, () => ({ title: r.grandparent_title || 'Unknown show', seconds: 0, plays: 0, eps: new Set(), thumb: r.grandparent_thumb || '' }));
+      const s = bump(shows, showKey, () => ({ title: r.grandparent_title || 'Unknown show', seconds: 0, plays: 0, eps: new Set(), thumb: '' }));
+      if (!s.thumb) s.thumb = showPoster(r);
       const epKey = String(r.rating_key || `${showKey}:${episodeCode(r)}`);
       s.seconds += secs; s.plays += 1; s.eps.add(epKey);
       const e = bump(episodes, epKey, () => ({ show: s.title, code: episodeCode(r), title: r.title || '', by: new Map() }));
@@ -124,13 +143,14 @@ export function summarizeYear(rows, { year, tz = 'UTC' } = {}) {
     topFilms: top(films, 5).map((f) => ({ title: f.title, year: f.year, seconds: f.seconds, plays: f.plays, thumb: f.thumb })),
     topArtists: top(artists, 3).map((a) => ({ title: a.title, seconds: a.seconds })),
     rewatched: {
-      film: film ? { title: film.title, year: film.year, times: film.finished } : null,
+      film: film ? { title: film.title, year: film.year, times: film.finished, ...(film.thumb ? { thumb: film.thumb } : {}) } : null,
       episode: ep ? { show: ep.show, code: ep.code, title: ep.title, times: ep.finished } : null,
     },
     busiest: busiest ? { date: busiest.date, seconds: busiest.seconds, night: busiest.night * 2 > busiest.seconds, titles: [...busiest.titles.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t]) => t) } : null,
     binge: binge && binge.eps.size >= 3 ? { show: binge.show, episodes: binge.eps.size, date: binge.date } : null,
     streak: streak && streak.days >= 2 ? streak : null,
     months, weekdays, hours, topWeekday: maxAt(weekdays), topHour: maxAt(hours),
+    monthTops: monthTitles.map((m, i) => ({ plays: monthPlays[i], top: top(m, 3).map((x) => ({ title: x.title, kind: x.kind, seconds: x.seconds })) })),
     devices: top(devices, 3).map((d) => ({ name: d.title, seconds: d.seconds })),
     first: first ? { title: first.title, date: ymd(local(first.at)) } : null,
   };
@@ -148,7 +168,27 @@ export function matchTautulliUser(users, { user, email } = {}) {
 }
 const personOf = (x) => ({ id: String(x.user_id), name: x.friendly_name || x.username || `User ${x.user_id}` });
 
-export function createYearReview({ get = defaultGet, now = () => Date.now() } = {}) {
+// Seconds watched per Tautulli user id in a year (films, episodes, live TV).
+export function watchTimeByUser(rows, { year, tz = 'UTC' } = {}) {
+  const local = localClock(tz); const time = new Map();
+  for (const r of rows || []) {
+    if (!['movie', 'episode', 'live'].includes(r.media_type)) continue;
+    const at = startOf(r); if (!at || local(at).y !== year) continue;
+    const s = playSeconds(r); if (s < MIN_PLAY) continue;
+    time.set(String(r.user_id), (time.get(String(r.user_id)) || 0) + s);
+  }
+  return time;
+}
+
+// The same moment one year earlier, for comparing a year in progress.
+export function sameTimeLastYear(nowMs) {
+  const d = new Date(nowMs); d.setUTCFullYear(d.getUTCFullYear() - 1);
+  return Math.floor(d.getTime() / 1000);
+}
+
+// posterUrl(thumb) turns a Plex image path into a link the browser can load
+// (null leaves posters out).
+export function createYearReview({ get = defaultGet, now = () => Date.now(), posterUrl = () => null } = {}) {
   const cache = new Map();
   const cached = (key, load) => {
     const hit = cache.get(key);
@@ -193,23 +233,38 @@ export function createYearReview({ get = defaultGet, now = () => Date.now() } = 
       target = me || (admin ? 'all' : null);
       if (!target) throw Object.assign(new Error(`Tautulli doesn’t know “${viewer.user}” yet, so there’s no year to show. It tracks people by their Plex username and email.`), { status: 404, notFound: true });
     } else target = 'all';
+    const mine = (rs) => (target === 'all' ? rs : rs.filter((r) => String(r.user_id) === String(target.user_id)));
     const rows = await history(svcKey, svc, year, admin ? null : target.user_id);
-    const own = target === 'all' ? rows : rows.filter((r) => String(r.user_id) === String(target.user_id));
-    const out = { year, tz: validTimeZone(tz), person: target === 'all' ? null : personOf(target), me: me ? personOf(me) : null, canPick: !!admin, recap: summarizeYear(own, { year, tz }) };
+    const recap = summarizeYear(mine(rows), { year, tz });
+    const out = { year, tz: validTimeZone(tz), person: target === 'all' ? null : personOf(target), me: me ? personOf(me) : null, canPick: !!admin, recap };
+    // Compared with last year: the whole year, or up to this moment last
+    // year while this year is still going. Left out if last year is empty
+    // (Tautulli wasn't tracking yet) or can't be read.
+    try {
+      const inProgress = localClock(tz)(Math.floor(now() / 1000)).y === year;
+      const prevRows = await history(svcKey, svc, year - 1, admin ? null : target.user_id);
+      const prev = summarizeYear(mine(prevRows), { year: year - 1, tz, until: inProgress ? sameTimeLastYear(now()) : null });
+      recap.compare = prev.totals.seconds > 0 ? { year: year - 1, seconds: prev.totals.seconds, plays: prev.totals.plays, toDate: inProgress } : null;
+    } catch { recap.compare = null; }
+    // Posters go out as links the server will serve; the Plex paths don't.
+    const withPoster = (x) => { if (!x) return x; const { thumb, ...rest } = x; const poster = thumb ? posterUrl(thumb) : null; return poster ? { ...rest, poster } : rest; };
+    recap.topShows = recap.topShows.map(withPoster);
+    recap.topFilms = recap.topFilms.map(withPoster);
+    recap.rewatched = { ...recap.rewatched, film: withPoster(recap.rewatched.film) };
     if (admin) {
       // Everyone who watched something this year, most first.
-      const local = localClock(tz); const time = new Map();
-      for (const r of rows) {
-        if (!['movie', 'episode', 'live'].includes(r.media_type)) continue;
-        const at = startOf(r); if (!at || local(at).y !== year) continue;
-        const s = playSeconds(r); if (s < MIN_PLAY) continue;
-        time.set(String(r.user_id), (time.get(String(r.user_id)) || 0) + s);
-      }
+      const time = watchTimeByUser(rows, { year, tz });
       out.people = list.filter((x) => time.has(String(x.user_id))).map((x) => ({ ...personOf(x), seconds: time.get(String(x.user_id)) })).sort((a, b) => b.seconds - a.seconds);
     }
     return out;
   }
-  return { recap, clear: () => cache.clear() };
+  // Everyone with something watched this year (for the December notice).
+  async function activePeople({ svcKey, svc, year, tz = 'UTC' }) {
+    const list = await users(svcKey, svc);
+    const time = watchTimeByUser(await history(svcKey, svc, year, null), { year, tz });
+    return list.filter((x) => time.has(String(x.user_id))).map((x) => ({ ...x, seconds: time.get(String(x.user_id)) }));
+  }
+  return { recap, activePeople, clear: () => cache.clear() };
 }
 
 // Which year to show by default: December shows this year, January last

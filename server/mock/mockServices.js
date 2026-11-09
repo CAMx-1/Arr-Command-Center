@@ -36,7 +36,7 @@ export const MOCK_PORTS = {
 
 import { createMockFs, sonarrDemoFs, radarrDemoFs, lidarrDemoFs } from './mockFs.js';
 import { INTEGRATION_MOCK_PORTS, makePortainer, makeGlances, makePihole, makeAdguard, makeSyncthing, makeNavidrome, makePulsarr, makeUnraid, makeTruenasServer, makeUnpackerr, makeSpeedtest, makePlex } from './integrationMocks.js';
-import { DEMO_TAUTULLI_USERS, demoHistoryPage } from './yearHistory.js';
+import { DEMO_TAUTULLI_USERS, demoHistoryPage, demoPosterSvg } from './yearHistory.js';
 Object.assign(MOCK_PORTS, INTEGRATION_MOCK_PORTS);
 
 const cfSeen = {}; // service -> last seen CF headers
@@ -1101,6 +1101,7 @@ function makeTautulli() {
       return res.json(wrap({ draw: 1, recordsTotal: list.length, recordsFiltered: list.length, data: list.slice(start, start + length) }));
     }
     if (cmd === 'get_users') return res.json(wrap(DEMO_TAUTULLI_USERS));
+    if (cmd === 'pms_image_proxy') return res.type('image/svg+xml').send(demoPosterSvg(req.query.img));
     // A date range (Year in review) gets the demo's year of history.
     if (cmd === 'get_history' && req.query.before) return res.json(wrap(demoHistoryPage(req.query)));
     if (cmd === 'get_history') {

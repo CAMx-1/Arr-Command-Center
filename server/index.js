@@ -28,6 +28,8 @@ import { createStepUp } from './stepUp.js';
 import { createUserPrefs } from './userPrefs.js';
 import { createYearReview } from './yearReview.js';
 import { createSelfBackup } from './selfBackup.js';
+import { createRecapNotice } from './recapNotice.js';
+import { createPosterLinks, posterHandler } from './recapPosters.js';
 import { createActivityLog } from './activity.js';
 import { createServiceAccess, pushFilter } from './serviceAccess.js';
 import { discover, cleanHosts, localSubnets, DEFAULT_PORTS, freeKey } from './discovery.js';
@@ -536,7 +538,7 @@ app.post('/api/push/test', express.json({ limit: '4kb' }), async (req, res) => {
 
 // ---- Notification channels (ntfy/Gotify/Discord/Telegram/webhook) ----
 // Secrets are masked in every response (see channels.js).
-app.get('/api/notify/channels', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ channels: channels.listPublic(), types: channels.CHANNEL_TYPES, categories: push.CATEGORIES }); });
+app.get('/api/notify/channels', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ channels: channels.listPublic(), types: channels.CHANNEL_TYPES, categories: push.CATEGORIES.filter((c) => !c.pushOnly) }); });
 app.post('/api/notify/channels', express.json({ limit: '8kb' }), (req, res) => {
   const r = channels.upsertChannel(req.body || {});
   if (r.error) return res.status(400).json({ error: r.error });
@@ -760,8 +762,10 @@ app.get('/api/doctor', async (req, res) => {
 // Free-up-space planner: ranked titles that could go (all disks, or one disk
 // from the forecast). Read-only; the browser deletes through the apps.
 // Year in review (Tautulli). Everyone gets their own year; admins can pick
-// anyone, or everyone together.
-const yearReview = createYearReview();
+// anyone, or everyone together. Posters are served by this server through
+// Tautulli, only for the Plex images it put in someone's year (signed links).
+const posterLinks = createPosterLinks(actionSecret);
+const yearReview = createYearReview({ posterUrl: posterLinks.url });
 const tautulliFor = () => Object.entries(cfg.services).find(([, s]) => s.type === 'tautulli' && s.enabled !== false) || null;
 app.get('/api/recap', async (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -778,6 +782,19 @@ app.get('/api/recap', async (req, res) => {
     res.status(e.status || 502).json({ error: e.status ? e.message : `Couldn’t read Tautulli: ${e.message}` });
   }
 });
+
+// December: "Your <year> in review is ready" to the people who watched something.
+const recapNotice = createRecapNotice({
+  store,
+  getPeople: async (year) => { const tau = tautulliFor(); if (!tau) throw new Error('no Tautulli'); return yearReview.activePeople({ svcKey: tau[0], svc: tau[1], year, tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }); },
+  listSubscriptions: () => push.listSubscriptions(),
+  send: (msg, filter) => push.sendToAll(push.notification(msg), { filter }),
+  categoryEnabled: (c) => push.categoryEnabled(c),
+  perPerson: () => plexAuth.enabled,
+  log: (e) => console.log(JSON.stringify({ level: e.ok ? 'info' : 'warn', src: 'recap-notice', ...e })),
+});
+
+app.get('/api/recap/poster', posterHandler({ links: posterLinks, tautulli: () => tautulliFor() }));
 
 app.get('/api/space/plan', async (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -1076,6 +1093,11 @@ const insightsTimer = setInterval(() => { insights.tick().catch(() => {}); diskR
 telegramBot.start();
 const digestTimer = setInterval(() => digest.tick().catch(() => {}), 5 * 60000);
 if (digestTimer.unref) digestTimer.unref();
+// Checked every half hour (and soon after starting); it only sends in December, once.
+const recapTimer = setInterval(() => recapNotice.tick().catch(() => {}), 30 * 60000);
+if (recapTimer.unref) recapTimer.unref();
+const recapFirst = setTimeout(() => recapNotice.tick().catch(() => {}), 90000);
+if (recapFirst.unref) recapFirst.unref();
 if (insightsFirst.unref) insightsFirst.unref();
 if (insightsTimer.unref) insightsTimer.unref();
 if (!process.env.AUTOMATION_DISABLE) {
@@ -1087,7 +1109,7 @@ function shutdown() {
   console.log('\n[shutdown] closing servers...');
   if (poller) poller.stop();
   if (automationTimer) clearInterval(automationTimer);
-  clearInterval(insightsTimer); clearTimeout(insightsFirst); clearInterval(digestTimer); telegramBot.stop();
+  clearInterval(insightsTimer); clearTimeout(insightsFirst); clearInterval(digestTimer); clearInterval(recapTimer); clearTimeout(recapFirst); telegramBot.stop();
   statusCache.stop();
   uptime.flush();
   server.close();

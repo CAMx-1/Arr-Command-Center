@@ -851,6 +851,24 @@ export async function serviceGet(svc, path, { timeout = 10000 } = {}) {
   } finally { clearTimeout(timer); }
 }
 
+// Server-side authed GET for binary bodies (images). Size-limited; never
+// follows redirects, so the service's credentials go nowhere else.
+export async function serviceFetch(svc, path, { timeout = 10000, maxBytes = 5 * 1024 * 1024 } = {}) {
+  const [p, q] = String(path).split('?');
+  const target = buildTargetUrl(svc, p, q || '');
+  const { headers } = authFor(svc);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const upstream = await fetch(target, { headers: { ...headers }, signal: controller.signal, redirect: 'manual' });
+    const tooBig = () => Object.assign(new Error('Response too large'), { status: 413 });
+    if (Number(upstream.headers.get('content-length') || 0) > maxBytes) { controller.abort(); throw tooBig(); }
+    const body = Buffer.from(await upstream.arrayBuffer());
+    if (body.length > maxBytes) throw tooBig();
+    return { ok: upstream.ok, status: upstream.status, type: String(upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase(), body };
+  } finally { clearTimeout(timer); }
+}
+
 // Server-side authed request (POST/PUT/DELETE) with optional JSON body. Used by
 // the automation module to trigger searches and remove queue items.
 export async function serviceRequest(svc, path, { method = 'POST', body, timeout = 15000 } = {}) {

@@ -26,8 +26,9 @@ export const CATEGORIES = [
   { id: 'problem', label: 'Problems (unhealthy containers, disk/pool errors, ad blocking off, sync errors)' },
   { id: 'digest', label: 'Weekly “recently added” digest' },
   { id: 'security', label: 'Sign-ins from a new device' },
+  { id: 'recap', label: 'Year in review is ready (December)', pushOnly: true }, // addressed to each person, so not sent to shared channels
 ];
-const DEFAULT_PREFS = { downloaded: true, failed: true, approval: true, service: true, problem: true, digest: true, security: true };
+const DEFAULT_PREFS = { downloaded: true, failed: true, approval: true, service: true, problem: true, digest: true, security: true, recap: true };
 
 // Which categories are enabled for push (defaults on). Persisted in the store.
 export function getPrefs() {

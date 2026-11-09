@@ -72,9 +72,12 @@ function _focusFirst(container) {
     (preferred || items[0] || container)?.focus?.();
   });
 }
+// Only the overlay opened last handles keys, so Escape closes a viewer
+// opened over a dialog without closing the dialog too.
+const _isTop = (id) => { const ids = [..._overlays.keys()]; return ids[ids.length - 1] === id; };
 function _makeTrap(id) {
   return (e) => {
-    const o = _overlays.get(id); if (!o) return;
+    const o = _overlays.get(id); if (!o || !_isTop(id)) return;
     if (e.key === 'Escape') { e.preventDefault(); closeOverlay(id); return; }
     if (e.key !== 'Tab') return;
     const items = _focusables(o.container); if (!items.length) return;

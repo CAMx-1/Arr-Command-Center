@@ -20,7 +20,7 @@ import { seerrRequestBadge } from '../lib/seerrStatus.js';
 import { createBookServiceClient } from '../lib/bookServices.js';
 import { setupNeeded, openSetupWizard } from '../lib/setupWizard.js';
 import { diskBanner } from '../lib/diskForecastUI.js';
-import { recapBanner } from '../lib/recapUI.js';
+import { recapBanner, openRecapFromLink } from '../lib/recapUI.js';
 import { downloadClientFor } from '../lib/downloadClients.js';
 import { autobrrClient, maintainerrClient, tdarrClient, absClient, normalizeTdarrWorkers } from '../lib/extraServices.js';
 import { mediaServerFor } from '../lib/mediaServers.js';
@@ -113,6 +113,8 @@ export async function renderHome(root, ctx) {
       class: `dashboard-widget widget-${widget.id} size-${widget.size}`, dataset: { widget: widget.id },
     }, h('div', { class: 'dashboard-widget-head' }, h('h2', { class: 'section-title' }, widget.label)), content[widget.id]));
   mount(root, diskBanner(ctx), recapBanner(ctx), h('div', { class: 'dashboard-grid', dataset: { dashboard: dashboard.id } }, ...widgets));
+  // From the December notification: #/home?recap=<year>&play=1
+  openRecapFromLink(ctx);
 
   layoutHoneycomb(honeycomb, tileEls);
   for (const svc of shown) hydrateCardStats(svc, workspaceCtx);
