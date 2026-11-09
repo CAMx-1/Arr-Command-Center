@@ -1,5 +1,6 @@
 // Shared "System" + "Wanted" tabs for Sonarr/Radarr — health checks, disk space,
 // system status, maintenance commands, and the missing/wanted list.
+import { openDiskForecast, forecastFor, forecastLine } from '../lib/diskForecastUI.js';
 import { h, mount, skeletonList, empty, toast, fmtBytes, pct, timeEl, openModal, closeModal, confirmModal } from '../lib/ui.js';
 import { profileSummary, formatSpecSummary, tagUsage, profileRows, applyProfileEdits, applyFormatEdits, moveProfileItem, removeFormatSpec, duplicateFormatSpec } from '../lib/arrProfiles.js';
 import { roleAllows } from '../lib/roleUi.js';
@@ -66,6 +67,8 @@ export async function tabSystem(root, arr, ctx, kind) {
         h('button', { class: 'btn sm', title: 'Where the space goes, largest titles and growth', onclick: () => openInsights(arr, ctx, kind) }, '📊 Insights'),
         h('button', { class: 'btn sm', title: 'Entries that waste searches or clutter the library, with bulk fixes', onclick: () => openTidyUp(arr, ctx, kind) }, 'Tidy up'),
         kind === 'movie' ? h('button', { class: 'btn sm', title: 'Trilogies and franchises you’ve started but not finished', onclick: () => openCollections(arr, ctx) }, 'Collections') : null,
+        h('button', { class: 'btn sm', title: 'Titles nobody is likely to miss, to win back disk space', onclick: () => import('../lib/spacePlannerUI.js').then((m) => m.openSpacePlanner(ctx)) }, 'Free up space'),
+        roleAllows('admin') ? h('button', { class: 'btn sm', title: 'Read-only checks: folders, download clients, hard links, Prowlarr sync', onclick: () => import('../lib/setupDoctorUI.js').then((m) => m.openSetupDoctor(ctx, { service: ctx.service.key })) }, 'Setup doctor') : null,
         sameTypeInstances(ctx).length ? h('button', { class: 'btn sm', title: 'Compare profiles, formats, naming and more with another instance', onclick: () => openCompare(arr, ctx) }, '⇄ Compare with…') : null,
       ),
       h('div', { class: 'section-title' }, 'Health'),
@@ -82,10 +85,14 @@ export async function tabSystem(root, arr, ctx, kind) {
             ),
           )))
         : h('div', { class: 'dim', style: { marginBottom: '16px' } }, 'No health issues — all good.'),
-      h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Disk space'),
+      h('div', { class: 'section-title', style: { marginTop: '16px', display: 'flex', alignItems: 'center', gap: '8px' } }, 'Disk space', h('span', { style: { flex: '1' } }),
+        h('button', { class: 'btn sm', title: 'When each disk is likely to fill, from daily readings', onclick: () => openDiskForecast(ctx) }, 'Forecast')),
       h('div', { class: 'list' }, ...(disks || []).map((d) => {
         const used = (d.totalSpace || 0) - (d.freeSpace || 0);
         const p = d.totalSpace ? (used / d.totalSpace) * 100 : 0;
+        // The forecast line, for disks that hold this app's root folders.
+        const fc = h('div', { class: 'dim', style: { fontSize: '12px', marginTop: '4px' } });
+        forecastFor(ctx.service.key, d.path).then((f) => { if (f) mount(fc, forecastLine(f)); else fc.remove(); });
         return h('div', { class: 'row' },
           h('div', { class: 'row-main' },
             h('div', { class: 'row-title', style: { fontSize: '14px' } }, d.path || d.label || 'Disk'),
@@ -94,6 +101,7 @@ export async function tabSystem(root, arr, ctx, kind) {
               h('span', { class: `pill ${p > 90 ? 'down' : p > 75 ? 'warn' : 'ok'}` }, `${Math.round(p)}% used`),
             ),
             h('div', { class: 'progress' }, h('span', { style: { width: pct(p) } })),
+            fc,
           ),
         );
       })),

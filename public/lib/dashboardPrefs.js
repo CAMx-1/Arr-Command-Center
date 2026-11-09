@@ -1,3 +1,4 @@
+import { prefsChanged } from './prefEvents.js';
 export const DEFAULT_WIDGETS = [
   { id: 'services', label: 'Services', visible: true, size: 'full' },
   { id: 'activity', label: 'Activity', visible: true, size: 'full' },
@@ -27,6 +28,8 @@ const V2_DEFAULT_WIDGETS = [
 export const DASHBOARD_PREFS_VERSION = 4;
 let dashboardScope = 'local';
 const storageKey = () => `acc:dashboards:${dashboardScope}`;
+// The localStorage key for the signed-in person's Home workspaces.
+export const dashboardStorageKey = () => storageKey();
 export function setDashboardScope(user) {
   const value = user && (user.id || user.uuid || user.username || user.email || user.title || user.displayName);
   dashboardScope = String(value || 'local').replace(/[^a-z0-9@._-]/gi, '_').slice(0, 80);
@@ -111,6 +114,7 @@ export function loadDashboards(storage) {
 export function saveDashboards(state, storage) {
   const next = { ...state, version: DASHBOARD_PREFS_VERSION };
   storageFor(storage).setItem(storageKey(), JSON.stringify(next));
+  if (!storage) prefsChanged();
   return next;
 }
 

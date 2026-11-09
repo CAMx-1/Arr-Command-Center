@@ -36,6 +36,7 @@ export const MOCK_PORTS = {
 
 import { createMockFs, sonarrDemoFs, radarrDemoFs, lidarrDemoFs } from './mockFs.js';
 import { INTEGRATION_MOCK_PORTS, makePortainer, makeGlances, makePihole, makeAdguard, makeSyncthing, makeNavidrome, makePulsarr, makeUnraid, makeTruenasServer, makeUnpackerr, makeSpeedtest, makePlex } from './integrationMocks.js';
+import { DEMO_TAUTULLI_USERS, demoHistoryPage } from './yearHistory.js';
 Object.assign(MOCK_PORTS, INTEGRATION_MOCK_PORTS);
 
 const cfSeen = {}; // service -> last seen CF headers
@@ -275,6 +276,27 @@ function fsFromItems(items) {
 // Backups, like the real apps: GET system/backup lists them, the Backup
 // command makes one, and the zip is served from /backup/<type>/<name> (needs
 // the API key). Mounted first so it sees Backup commands before other routes.
+// Download clients, remote path mappings, indexers and download-client
+// settings, for the setup doctor. Each demo instance has its own setup
+// (passed in), including one realistic mistake to find.
+const dlField = (name, value) => ({ name, value });
+export function demoDownloadClient(id, impl, { host, port, category, field, protocol, enable = true }) {
+  return {
+    id, name: impl === 'QBittorrent' ? 'qBittorrent' : impl === 'Sabnzbd' ? 'SABnzbd' : impl, implementation: impl, implementationName: impl, configContract: `${impl}Settings`,
+    protocol: protocol || (impl === 'Sabnzbd' || impl === 'Nzbget' ? 'usenet' : 'torrent'), enable, priority: 1, removeCompletedDownloads: true, removeFailedDownloads: true, tags: [],
+    fields: [dlField('host', host), dlField('port', port), dlField('useSsl', false), dlField('urlBase', ''), impl === 'Sabnzbd' ? dlField('apiKey', '********') : dlField('username', 'admin'), dlField('password', '********'), dlField(field, category), dlField(field.replace('Category', 'ImportedCategory'), '')],
+  };
+}
+const prowlarrIndexer = (id, name, protocol) => ({ id, name: `${name} (Prowlarr)`, implementation: protocol === 'torrent' ? 'Torznab' : 'Newznab', protocol, enableRss: true, enableAutomaticSearch: true, enableInteractiveSearch: true, priority: 25, fields: [dlField('baseUrl', `http://prowlarr:9696/${id}/`), dlField('apiKey', '********')] });
+export const DEMO_PROWLARR_INDEXERS = { nzbgeek: (id) => prowlarrIndexer(id, 'NZBgeek', 'usenet'), drunkenslug: (id) => prowlarrIndexer(id, 'DrunkenSlug', 'usenet'), torrentleech: (id) => prowlarrIndexer(id, 'TorrentLeech', 'torrent'), oldindexer: (id) => prowlarrIndexer(id, 'OldIndexer', 'torrent') };
+function mountDoctorMock(app, v, { clients = [], mappings = [], indexers = [], completedHandling = true } = {}) {
+  const dlConfig = { id: 1, downloadClientWorkingFolders: '_UNPACK_|_FAILED_', enableCompletedDownloadHandling: completedHandling, autoRedownloadFailed: true, autoRedownloadFailedFromInteractiveSearch: true };
+  app.get(`/api/${v}/downloadclient`, (req, res) => res.json(clients));
+  app.get(`/api/${v}/remotepathmapping`, (req, res) => res.json(mappings));
+  app.get(`/api/${v}/indexer`, (req, res) => res.json(indexers));
+  app.get(`/api/${v}/config/downloadclient`, (req, res) => res.json(dlConfig));
+}
+
 function mountBackupMock(app, appName, v) {
   const t0 = Date.now();
   let backups = [
@@ -311,7 +333,9 @@ function mountBackupMock(app, appName, v) {
   app.locals.pushed = pushed;
   app.post(`/api/${v}/release/push`, (req, res) => {
     const b = req.body || {};
-    if (!b.title || !b.downloadUrl) return res.status(400).json([{ propertyName: 'Title', errorMessage: "'Title' must not be empty." }]);
+    if (!b.title) return res.status(400).json([{ propertyName: 'Title', errorMessage: "'Title' must not be empty." }]);
+    if (!b.downloadUrl && !b.magnetUrl) return res.status(400).json([{ propertyName: 'DownloadUrl', errorMessage: "'Download Url' must not be empty." }]);
+    if (!['usenet', 'torrent'].includes(b.protocol)) return res.status(400).json([{ propertyName: 'Protocol', errorMessage: "'Protocol' must not be empty." }]);
     pushed.push(b);
     const unknown = /unknown|zzz/i.test(b.title);
     res.json([{ guid: `push-${pushed.length}`, title: b.title, approved: !unknown, rejections: unknown ? [{ reason: 'Unknown Series', type: 'permanent' }] : [], ...(appName === 'radarr' ? { movieTitle: b.title.split(/[.(\[]/)[0].trim() } : { seriesTitle: b.title.split(/[.(\[]/)[0].trim() }) }]);
@@ -329,6 +353,18 @@ function makeSonarr(opts = {}) {
   const app = express();
   app.use(express.json());
   mountBackupMock(app, opts.instanceName && /whisparr/i.test(opts.instanceName) ? 'whisparr' : 'sonarr', 'v3');
+  // Setup doctor demo: the main Sonarr can't see qBittorrent's /downloads (no
+  // mapping); the anime instance shares SABnzbd's "tv" category with it.
+  const I = DEMO_PROWLARR_INDEXERS;
+  mountDoctorMock(app, 'v3', /whisparr/i.test(opts.instanceName || '')
+    ? { clients: [demoDownloadClient(1, 'Sabnzbd', { host: 'sabnzbd', port: 8080, category: 'whisparr', field: 'tvCategory' })] }
+    : opts.series
+      ? { clients: [demoDownloadClient(1, 'Sabnzbd', { host: 'sabnzbd', port: 8080, category: 'tv', field: 'tvCategory' })], indexers: [{ id: 1, name: 'Nyaa', implementation: 'Torznab', protocol: 'torrent', enableRss: true, enableAutomaticSearch: true, enableInteractiveSearch: true, priority: 25, fields: [] }] }
+      : {
+        clients: [demoDownloadClient(1, 'QBittorrent', { host: 'qbittorrent', port: 8080, category: 'tv-sonarr', field: 'tvCategory' }), demoDownloadClient(2, 'Sabnzbd', { host: 'sabnzbd', port: 8080, category: 'tv', field: 'tvCategory' })],
+        mappings: [{ id: 1, host: 'sabnzbd', remotePath: '/downloads/complete/', localPath: '/data/usenet/' }],
+        indexers: [I.nzbgeek(1), I.drunkenslug(2), I.torrentleech(3)],
+      });
   let series = [
     { id: 1, title: 'Severance', year: 2022, tvdbId: 371980, status: 'continuing', monitored: true, seasonCount: 2, network: 'Apple TV+', overview: 'Employees at Lumon undergo a procedure that severs work and personal memories.', path: 'C:\\Media\\TV\\Severance', rootFolderPath: 'C:\\Media\\TV', statistics: { episodeFileCount: 18, episodeCount: 19, percentOfEpisodes: 94.7, sizeOnDisk: 40802189312 }, images: [] },
     { id: 2, title: 'The Bear', year: 2022, tvdbId: 388477, status: 'continuing', monitored: true, seasonCount: 3, network: 'FX', overview: 'A young chef returns to Chicago to run his family sandwich shop.', path: 'C:\\Media\\TV\\The Bear', rootFolderPath: 'C:\\Media\\TV', statistics: { episodeFileCount: 28, episodeCount: 28, percentOfEpisodes: 100, sizeOnDisk: 30064771072 }, images: [] },
@@ -469,7 +505,7 @@ function makeSonarr(opts = {}) {
     res.json({});
   });
   app.get('/api/v3/episodefile', (req, res) => { const s = series.find((x) => x.id === Number(req.query.seriesId)); res.json(s ? filesFor(s) : []); });
-  let mediaManagementTv = { id: 1, recycleBin: opts.series ? '' : '/Volumes/Media/.recycle', recycleBinCleanupDays: 7 };
+  let mediaManagementTv = { id: 1, recycleBin: opts.series ? '' : '/Volumes/Media/.recycle', recycleBinCleanupDays: 7, copyUsingHardlinks: !opts.series };
   app.get('/api/v3/config/mediamanagement', (req, res) => res.json(mediaManagementTv));
   app.put('/api/v3/config/mediamanagement', (req, res) => { mediaManagementTv = { ...mediaManagementTv, ...req.body }; res.status(202).json(mediaManagementTv); });
   mountManualImportMock(app, {
@@ -639,6 +675,17 @@ function makeRadarr(opts = {}) {
   const app = express();
   app.use(express.json());
   mountBackupMock(app, 'radarr', 'v3');
+  // Setup doctor demo: the main Radarr sees qBittorrent's downloads on the
+  // Movies3 disk while its library is on another one (no hard links); it's
+  // missing TorrentLeech from Prowlarr. The 4K instance has hard links off.
+  const RI = DEMO_PROWLARR_INDEXERS;
+  mountDoctorMock(app, 'v3', opts.movies
+    ? { clients: [demoDownloadClient(1, 'QBittorrent', { host: 'qbittorrent', port: 8080, category: 'radarr-4k', field: 'movieCategory' })], indexers: [RI.nzbgeek(1), RI.drunkenslug(2), RI.torrentleech(3), RI.oldindexer(4)] }
+    : {
+      clients: [demoDownloadClient(1, 'QBittorrent', { host: 'qbittorrent', port: 8080, category: 'radarr', field: 'movieCategory' }), demoDownloadClient(2, 'Sabnzbd', { host: 'sabnzbd', port: 8080, category: 'movies', field: 'movieCategory' })],
+      mappings: [{ id: 1, host: 'qbittorrent', remotePath: '/downloads/', localPath: '/Volumes/Movies3/downloads/' }, { id: 2, host: 'sabnzbd', remotePath: '/downloads/complete/', localPath: '/data/usenet/' }],
+      indexers: [RI.nzbgeek(1), RI.drunkenslug(2)],
+    });
   let movies = [
     { id: 1, title: 'Dune: Part Two', year: 2024, tmdbId: 693134, status: 'released', monitored: true, hasFile: true, runtime: 166, overview: 'Paul Atreides unites with the Fremen to wage war against House Harkonnen.', path: 'C:\\Media\\Movies\\Dune Part Two (2024)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 32212254720, studio: 'Legendary', images: [], movieFile: { id: 101, movieId: 1, relativePath: 'Dune.Part.Two.mkv', quality: { quality: { id: 7, name: 'Bluray-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 32212254720, mediaInfo: { videoCodec: 'x264', audioCodec: 'DTS-HD MA', audioChannels: 7.1, audioStreamCount: 2, resolution: '1920x804', runTime: '2:46:12', videoBitrate: 24000000 } } },
     { id: 2, title: 'Oppenheimer', year: 2023, tmdbId: 872585, status: 'released', monitored: true, hasFile: true, runtime: 180, overview: 'The story of J. Robert Oppenheimer and the atomic bomb.', path: 'C:\\Media\\Movies2\\Oppenheimer (2023)', rootFolderPath: 'C:\\Media\\Movies2', sizeOnDisk: 27917287424, studio: 'Universal', images: [], movieFile: { id: 102, movieId: 2, relativePath: 'Oppenheimer.2023.1080p.mkv', quality: { quality: { id: 7, name: 'Bluray-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 27917287424, mediaInfo: { videoCodec: 'x265', audioCodec: '', audioChannels: 0, audioStreamCount: 0, resolution: '1920x1080', runTime: '3:00:21' } } },
@@ -763,7 +810,7 @@ function makeRadarr(opts = {}) {
     res.json(movies[idx]);
   });
   app.delete('/api/v3/movie/:id', (req, res) => { movies = movies.filter((m) => m.id !== Number(req.params.id)); res.json({}); });
-  let tags = [{ id: 1, label: '4k' }, { id: 2, label: 'kids' }];
+  let tags = [{ id: 1, label: '4k' }, { id: 2, label: 'kids' }, { id: 3, label: 'keep' }];
   app.get('/api/v3/tag', (req, res) => res.json(tags));
   app.post('/api/v3/tag', (req, res) => { const t = { id: (tags.reduce((mx, x) => Math.max(mx, x.id), 0) || 0) + 1, label: String((req.body && req.body.label) || 'tag') }; tags.push(t); res.status(201).json(t); });
   mountArrLibraryExtras(app, 'movie', { getTags: () => tags, setTags: (t) => { tags = t; }, getItems: () => movies, variant: opts.instanceName ? 'b' : 'a' });
@@ -782,7 +829,7 @@ function makeRadarr(opts = {}) {
     res.json({});
   });
   app.get('/api/v3/moviefile', (req, res) => { const m = movies.find((x) => x.id === Number(req.query.movieId)); res.json(m && m.movieFile ? [m.movieFile] : []); });
-  let mediaManagement = { id: 1, recycleBin: opts.movies ? '' : '/Volumes/Movies/.recycle', recycleBinCleanupDays: 7, deleteEmptyFolders: false, autoUnmonitorPreviouslyDownloadedMovies: false };
+  let mediaManagement = { id: 1, recycleBin: opts.movies ? '' : '/Volumes/Movies/.recycle', recycleBinCleanupDays: 7, deleteEmptyFolders: false, autoUnmonitorPreviouslyDownloadedMovies: false, copyUsingHardlinks: !opts.movies };
   app.get('/api/v3/config/mediamanagement', (req, res) => res.json(mediaManagement));
   app.put('/api/v3/config/mediamanagement', (req, res) => { mediaManagement = { ...mediaManagement, ...req.body }; res.status(202).json(mediaManagement); });
   mountManualImportMock(app, {
@@ -962,7 +1009,7 @@ function makeSab() {
     { nzo_id: 'SABnzbd_nzo_b2', filename: 'Severance.S02E10.1080p.WEB', status: 'Queued', percentage: '0', mb: '2048', mbleft: '2048', timeleft: '0:00:00', cat: 'tv', priority: 'High', sizeleft: '2.0 GB', size: '2.0 GB' },
   ];
   let history = [
-    { nzo_id: 'SABnzbd_nzo_h1', name: 'Dune.Part.Two.2024.2160p', status: 'Completed', category: 'movies', size: '30.0 GB', bytes: 32212254720, completed: Math.floor((Date.now() - 3600000) / 1000), download_time: 842, storage: '/data/movies' },
+    { nzo_id: 'SABnzbd_nzo_h1', name: 'Dune.Part.Two.2024.2160p', status: 'Completed', category: 'movies', storage: '/downloads/complete/movies/Dune.Part.Two.2024.2160p', size: '30.0 GB', bytes: 32212254720, completed: Math.floor((Date.now() - 3600000) / 1000), download_time: 842, storage: '/data/movies' },
     { nzo_id: 'SABnzbd_nzo_h2', name: 'The.Bear.S03E08.1080p', status: 'Failed', category: 'tv', size: '1.8 GB', bytes: 1932735283, completed: Math.floor((Date.now() - 9000000) / 1000), fail_message: 'Unpack failed', storage: '' },
   ];
 
@@ -1021,6 +1068,7 @@ function makeTautulli() {
     recordCf('tautulli', req);
     const cmd = req.query.cmd;
     if (cmd === 'status') return res.json(wrap({ result: 'success' }));
+    if (cmd === 'get_tautulli_info') return res.json(wrap({ tautulli_version: 'v2.15.2', tautulli_install_type: 'docker', tautulli_branch: 'master' }));
     if (cmd === 'get_activity') {
       const total = sessions.reduce((a, s) => a + Number(s.bandwidth), 0);
       return res.json(wrap({ stream_count: String(sessions.length), stream_count_direct_play: 1, stream_count_transcode: 1, total_bandwidth: total, wan_bandwidth: total, sessions }));
@@ -1030,6 +1078,31 @@ function makeTautulli() {
       sessions = sessions.filter((s) => s.session_id !== id && s.session_key !== key);
       return res.json(wrap({}));
     }
+    // Library media info: plays and last played per title, as Tautulli's
+    // Libraries → Media Info table (rating keys match the demo Plex).
+    if (cmd === 'get_libraries') return res.json(wrap([
+      { section_id: '1', section_name: 'Movies', section_type: 'movie', count: '3', is_active: 1 },
+      { section_id: '2', section_name: 'TV Shows', section_type: 'show', count: '3', parent_count: '9', child_count: '66', is_active: 1 },
+    ]));
+    if (cmd === 'get_library_media_info') {
+      const ago = (d) => Math.floor((Date.now() - d * 86400000) / 1000);
+      const GB = 2 ** 30;
+      const row = (o) => ({ section_type: o.media_type === 'show' ? 'show' : 'movie', added_at: String(ago(200)), thumb: '', container: 'mkv', ...o, rating_key: String(o.rating_key), file_size: String(o.file_size || 0) });
+      const media = {
+        1: [row({ section_id: 1, media_type: 'movie', rating_key: 11, title: 'Dune: Part Two', year: '2024', file_size: 30 * GB, play_count: 3, last_played: ago(420) }),
+          row({ section_id: 1, media_type: 'movie', rating_key: 15, title: '1917', year: '1917', file_size: 8 * GB, play_count: 0, last_played: null }),
+          row({ section_id: 1, media_type: 'movie', rating_key: 10, title: 'Oppenheimer', year: '2023', file_size: 26 * GB, play_count: 2, last_played: ago(3) })],
+        2: [row({ section_id: 2, media_type: 'show', rating_key: 20, title: 'Severance', year: '2022', play_count: 6, last_played: ago(1) }),
+          row({ section_id: 2, media_type: 'show', rating_key: 30, title: 'Foundation', year: '1951', play_count: 4, last_played: ago(300) }),
+          row({ section_id: 2, media_type: 'show', rating_key: 40, title: 'The Bear', year: '2022', play_count: 12, last_played: ago(2) })],
+      };
+      const list = media[String(req.query.section_id)] || [];
+      const start = Number(req.query.start) || 0; const length = Number(req.query.length) || 25;
+      return res.json(wrap({ draw: 1, recordsTotal: list.length, recordsFiltered: list.length, data: list.slice(start, start + length) }));
+    }
+    if (cmd === 'get_users') return res.json(wrap(DEMO_TAUTULLI_USERS));
+    // A date range (Year in review) gets the demo's year of history.
+    if (cmd === 'get_history' && req.query.before) return res.json(wrap(demoHistoryPage(req.query)));
     if (cmd === 'get_history') {
       const ago = (d) => Math.floor((Date.now() - d * 86400000) / 1000);
       let data = [
@@ -1109,7 +1182,9 @@ function makeProwlarr() {
   const app = express();
   app.use(express.json());
   mountBackupMock(app, 'prowlarr', 'v1');
-  const cats = (names) => ({ categories: names.map((name, i) => ({ id: 2000 + i * 1000, name })) });
+  app.get('/api/v1/system/status', (req, res) => res.json({ appName: 'Prowlarr', instanceName: 'Prowlarr (mock)', version: '1.28.2.4885', isDocker: true }));
+  const CAT_IDS = { Movies: 2000, Audio: 3000, PC: 4000, TV: 5000, Books: 7000 };
+  const cats = (names) => ({ categories: names.map((name) => ({ id: CAT_IDS[name], name, subCategories: [] })) });
   let indexers = [
     { id: 1, name: 'NZBgeek', protocol: 'usenet', enable: true, priority: 10, implementation: 'Newznab', capabilities: cats(['Movies', 'TV', 'Audio']) },
     { id: 2, name: 'DrunkenSlug', protocol: 'usenet', enable: true, priority: 15, implementation: 'Newznab', capabilities: cats(['Movies', 'TV']) },
@@ -1117,9 +1192,9 @@ function makeProwlarr() {
     { id: 4, name: 'OldTracker', protocol: 'torrent', enable: false, priority: 40, implementation: 'Cardigann', capabilities: cats(['TV']) },
   ];
   const apps = [
-    { id: 1, name: 'Sonarr', implementation: 'Sonarr', syncLevel: 'fullSync', fields: [{ name: 'baseUrl', value: 'http://sonarr:8989' }] },
-    { id: 2, name: 'Radarr', implementation: 'Radarr', syncLevel: 'fullSync', fields: [{ name: 'baseUrl', value: 'http://radarr:7878' }] },
-    { id: 3, name: 'Radarr 4K', implementation: 'Radarr', syncLevel: 'addOnly', fields: [{ name: 'baseUrl', value: 'http://radarr-4k:7879' }] },
+    { id: 1, name: 'Sonarr', implementation: 'Sonarr', syncLevel: 'fullSync', tags: [], fields: [{ name: 'baseUrl', value: 'http://sonarr:8989' }, { name: 'syncCategories', value: [5000, 5010, 5020, 5030, 5040, 5045, 5050] }] },
+    { id: 2, name: 'Radarr', implementation: 'Radarr', syncLevel: 'fullSync', tags: [], fields: [{ name: 'baseUrl', value: 'http://radarr:7878' }, { name: 'syncCategories', value: [2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060] }] },
+    { id: 3, name: 'Radarr 4K', implementation: 'Radarr', syncLevel: 'addOnly', tags: [], fields: [{ name: 'baseUrl', value: 'http://radarr-4k:7879' }, { name: 'syncCategories', value: [2000, 2045] }] },
   ];
   const failing = new Set([3]);
   let commandId = 100;
@@ -1152,7 +1227,40 @@ function makeProwlarr() {
   app.get('/api/v1/command/:id', (req, res) => res.json({ id: Number(req.params.id), name: 'ApplicationIndexerSync', status: 'completed', ended: new Date().toISOString() }));
   app.get('/api/v1/health', (req, res) => res.json(failing.size ? [{ source: 'IndexerStatusCheck', type: 'warning', message: 'Indexers unavailable due to failures: TorrentLeech' }] : []));
   app.get('/api/v1/history', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 0, records: [] }));
-  app.get('/api/v1/search', (req, res) => res.json([]));
+  // Search across indexers. Like Prowlarr, download and magnet links point at
+  // Prowlarr itself (/{indexerId}/download?apikey=…) on the host it was asked on.
+  const RELEASES = [
+    { guid: 'px-1', title: 'Dune.Part.Two.2024.2160p.UHD.BluRay.x265-GROUP', indexerId: 1, indexer: 'NZBgeek', protocol: 'usenet', size: 32.4e9, grabs: 120, cats: [[2000, 'Movies', [[2045, 'Movies/UHD']]]], age: 40 },
+    { guid: 'px-2', title: 'Dune.Part.Two.2024.1080p.WEB-DL.DDP5.1.H.264-FLUX', indexerId: 3, indexer: 'TorrentLeech', protocol: 'torrent', size: 9.1e9, seeders: 412, leechers: 18, cats: [[2000, 'Movies', [[2040, 'Movies/HD']]]], age: 120, hash: '6a7c2b1f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b' },
+    { guid: 'px-3', title: 'Severance.S02E10.1080p.ATVP.WEB-DL.DDP5.1.H.264-NTb', indexerId: 1, indexer: 'NZBgeek', protocol: 'usenet', size: 2.1e9, grabs: 54, cats: [[5000, 'TV', [[5040, 'TV/HD']]]], age: 6 },
+    { guid: 'px-4', title: 'Severance.S02E10.2160p.ATVP.WEB-DL.DDP5.1.HDR.H.265-FLUX', indexerId: 3, indexer: 'TorrentLeech', protocol: 'torrent', size: 6.8e9, seeders: 250, leechers: 9, cats: [[5000, 'TV', [[5045, 'TV/UHD']]]], age: 5, magnetOnly: true, hash: '0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c' },
+    { guid: 'px-5', title: 'Andy.Weir.Project.Hail.Mary.2021.Audiobook.M4B', indexerId: 2, indexer: 'DrunkenSlug', protocol: 'usenet', size: 1.1e9, grabs: 9, cats: [[3000, 'Audio', [[3030, 'Audio/Audiobook']]]], age: 300 },
+    { guid: 'px-6', title: 'Unknown.Show.S01E01.720p.HDTV.x264-LOL', indexerId: 2, indexer: 'DrunkenSlug', protocol: 'usenet', size: 0.9e9, grabs: 1, cats: [[5000, 'TV', [[5030, 'TV/SD']]]], age: 2 },
+  ];
+  const grabbed = [];
+  app.locals.grabbed = grabbed;
+  const shape = (r, base) => {
+    const link = `${base}/${r.indexerId}/download?apikey=MOCK_API_KEY&link=${encodeURIComponent(Buffer.from(r.guid).toString('base64'))}&file=${encodeURIComponent(r.title)}`;
+    const magnet = r.hash ? `magnet:?xt=urn:btih:${r.hash}&dn=${encodeURIComponent(r.title)}` : null;
+    return {
+      guid: r.guid, title: r.title, sortTitle: r.title.toLowerCase(), indexerId: r.indexerId, indexer: r.indexer, protocol: r.protocol, size: r.size, grabs: r.grabs,
+      publishDate: new Date(Date.now() - r.age * 3600000).toISOString(), age: Math.floor(r.age / 24), ageHours: r.age,
+      categories: r.cats.map(([id, name, subs]) => ({ id, name, subCategories: subs.map(([sid, sname]) => ({ id: sid, name: sname, subCategories: [] })) })),
+      downloadUrl: r.magnetOnly ? null : link, magnetUrl: r.protocol === 'torrent' ? magnet : null, infoHash: r.hash || null,
+      ...(r.protocol === 'torrent' ? { seeders: r.seeders, leechers: r.leechers } : {}),
+      infoUrl: `${base}/details/${r.guid}`,
+    };
+  };
+  app.get('/api/v1/search', (req, res) => {
+    const words = String(req.query.query || '').toLowerCase().split(/[\s.]+/).filter(Boolean);
+    const base = `${req.protocol}://${req.get('host')}`;
+    res.json(RELEASES.filter((r) => words.length && words.every((w) => r.title.toLowerCase().includes(w))).map((r) => shape(r, base)));
+  });
+  app.post('/api/v1/search', (req, res) => {
+    const r = RELEASES.find((x) => x.guid === (req.body && req.body.guid));
+    if (!r) return res.status(404).json({ message: 'Release not found in cache, search again' });
+    grabbed.push(r.guid); res.json(shape(r, `${req.protocol}://${req.get('host')}`));
+  });
   return app;
 }
 
@@ -1430,6 +1538,15 @@ function makeQbittorrent() {
     return res.status(403).send('Forbidden');
   });
   app.get('/__debug', (req, res) => res.json({ cf: cfSeen.qbittorrent || null }));
+  // Preferences: only the "run external program" settings are modelled.
+  const prefs = { autorun_enabled: false, autorun_program: '', autorun_on_torrent_added_enabled: false, autorun_on_torrent_added_program: '' };
+  app.locals.prefs = prefs;
+  app.get('/api/v2/app/preferences', (req, res) => res.json(prefs));
+  app.post('/api/v2/app/setPreferences', (req, res) => {
+    let j; try { j = JSON.parse(req.body.json || '{}'); } catch { return res.status(400).send('Bad json'); }
+    for (const [k, v] of Object.entries(j)) if (k in prefs) prefs[k] = typeof prefs[k] === 'string' ? String(v).trim() : !!v;
+    res.send('');
+  });
 
   app.post('/api/v2/auth/login', (req, res) => {
     const { username, password } = req.body || {};
@@ -1463,7 +1580,8 @@ function makeQbittorrent() {
     if (filter === 'downloading') list = list.filter((t) => /DL$|downloading|stalledDL|metaDL/i.test(t.state) && t.progress < 1);
     else if (filter === 'completed') list = list.filter((t) => t.progress >= 1);
     else if (filter === 'paused') list = list.filter((t) => /paused/i.test(t.state));
-    res.json(list);
+    // Real qBittorrent reports seeding_time (seconds) on every torrent.
+    res.json(list.map((t) => ({ seeding_time: 0, ...t })));
   });
   const applyHashes = (req, fn) => {
     const hashes = String((req.body && req.body.hashes) || req.query.hashes || '');
@@ -1597,6 +1715,7 @@ function makeNzbget() {
 // ---------------- Jellyfin / Emby ----------------
 function makeMediaServer(kind) {
   const app = express();
+  const lc = (v) => String(v || '').toLowerCase();
   const isEmby = kind === 'emby';
   const now = Date.now();
   const items = [
@@ -1620,8 +1739,77 @@ function makeMediaServer(kind) {
     { Name: 'Movies', CollectionType: 'movies', ItemId: `${kind}-movies`, Locations: ['/media/movies'] },
     { Name: 'TV Shows', CollectionType: 'tvshows', ItemId: `${kind}-tv`, Locations: ['/media/tv'] },
   ]));
+  app.use(express.json());
+  // The library as Sonarr/Radarr see it (same folders as the demo apps).
+  // "Dune: Part Two" is matched to the 1984 film and Foundation isn't matched,
+  // for the wrong-matches demo; The Bear only has a TMDB id.
+  const id = (n) => (isEmby ? String(1000 + n) : `${kind}${String(n).padStart(4, '0')}`);
+  const library = [
+    { Id: id(1), Name: 'Dune', Type: 'Movie', ProductionYear: 1984, ProviderIds: { Tmdb: '841', Imdb: 'tt0087182' }, Path: 'C:\\Media\\Movies\\Dune Part Two (2024)\\Dune.Part.Two.mkv' },
+    { Id: id(2), Name: 'Oppenheimer', Type: 'Movie', ProductionYear: 2023, ProviderIds: { Tmdb: '872585', Imdb: 'tt15398776' }, Path: 'C:\\Media\\Movies2\\Oppenheimer (2023)\\Oppenheimer.2023.1080p.mkv' },
+    { Id: id(3), Name: '1917', Type: 'Movie', ProductionYear: 2019, ProviderIds: { Tmdb: '530915' }, Path: 'C:\\Media\\Movies\\1917 (2019)\\1917.mkv' },
+    { Id: id(4), Name: 'Severance', Type: 'Series', ProductionYear: 2022, ProviderIds: { Tvdb: '371980', Tmdb: '95396' }, Path: 'C:\\Media\\TV\\Severance' },
+    { Id: id(5), Name: 'The Bear', Type: 'Series', ProductionYear: 2022, ProviderIds: { Tmdb: '136315' }, Path: 'C:\\Media\\TV\\The Bear' },
+    { Id: id(6), Name: 'Foundation', Type: 'Series', ProductionYear: 2021, ProviderIds: {}, Path: 'C:\\Media\\TV\\Foundation' },
+  ];
+  app.locals.library = library;
   app.get('/Items/Latest', (req, res) => res.json(items));
-  app.get('/Items', (req, res) => res.json({ Items: items, TotalRecordCount: items.length, StartIndex: 0 }));
+  app.get('/Items', (req, res) => {
+    const types = String(req.query.IncludeItemTypes || '').split(',').filter(Boolean);
+    if (types.length && !req.query.ParentId && types.every((t) => t === 'Movie' || t === 'Series')) {
+      const list = library.filter((x) => types.includes(x.Type));
+      const start = Number(req.query.StartIndex) || 0; const limit = Number(req.query.Limit) || list.length;
+      return res.json({ Items: list.slice(start, start + limit), TotalRecordCount: list.length, StartIndex: start });
+    }
+    res.json({ Items: items, TotalRecordCount: items.length, StartIndex: 0 });
+  });
+  // Identify: search the providers, then apply one result.
+  const CANDIDATES = {
+    Movie: [{ Name: 'Dune: Part Two', ProductionYear: 2024, ProviderIds: { Tmdb: '693134', Imdb: 'tt15239678' }, SearchProviderName: 'TheMovieDb', ImageUrl: 'https://image.tmdb.org/t/p/original/dune2.jpg' },
+      { Name: 'Dune', ProductionYear: 1984, ProviderIds: { Tmdb: '841', Imdb: 'tt0087182' }, SearchProviderName: 'TheMovieDb' }],
+    Series: [{ Name: 'Foundation', ProductionYear: 2021, ProviderIds: { Tvdb: '358711', Tmdb: '93740' }, SearchProviderName: 'TheMovieDb' },
+      { Name: 'Foundation and Empire', ProductionYear: 1975, ProviderIds: { Tmdb: '4471' }, SearchProviderName: 'TheMovieDb' }],
+  };
+  app.post('/Items/RemoteSearch/:type', (req, res, next) => {
+    if (!CANDIDATES[req.params.type]) return next();
+    const info = (req.body && req.body.SearchInfo) || {};
+    const want = lc(info.Name);
+    const list = CANDIDATES[req.params.type].filter((c) => lc(c.Name).includes(want.split(':')[0]) || Object.values(info.ProviderIds || {}).some((v) => Object.values(c.ProviderIds).includes(String(v))));
+    res.json(list.length ? list : [{ Name: info.Name, ProductionYear: info.Year, ProviderIds: info.ProviderIds || {}, SearchProviderName: 'TheMovieDb' }]);
+  });
+  app.post('/Items/RemoteSearch/Apply/:id', (req, res) => {
+    const it = library.find((x) => x.Id === req.params.id);
+    if (!it) return res.status(404).json({ error: 'Item not found' });
+    const b = req.body || {};
+    if (!b.ProviderIds || !Object.keys(b.ProviderIds).length) return res.status(400).json({ error: 'ProviderIds required' });
+    it.Name = b.Name || it.Name; it.ProductionYear = b.ProductionYear || it.ProductionYear; it.ProviderIds = { ...b.ProviderIds };
+    res.status(204).end();
+  });
+  // Playback Reporting plugin: its custom-query endpoint over the play log.
+  app.get('/user_usage_stats/type_filter_list', (req, res) => res.json(['Movie', 'Episode']));
+  const ago = (d, h = 20) => { const t = new Date(now - d * 86400000); t.setHours(h, 0, 0, 0); return t.toISOString().replace('T', ' ').slice(0, 19); };
+  const playLog = [
+    [ago(1), 'u1', id(41), 'Episode', 'Severance - s02e01 - Hello, Ms. Cobel', 'Transcode (v:h264 a:aac)', (isEmby ? 'Emby for Android' : 'Jellyfin Android'), 'Pixel 8', 2900],
+    [ago(3), 'u1', id(42), 'Episode', 'Severance - s02e02 - Goodbye, Mrs. Selvig', 'Transcode (v:h264 a:aac)', (isEmby ? 'Emby for Android' : 'Jellyfin Android'), 'Pixel 8', 3100],
+    [ago(4), 'u2', id(43), 'Episode', 'Severance - s02e03 - Who Is Alive?', 'Transcode (v:h264 a:direct)', (isEmby ? 'Emby Web' : 'Jellyfin Web'), 'Chrome', 3000],
+    [ago(6), 'u2', id(44), 'Episode', 'Severance - s02e04 - Woe\'s Hollow', 'DirectPlay', 'Infuse', 'Apple TV', 3200],
+    [ago(2), 'u1', id(1), 'Movie', 'Dune: Part Two', 'Transcode (v:h264 a:direct)', (isEmby ? 'Emby Web' : 'Jellyfin Web'), 'Firefox', 9900],
+    [ago(9), 'u2', id(1), 'Movie', 'Dune: Part Two', 'Transcode (v:h264 a:aac)', (isEmby ? 'Emby Web' : 'Jellyfin Web'), 'Chrome', 9800],
+    [ago(5), 'u1', id(51), 'Episode', 'The Bear - s03e01 - Tomorrow', 'Transcode (v:direct a:aac)', (isEmby ? 'Emby Theater' : 'Jellyfin Media Player'), 'Desktop', 1800],
+    [ago(8), 'u1', id(52), 'Episode', 'The Bear - s03e02 - Next', 'Transcode (v:direct a:aac)', (isEmby ? 'Emby Theater' : 'Jellyfin Media Player'), 'Desktop', 1750],
+    [ago(7), 'u2', id(2), 'Movie', 'Oppenheimer', 'DirectPlay', 'Infuse', 'Apple TV', 10800],
+    [ago(12), 'u1', id(2), 'Movie', 'Oppenheimer', 'DirectPlay', 'Infuse', 'Apple TV', 10700],
+    [ago(60), 'u1', id(3), 'Movie', '1917', 'Transcode (v:h264 a:aac)', (isEmby ? 'Emby Web' : 'Jellyfin Web'), 'Chrome', 7000],
+  ];
+  const users = { u1: 'cameron', u2: 'guest' };
+  app.post('/user_usage_stats/submit_custom_query', (req, res) => {
+    const q = String((req.body && req.body.CustomQueryString) || '');
+    if (!/^\s*select\b/i.test(q)) return res.json({ colums: [], results: [], message: 'Query executed, no data returned.' });
+    const since = (/DateCreated >= '(\d{4}-\d{2}-\d{2})'/.exec(q) || [])[1] || '0000';
+    const cols = ['ItemId', 'ItemType', 'ItemName', 'PlaybackMethod', 'ClientName', 'DeviceName', req.body.ReplaceUserId ? 'UserName' : 'UserId', 'DateCreated'];
+    const results = playLog.filter((r) => r[0].slice(0, 10) >= since).map(([d, u, iid, type, name, method, client, device]) => [iid, type, name, method, client, device, req.body.ReplaceUserId ? users[u] : u, d]);
+    res.json({ colums: cols, results, message: '' });
+  });
   app.get('/Sessions', (req, res) => res.json([
     { Id: `${kind}-session`, UserName: 'cameron', Client: isEmby ? 'Emby Theater' : 'Jellyfin Web', DeviceName: 'Living Room', NowPlayingItem: items[0], PlayState: { IsPaused: false, PositionTicks: 24000000000 }, TranscodingInfo: { VideoCodec: 'h264', Bitrate: 8000000 } },
   ]));
@@ -1737,11 +1925,12 @@ function makeLidarr(opts = {}) {
   const app = express();
   app.use(express.json());
   mountBackupMock(app, 'lidarr', 'v1');
+  mountDoctorMock(app, 'v1', { clients: [demoDownloadClient(1, 'QBittorrent', { host: 'qbittorrent', port: 8080, category: 'lidarr', field: 'musicCategory' })], completedHandling: false });
   const now = Date.now();
   let artists = [
-    { id: 1, artistName: 'Radiohead', foreignArtistId: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', monitored: true, overview: 'English rock band formed in Abingdon.', path: '/music/Radiohead', rootFolderPath: '/music', added: new Date(now - 90 * 86400000).toISOString(), statistics: { albumCount: 9, trackFileCount: 120, trackCount: 130, percentOfTracks: 92.3, sizeOnDisk: 8589934592 }, images: [] },
-    { id: 2, artistName: 'Daft Punk', foreignArtistId: '056e4f3e-d505-4dad-8ec1-d04f521cbb56', monitored: true, overview: 'French electronic duo.', path: '/music/Daft Punk', rootFolderPath: '/music', added: new Date(now - 60 * 86400000).toISOString(), statistics: { albumCount: 4, trackFileCount: 48, trackCount: 52, percentOfTracks: 92.3, sizeOnDisk: 3221225472 }, images: [] },
-    { id: 3, artistName: 'Miles Davis', foreignArtistId: '561d854a-6a28-4aa7-8c99-323e6ce46c2a', monitored: false, overview: 'American jazz trumpeter.', path: '/music/Miles Davis', rootFolderPath: '/music', added: new Date(now - 30 * 86400000).toISOString(), statistics: { albumCount: 12, trackFileCount: 140, trackCount: 140, percentOfTracks: 100, sizeOnDisk: 6442450944 }, images: [] },
+    { id: 1, artistName: 'Radiohead', foreignArtistId: 'a74b1b7f-71a5-4011-9441-d0b5e4122711', status: 'continuing', qualityProfileId: 1, monitored: true, overview: 'English rock band formed in Abingdon.', path: '/music/Radiohead', rootFolderPath: '/music', added: new Date(now - 90 * 86400000).toISOString(), statistics: { albumCount: 9, trackFileCount: 120, trackCount: 130, percentOfTracks: 92.3, sizeOnDisk: 8589934592 }, images: [] },
+    { id: 2, artistName: 'Daft Punk', foreignArtistId: '056e4f3e-d505-4dad-8ec1-d04f521cbb56', status: 'ended', qualityProfileId: 1, monitored: true, overview: 'French electronic duo.', path: '/music/Daft Punk', rootFolderPath: '/music', added: new Date(now - 60 * 86400000).toISOString(), statistics: { albumCount: 4, trackFileCount: 52, trackCount: 52, percentOfTracks: 100, sizeOnDisk: 3221225472 }, images: [] },
+    { id: 3, artistName: 'Miles Davis', foreignArtistId: '561d854a-6a28-4aa7-8c99-323e6ce46c2a', status: 'ended', qualityProfileId: 9, monitored: false, overview: 'American jazz trumpeter.', path: '/music/Miles Davis', rootFolderPath: '/music', added: new Date(now - 30 * 86400000).toISOString(), statistics: { albumCount: 12, trackFileCount: 140, trackCount: 140, percentOfTracks: 100, sizeOnDisk: 6442450944 }, images: [] },
   ];
   let queue = [
     { id: 301, title: 'Radiohead - OK Computer (1997) [FLAC]', artistId: 1, status: 'downloading', trackedDownloadState: 'downloading', trackedDownloadStatus: 'ok', size: 524288000, sizeleft: 104857600, timeleft: '00:03:00', estimatedCompletionTime: new Date(now + 180000).toISOString(), downloadClient: 'SABnzbd', indexer: 'NZBgeek', downloadId: 'lid-abc', protocol: 'usenet' },
@@ -1754,6 +1943,13 @@ function makeLidarr(opts = {}) {
   const lfs = opts.artists ? fsFromItems(artists) : lidarrDemoFs();
   const lidarrRoots = [{ id: 1, path: '/music' }];
   lfs.mount(app, { getItems: () => artists, rootFolders: () => lidarrRoots, prefix: '/api/v1' });
+  // Mass editor (Tidy up): monitor / profile, and remove entries.
+  app.put('/api/v1/artist/editor', (req, res) => {
+    const b = req.body || {}; const ids = new Set((b.artistIds || []).map(Number));
+    for (const a of artists.filter((x) => ids.has(x.id))) { if (typeof b.monitored === 'boolean') a.monitored = b.monitored; if (b.qualityProfileId) a.qualityProfileId = Number(b.qualityProfileId); }
+    res.status(202).json(artists.filter((x) => ids.has(x.id)));
+  });
+  app.delete('/api/v1/artist/editor', (req, res) => { const ids = new Set(((req.body || {}).artistIds || []).map(Number)); artists = artists.filter((x) => !ids.has(x.id)); res.json({}); });
   app.get('/api/v1/artist/:id', (req, res) => { const a = artists.find((x) => x.id === Number(req.params.id)); return a ? res.json(a) : res.status(404).json({ message: 'NotFound' }); });
   app.put('/api/v1/artist/:id', (req, res) => {
     const id = Number(req.params.id);
@@ -1790,10 +1986,13 @@ function makeReadarr(opts = {}) {
   const app = express();
   app.use(express.json());
   mountBackupMock(app, 'readarr', 'v1');
+  mountDoctorMock(app, 'v1', { clients: [] });
   const now = Date.now();
   let authors = [
     { id: 1, authorName: 'Brandon Sanderson', foreignAuthorId: 'b1', monitored: true, overview: 'American fantasy author.', path: '/books/Brandon Sanderson', rootFolderPath: '/books', added: new Date(now - 120 * 86400000).toISOString(), statistics: { bookCount: 20, bookFileCount: 18, sizeOnDisk: 1073741824 }, images: [] },
     { id: 2, authorName: 'Andy Weir', foreignAuthorId: 'b2', monitored: true, overview: 'American novelist.', path: '/books/Andy Weir', rootFolderPath: '/books', added: new Date(now - 45 * 86400000).toISOString(), statistics: { bookCount: 3, bookFileCount: 3, sizeOnDisk: 157286400 }, images: [] },
+    { id: 3, authorName: 'Terry Pratchett', foreignAuthorId: 'b3', status: 'ended', qualityProfileId: 1, monitored: true, overview: 'English humorist and fantasy author.', path: '/books/Terry Pratchett', rootFolderPath: '/books', added: new Date(now - 400 * 86400000).toISOString(), statistics: { bookCount: 41, bookFileCount: 41, sizeOnDisk: 524288000 }, images: [] },
+    { id: 4, authorName: 'Agatha Christie', foreignAuthorId: 'b4', status: 'ended', qualityProfileId: 1, monitored: false, overview: 'English crime novelist.', path: '/books/Agatha Christie', rootFolderPath: '/books', added: new Date(now - 300 * 86400000).toISOString(), statistics: { bookCount: 66, bookFileCount: 0, sizeOnDisk: 0 }, images: [] },
   ];
   let queue = [
     { id: 601, title: 'Andy Weir - Project Hail Mary [EPUB]', authorId: 2, status: 'downloading', trackedDownloadState: 'downloading', trackedDownloadStatus: 'ok', size: 4194304, sizeleft: 1048576, timeleft: '00:00:30', estimatedCompletionTime: new Date(now + 30000).toISOString(), downloadClient: 'SABnzbd', indexer: 'NZBgeek', downloadId: 'rd-abc', protocol: 'usenet' },
@@ -1802,9 +2001,16 @@ function makeReadarr(opts = {}) {
   app.get('/__debug', (req, res) => res.json({ cf: cfSeen.readarr || null }));
   app.get('/api/v1/system/status', (req, res) => res.json({ version: '0.4.7.2718', appName: 'Readarr', instanceName: opts.instanceName || 'Readarr (mock)' }));
   app.get('/api/v1/rootfolder', (req, res) => res.json([{ id: 1, path: '/books', freeSpace: 120000000000, accessible: true }]));
+  app.get('/api/v1/diskspace', (req, res) => res.json([{ path: '/', label: 'root', freeSpace: 120000000000, totalSpace: 500000000000 }]));
   app.get('/api/v1/qualityprofile', (req, res) => res.json([{ id: 1, name: 'eBook' }, { id: 2, name: 'Audiobook' }]));
   app.get('/api/v1/metadataprofile', (req, res) => res.json([{ id: 1, name: 'Standard' }]));
   app.get('/api/v1/author', (req, res) => res.json(authors));
+  app.put('/api/v1/author/editor', (req, res) => {
+    const b = req.body || {}; const ids = new Set((b.authorIds || []).map(Number));
+    for (const a of authors.filter((x) => ids.has(x.id))) { if (typeof b.monitored === 'boolean') a.monitored = b.monitored; if (b.qualityProfileId) a.qualityProfileId = Number(b.qualityProfileId); }
+    res.status(202).json(authors.filter((x) => ids.has(x.id)));
+  });
+  app.delete('/api/v1/author/editor', (req, res) => { const ids = new Set(((req.body || {}).authorIds || []).map(Number)); authors = authors.filter((x) => !ids.has(x.id)); res.json({}); });
   app.get('/api/v1/queue', (req, res) => res.json({ page: 1, pageSize: 20, totalRecords: queue.length, records: queue }));
   app.delete('/api/v1/queue/:id', (req, res) => { queue = queue.filter((q) => q.id !== Number(req.params.id)); res.json({}); });
   app.get('/api/v1/calendar', (req, res) => res.json([
@@ -1931,7 +2137,7 @@ export function startMockServices() {
     ] }), MOCK_PORTS.sonarrAnime],
     ['radarr', makeRadarr(primaryLibraryOptions), MOCK_PORTS.radarr],
     ['radarr-4k', makeRadarr({ instanceName: 'Radarr 4K (mock)', movies: [
-      { id: 1, title: 'Blade Runner 2049', year: 2017, tmdbId: 335984, status: 'released', monitored: true, hasFile: true, runtime: 164, overview: 'A young blade runner uncovers a long-buried secret.', path: '/movies-4k/Blade Runner 2049 (2017)', rootFolderPath: '/movies-4k', sizeOnDisk: 64424509440, studio: 'Alcon', images: [] },
+      { id: 1, title: 'Blade Runner 2049', year: 2017, tmdbId: 335984, status: 'released', monitored: true, hasFile: true, runtime: 164, overview: 'A young blade runner uncovers a long-buried secret.', path: '/movies-4k/Blade Runner 2049 (2017)', rootFolderPath: '/movies-4k', sizeOnDisk: 64424509440, tags: [3], studio: 'Alcon', images: [] },
       { id: 2, title: 'Interstellar', year: 2014, tmdbId: 157336, status: 'released', monitored: true, hasFile: true, runtime: 169, overview: 'Explorers travel through a wormhole in search of a new home.', path: '/movies-4k/Interstellar (2014)', rootFolderPath: '/movies-4k', sizeOnDisk: 75161927680, studio: 'Paramount', images: [] },
       { id: 3, title: 'Top Gun: Maverick', year: 2022, tmdbId: 361743, status: 'released', monitored: false, hasFile: false, runtime: 130, overview: 'Maverick trains a detachment of Top Gun graduates.', path: '/movies-4k/Top Gun Maverick (2022)', rootFolderPath: '/movies-4k', sizeOnDisk: 0, studio: 'Paramount', images: [] },
     ] }), MOCK_PORTS.radarr4k],
@@ -1976,7 +2182,7 @@ export function startMockServices() {
     // Real apps serve their login page without a key; the mocks' own auth
     // would refuse it, so answer "/" in front of them.
     let front = app;
-    if (typeof app.get === 'function' && typeof app.use === 'function') { front = express(); front.get('/', (req, res) => res.type('html').send(`<!doctype html><title>${name}</title>`)); front.use(app); }
+    if (typeof app.get === 'function' && typeof app.use === 'function') { front = express(); front.get('/', (req, res, next) => (req.headers['x-plex-token'] ? next() : res.type('html').send(`<!doctype html><title>${name}</title>`))); front.use(app); }
     const server = front.listen(port, '127.0.0.1', () => {
       console.log(`  [mock] ${name} listening on http://127.0.0.1:${port}`);
     });
@@ -1986,4 +2192,4 @@ export function startMockServices() {
 }
 
 // Exposed for tests (in-process, ephemeral ports).
-export { makeLidarr as _makeLidarrMock, makeSonarr as _makeSonarrMock, makeRadarr as _makeRadarrMock, makeBazarr as _makeBazarrMock, makeQbittorrent as _makeQbittorrentMock, makeTransmission as _makeTransmissionMock, makeDeluge as _makeDelugeMock, makeNzbget as _makeNzbgetMock, makeFlood as _makeFloodMock, makeOverseerr as _makeOverseerrMock, makeTautulli as _makeTautulliMock, makeProwlarr as _makeProwlarrMock };
+export { makeSab as _makeSabMock, makeMediaServer as _makeMediaServerMock, makeReadarr as _makeReadarrMock, makeLidarr as _makeLidarrMock, makeSonarr as _makeSonarrMock, makeRadarr as _makeRadarrMock, makeBazarr as _makeBazarrMock, makeQbittorrent as _makeQbittorrentMock, makeTransmission as _makeTransmissionMock, makeDeluge as _makeDelugeMock, makeNzbget as _makeNzbgetMock, makeFlood as _makeFloodMock, makeOverseerr as _makeOverseerrMock, makeTautulli as _makeTautulliMock, makeProwlarr as _makeProwlarrMock };

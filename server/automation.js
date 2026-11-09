@@ -33,8 +33,8 @@ export function getConfig() {
     hunting: { ...DEFAULT_CONFIG.hunting, ...(saved.hunting || {}) },
   };
 }
-export function setConfig(partial) {
-  const cur = getConfig();
+// The saved settings with `partial` on top, with every field checked.
+export function normalizeConfig(partial, cur = DEFAULT_CONFIG) {
   const next = {
     queueCleaner: { ...cur.queueCleaner, ...((partial && partial.queueCleaner) || {}) },
     hunting: { ...cur.hunting, ...((partial && partial.hunting) || {}) },
@@ -50,6 +50,10 @@ export function setConfig(partial) {
   next.hunting.intervalMinutes = Math.max(5, Number(next.hunting.intervalMinutes) || 360);
   next.hunting.enabled = !!next.hunting.enabled;
   next.hunting.mode = ['missing', 'cutoff', 'both'].includes(next.hunting.mode) ? next.hunting.mode : 'missing';
+  return next;
+}
+export function setConfig(partial) {
+  const next = normalizeConfig(partial, getConfig());
   store.set(CFG_NS, next);
   return next;
 }

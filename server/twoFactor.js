@@ -84,10 +84,10 @@ export function createSessions(store, { ttlMs, now = () => Date.now() }) {
   const save = (v) => store.set(SESSION_NS, v);
   const prune = (map) => { const t = now(); for (const [id, s] of Object.entries(map)) if (!s || t - s.created > ttlMs) delete map[id]; return map; };
   return {
-    create(user, { ip = '', ua = '', mfa = false } = {}) {
+    create(user, { ip = '', ua = '', mfa = false, verifiedAt = null } = {}) {
       const map = prune(all());
       const id = crypto.randomBytes(18).toString('base64url');
-      map[id] = { user, created: now(), lastSeen: now(), ip: String(ip).slice(0, 64), ua: String(ua).slice(0, 300), mfa: !!mfa };
+      map[id] = { user, created: now(), lastSeen: now(), ip: String(ip).slice(0, 64), ua: String(ua).slice(0, 300), mfa: !!mfa, ...(verifiedAt ? { verifiedAt } : {}) };
       save(map);
       return id;
     },
@@ -98,6 +98,8 @@ export function createSessions(store, { ttlMs, now = () => Date.now() }) {
       if (!s || now() - s.lastSeen < TOUCH_MS) return;
       s.lastSeen = now(); if (ip) s.ip = String(ip).slice(0, 64); save(map);
     },
+    // Set fields on a session (e.g. verifiedAt after "confirm it's you").
+    update(id, patch) { const map = all(); if (!map[id]) return false; Object.assign(map[id], patch); save(map); return true; },
     revoke(id) { const map = all(); if (!map[id]) return false; delete map[id]; save(map); return true; },
     revokeUser(user, { except } = {}) {
       const map = all(); let n = 0;

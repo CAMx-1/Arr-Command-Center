@@ -38,8 +38,10 @@ import { renderCleanup } from './views/cleanup.js';
 import { openDetailModal } from './views/detail.js';
 import { fetchNotifications, getLastSeen, markSeen, notifKind } from './lib/notifications.js';
 import * as push from './lib/push.js';
-import { initAppearance } from './lib/theme.js';
-import { initDensity } from './lib/density.js';
+import { initAppearance, applyTheme, applyAccent } from './lib/theme.js';
+import { initDensity, applyDensity } from './lib/density.js';
+import { isLocalMode } from './lib/connections.js';
+import { startPrefSync, describeNames } from './lib/prefSync.js';
 import { initUpdateBanner } from './lib/updateBanner.js';
 import { dismissNativeKeyboard, finishNativeLaunch, installNativeKeyboardHandling, onNativeAppStateChange, isNativeApp } from './lib/nativeApp.js';
 import { installDeepLinks, refreshQuickActions } from './lib/deepLinks.js';
@@ -445,6 +447,17 @@ function currentHiveSignature() {
   });
 }
 
+// Settings arrived from the account (another browser changed them, or this
+// browser just started syncing): apply the look now and redraw the page.
+let firstRenderDone = false;
+function onPrefsApplied(names, first) {
+  if (names.includes('theme')) applyTheme();
+  if (names.includes('accent')) applyAccent();
+  if (names.includes('acc:density')) applyDensity();
+  if (firstRenderDone && names.some((n) => !['theme', 'accent', 'acc:density'].includes(n))) { _pendingIntent = 'preserve'; navigate(); }
+  if (first) toast(`Using the settings saved to your account: ${describeNames(names)}.`, 'info', 6000);
+}
+
 // Repaint just the connection dots on every rendered hive node (sidebar rail,
 // overflow flyout, bottom-nav hexes, all-services sheet) without rebuilding any
 // layout. Only touches dots that already exist, so appearance is unchanged for
@@ -489,7 +502,7 @@ const QUICK_ACTIONS = {
   bindery: [['library', 'Library'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['calendar', 'Calendar'], ['history', 'History']],
   listenarr: [['library', 'Library'], ['wanted', 'Wanted'], ['queue', 'Queue'], ['history', 'History'], ['add', 'Add audiobook']],
   sabnzbd: [['queue', 'Queue'], ['history', 'History']],
-  tautulli: [['streams', 'Active Streams'], ['history', 'History'], ['stats', 'Statistics'], ['graphs', 'Graphs'], ['transcodes', 'Transcodes']],
+  tautulli: [['streams', 'Active Streams'], ['history', 'History'], ['stats', 'Statistics'], ['graphs', 'Graphs'], ['transcodes', 'Transcodes'], ['recap', 'Year in review']],
   qbittorrent: [['downloading', 'Downloading'], ['completed', 'Completed'], ['seeding', 'Seeding clean-up']],
   transmission: [['active', 'Downloading'], ['completed', 'Completed']],
   deluge: [['active', 'Downloading'], ['completed', 'Completed']],
@@ -502,9 +515,9 @@ const QUICK_ACTIONS = {
   overseerr: [['pending', 'Pending'], ['all', 'All Requests'], ['issues', 'Issues'], ['recent', 'Recently Added'], ['discover', 'Discover']],
   bazarr: [['series', 'Series'], ['movies', 'Movies'], ['wanted', 'Wanted'], ['history', 'History'], ['blacklist', 'Blacklist'], ['providers', 'Providers'], ['system', 'System']],
   prowlarr: [['indexers', 'Indexers'], ['health', 'Health'], ['search', 'Search'], ['history', 'History']],
-  plex: [['watchlist', 'Watchlist'], ['duplicates', 'Duplicates'], ['matches', 'Wrong matches'], ['users', 'Users'], ['friends', 'Friends'], ['sessions', 'Now Playing']],
-  jellyfin: [['libraries', 'Libraries'], ['latest', 'Recently Added'], ['sessions', 'Now Playing'], ['users', 'Users']],
-  emby: [['libraries', 'Libraries'], ['latest', 'Recently Added'], ['sessions', 'Now Playing'], ['users', 'Users']],
+  plex: [['watchlist', 'Watchlist'], ['duplicates', 'Duplicates'], ['matches', 'Wrong matches'], ['missing', 'Missing from Plex'], ['server', 'Server'], ['users', 'Users'], ['friends', 'Friends & sharing'], ['sessions', 'Now Playing']],
+  jellyfin: [['libraries', 'Libraries'], ['latest', 'Recently Added'], ['sessions', 'Now Playing'], ['users', 'Users'], ['matches', 'Wrong matches'], ['transcodes', 'Transcodes']],
+  emby: [['libraries', 'Libraries'], ['latest', 'Recently Added'], ['sessions', 'Now Playing'], ['users', 'Users'], ['matches', 'Wrong matches'], ['transcodes', 'Transcodes']],
   portainer: [['containers', 'Containers'], ['environments', 'Environments']],
   glances: [['overview', 'Overview'], ['sensors', 'Temperatures'], ['containers', 'Containers']],
   syncthing: [['folders', 'Folders'], ['devices', 'Devices']],
@@ -1482,6 +1495,9 @@ async function init() {
   }
   state.services = Object.values(state.config.services || {});
   setDashboardScope(state.config.auth?.user);
+  // Settings that follow you: use the account's saved copy before the first
+  // screen (waits at most 1.5 s for it).
+  if (state.config.auth?.prefsSync && !isLocalMode()) await startPrefSync({ onApplied: onPrefsApplied });
   // Showcase mode: mask hosts/IPs/emails/names on screen for screenshots.
   installShowcase({ names: [state.config.auth?.user].filter(Boolean) });
   // Persist big lists (libraries, profiles, root folders) between launches,
@@ -1507,6 +1523,7 @@ async function init() {
   }
   window.addEventListener('hashchange', navigate);
   await navigate();
+  firstRenderDone = true;
   await finishNativeLaunch();
   // Native app: arrcc:// links and home-screen quick actions (navigation only).
   if (isNativeApp()) {

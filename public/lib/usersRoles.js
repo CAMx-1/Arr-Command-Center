@@ -2,6 +2,7 @@
 // in and their role, and lets an admin add, change or remove users. The server
 // enforces the roles; this card only edits the list.
 import { h, mount, toast, confirmModal } from './ui.js';
+import { api } from './api.js';
 
 export const ROLE_INFO = {
   admin: 'Everything, including settings, services, users and deleting.',
@@ -18,12 +19,8 @@ export function currentRole(config) {
 }
 export const isAdmin = (config) => currentRole(config) === 'admin';
 
-async function call(method, url, body) {
-  const res = await fetch(url, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
-}
+// Through api.js, so role changes can ask "Confirm it's you" first.
+const call = (method, url, body) => (method === 'GET' ? api.getJson(url) : api.sendJson(url, body || {}, method));
 
 function roleSelect(value, onChange, disabled) {
   const sel = h('select', { class: 'input', style: { width: 'auto' }, disabled: disabled ? 'disabled' : null, 'aria-label': 'Role' },
@@ -52,11 +49,11 @@ export function usersRolesCard() {
         h('div', { class: 'row-actions' },
           roleSelect(u.role, async (role, sel) => {
             try { render({ ...data, ...(await call('POST', '/api/users', { id: u.id, role })) }); toast(`${u.id} is now ${role}`, 'success'); }
-            catch (e) { sel.value = u.role; toast(e.message, 'error'); }
+            catch (e) { sel.value = u.role; if (!e.cancelled) toast(e.message, 'error'); }
           }, me),
           fromConfig || me ? null : h('button', { class: 'btn sm danger', onclick: () => confirmModal({
             title: 'Remove user', message: `${u.id} will be signed out and can no longer sign in.`, confirmLabel: 'Remove', danger: true,
-            onConfirm: async () => { try { render({ ...data, ...(await call('DELETE', `/api/users/${encodeURIComponent(u.id)}`)) }); } catch (e) { toast(e.message, 'error'); } },
+            onConfirm: async () => { try { render({ ...data, ...(await call('DELETE', `/api/users/${encodeURIComponent(u.id)}`)) }); } catch (e) { if (!e.cancelled) toast(e.message, 'error'); } },
           }) }, 'Remove'),
         ),
       );
@@ -68,7 +65,7 @@ export function usersRolesCard() {
       const id = idInput.value.trim();
       if (!id) return;
       try { render({ ...data, ...(await call('POST', '/api/users', { id, role: newRole })) }); toast(`Added ${id}`, 'success'); }
-      catch (e) { toast(e.message, 'error'); }
+      catch (e) { if (!e.cancelled) toast(e.message, 'error'); }
     };
     idInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
     mount(card,
@@ -96,7 +93,7 @@ function roleServicesPanel() {
     const state = { user: d.settings.user, guest: d.settings.guest };
     const save = async (role) => {
       try { await call('PUT', '/api/users/services', { [role]: state[role] }); toast(`${role === 'user' ? 'Users' : 'Guests'} now see ${state[role] === null ? 'every service' : `${state[role].length} ${state[role].length === 1 ? 'service' : 'services'}`}`, 'success'); paint(); }
-      catch (e) { toast(e.message, 'error'); }
+      catch (e) { if (!e.cancelled) toast(e.message, 'error'); }
     };
     const col = (role) => {
       const all = state[role] === null;

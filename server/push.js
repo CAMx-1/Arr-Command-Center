@@ -25,8 +25,9 @@ export const CATEGORIES = [
   { id: 'service', label: 'Service down / recovered' },
   { id: 'problem', label: 'Problems (unhealthy containers, disk/pool errors, ad blocking off, sync errors)' },
   { id: 'digest', label: 'Weekly “recently added” digest' },
+  { id: 'security', label: 'Sign-ins from a new device' },
 ];
-const DEFAULT_PREFS = { downloaded: true, failed: true, approval: true, service: true, problem: true, digest: true };
+const DEFAULT_PREFS = { downloaded: true, failed: true, approval: true, service: true, problem: true, digest: true, security: true };
 
 // Which categories are enabled for push (defaults on). Persisted in the store.
 export function getPrefs() {
@@ -74,6 +75,9 @@ function subject() {
   if (isValidSubject(saved)) return saved;
   return 'https://localhost';
 }
+
+// Load the keys again (after restoring a backup of Arr Command Center).
+export function reloadPush() { ready = false; return initPush(); }
 
 // Load an existing VAPID keypair or generate + persist a new one.
 export function initPush() {

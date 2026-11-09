@@ -7,6 +7,8 @@ import { settingsLayout } from '../lib/settingsLayout.js';
 import { webhooksCard } from '../lib/webhooksUI.js';
 import { openSetupWizard } from '../lib/setupWizard.js';
 import { accountSecurityCard } from '../lib/accountSecurity.js';
+import { doctorCard, lastDoctorSummary } from '../lib/setupDoctorUI.js';
+import { compatCard, lastCompatSummary } from '../lib/compatUI.js';
 import { clearPersistedCache } from '../lib/cache.js';
 import { h, mount, clear, spinner, svcIcon, confirmModal, openModal, closeModal, toast, tabs, fmtBytes } from '../lib/ui.js';
 import { api as apiClient } from '../lib/api.js';
@@ -14,6 +16,9 @@ import { SERVICE_META, calendarIcon } from '../app.js';
 import { getTheme, getAccent, applyTheme, applyAccent, ACCENTS, ACCENT_NAMES } from '../lib/theme.js';
 import { globalMode, setGlobalMode } from '../lib/viewMode.js';
 import { getDensity, setDensity, DENSITIES } from '../lib/density.js';
+import { prefSyncCard, prefSyncSummary } from '../lib/prefSyncUI.js';
+import { recapSettingsCard, recapAvailable, recapYear } from '../lib/recapUI.js';
+import { selfBackupCard, selfBackupSummary } from '../lib/selfBackupUI.js';
 import { isHidden, setHidden, orderServices, setOrder, isServicePinned, toggleServicePinned, pinnedServices, movePinnedService, setServicePinned, CALENDAR_PIN, MAX_PINNED_SERVICES } from '../lib/servicePrefs.js';
 import { getNativeAppInfo, connectedServerOrigin, changeServer, reloadInterface, isNativeApp, saveLocalFallbackSnapshot, loadLocalFallbackSnapshot, persistAppMode } from '../lib/nativeApp.js';
 import { createLocalFallbackSnapshot, applyLocalFallbackSnapshot, fallbackMetadata, applyLocalFallbackSnapshotSecure } from '../lib/fallbackSync.js';
@@ -123,6 +128,7 @@ export async function renderSettings(root, ctx) {
         svc.hasCloudflareAccess ? h('span', { class: 'pill info' }, 'Cloudflare Access') : h('span', { class: 'pill muted' }, 'No CF Access'),
         svc.hasCustomHeaders ? h('span', { class: 'pill info' }, 'Custom headers') : null,
         svc.embed ? h('span', { class: 'pill muted' }, 'Embedded') : null,
+        svc.savedHere ? h('span', { class: 'pill muted', title: 'Added or changed here while config.json was read-only; kept in data/services.json' }, 'Saved in data folder') : null,
         hidden ? h('span', { class: 'pill muted' }, 'Hidden from nav') : null,
       ),
       h('div', { class: 'meta-line svc-controls', style: { marginTop: '10px' } },
@@ -173,6 +179,8 @@ export async function renderSettings(root, ctx) {
       h('div', { class: 'dim', style: { fontSize: '13px', flex: '1' } }, (localMode ? 'Manage local connections under “Connection”. Drag a service card to reorder it, or Hide it from the sidebar and Home.' : 'Drag a service card to reorder it, or Hide it from the sidebar and Home.')),
       (localMode || !admin) ? null : h('button', { class: 'btn sm hex-btn', onclick: () => openSetupWizard(ctx) }, 'Find services'),
       (cfg.mock || localMode || !admin) ? null : h('button', { class: 'btn sm primary hex-btn', onclick: () => openServiceForm(root, ctx, null, null) }, '+ Add service')),
+    cfg.serviceStorage === 'data' ? h('p', { class: 'dim settings-copy', style: { margin: '0 0 12px' } }, 'config.json is read-only here (as in the Docker setup), so services you add, change or remove are saved in data/services.json. Those changes take priority over config.json.') : null,
+    cfg.serviceStorage === null && admin && !localMode ? h('p', { class: 'dim settings-copy', style: { margin: '0 0 12px' } }, 'Services can’t be saved from here: neither config.json nor the data folder can be written. Edit config.json and restart.') : null,
     h('div', { class: 'grid cols-2' }, ...serviceCards),
   ];
 
@@ -180,6 +188,8 @@ export async function renderSettings(root, ctx) {
   // and the existing card(s) as its body. Old anchor ids stay as aliases.
   const sections = [
     { id: 'appearance', tab: 'you', title: 'Appearance', nodes: [appearanceCard(root, ctx)], summary: `${cap(getTheme())} · ${cap(getAccent())} · ${cap(getDensity())}`, keywords: ['theme', 'dark', 'accent', 'colour', 'color', 'density', 'view mode'], aliases: ['settings-appearance'] },
+    recapAvailable(state) ? { id: 'recap', tab: 'you', title: 'Year in review', nodes: [recapSettingsCard(ctx)], summary: `${recapYear()}`, keywords: ['tautulli', 'wrapped', 'recap', 'stats', 'hours watched', 'top shows'] } : null,
+    localMode ? null : { id: 'sync', tab: 'you', title: 'Settings on every device', nodes: [prefSyncCard()], summary: () => prefSyncSummary(), keywords: ['sync', 'devices', 'account', 'follow', 'theme', 'pinned', 'workspaces'] },
     localMode ? null : { id: 'security', tab: 'you', title: 'Sign-in & security', nodes: [accountSecurityCard()], summary: () => fetchJson('/api/account').then((d) => (!d.plexAuth ? '' : `${d.twoFactor.enabled ? 'Two-factor on' : d.twoFactor.canEnroll ? 'Two-factor off' : ''}${d.twoFactor.canEnroll ? ' · ' : ''}${d.sessions.length} signed in`)), keywords: ['2fa', 'two-factor', 'totp', 'authenticator', 'sessions', 'sign out', 'devices', 'security'] },
     { id: 'favorites', tab: 'you', title: 'Favorites & navigation', nodes: [favoriteNavigationCard(ctx)], summary: pinned ? `${pinned} in the bottom bar` : '', keywords: ['bottom bar', 'sidebar', 'pin'], aliases: ['settings-favorites'] },
     { id: 'quick-add', tab: 'you', title: 'Quick Add', nodes: [quickAddSettingsCard(state)], summary: arrCount ? `Defaults for ${arrCount} ${arrCount === 1 ? 'app' : 'apps'}` : '', keywords: ['add', 'profile', 'root folder', 'monitor'], aliases: ['settings-quick-add'] },
@@ -193,6 +203,8 @@ export async function renderSettings(root, ctx) {
 
     { id: 'services', tab: 'services', title: 'Services', nodes: servicesNodes, summary: `${state.services.length} connected`, badge: offline, badgeLabel: 'offline', keywords: ['api key', 'url', 'sonarr', 'radarr', 'add service', 'hide'], aliases: ['settings-services'] },
     { id: 'connection', tab: 'services', title: 'Connection', nodes: [connectionModeCard(root, ctx)], summary: localMode ? 'Local only' : 'Through the server', keywords: ['local', 'server', 'mode', 'fallback'], aliases: ['settings-connection'] },
+    (!localMode && admin) ? { id: 'compat', tab: 'services', title: 'Check compatibility', nodes: [compatCard()], summary: () => lastCompatSummary(), keywords: ['compatibility', 'versions', 'check', 'which tools', 'works with'] } : null,
+    (!localMode && admin) ? { id: 'doctor', tab: 'services', title: 'Setup doctor', nodes: [doctorCard(ctx)], summary: () => lastDoctorSummary(), keywords: ['doctor', 'check', 'remote path mapping', 'hardlink', 'hard link', 'category', 'prowlarr sync', 'root folder', 'problems'] } : null,
     (!localMode && admin) ? { id: 'webhooks', tab: 'services', title: 'Instant updates (webhooks)', nodes: [webhooksCard()], summary: () => fetchJson('/api/webhooks').then((d) => { const on = d.hooks.filter((x) => x.lastAt).length; return d.hooks.length ? `${on} of ${d.hooks.length} apps sending` : ''; }), keywords: ['webhook', 'instant', 'connect', 'push'] } : null,
     admin ? { id: 'links', tab: 'services', title: 'Custom links', nodes: [localMode ? serverOnlyCard('Custom Links') : h('div', { class: 'card', id: 'links-admin' }, h('div', { class: 'dim' }, 'Loading…'))], summary: '', keywords: ['bookmarks', 'organizr'] } : null,
 
@@ -207,6 +219,7 @@ export async function renderSettings(root, ctx) {
     { id: 'tools', tab: 'system', title: 'Tools', nodes: [toolsCard(ctx)], summary: 'Cleanup, Calendar', keywords: ['cleanup', 'calendar'], aliases: ['settings-tools'] },
     { id: 'sysmon', tab: 'system', title: 'System monitor', nodes: [localMode ? serverOnlyCard('The system monitor') : systemMonitorCard(root, ctx)], summary: '', keywords: ['cpu', 'memory', 'disks'] },
     admin ? { id: 'diagnostics', tab: 'system', title: 'Server diagnostics', nodes: [localMode ? serverOnlyCard('Server diagnostics') : h('div', { class: 'card', id: 'diag-panel' }, h('div', { class: 'dim' }, 'Loading diagnostics…'))], summary: '', keywords: ['debug', 'logs', 'report'], aliases: ['settings-diagnostics'] } : null,
+    (!localMode && admin) ? { id: 'self-backup', tab: 'system', title: 'Back up Arr Command Center', nodes: [selfBackupCard()], summary: () => selfBackupSummary(), keywords: ['backup', 'restore', 'export', 'import', 'move', 'migrate', 'new server', 'passphrase'] } : null,
     { id: 'about', tab: 'system', title: 'About', nodes: [note], summary: 'Configuration', keywords: ['config.json', 'version'] },
   ].filter(Boolean);
 
@@ -476,7 +489,10 @@ async function hydrateLoginLog(ctx) {
       h('div', { class: 'row-title', style: { fontSize: '14px' } }, e.user),
       h('div', { class: 'meta-line', style: { marginTop: '2px' } },
         h('span', { class: 'dim' }, new Date(e.at).toLocaleString()),
+        e.device ? h('span', {}, e.device) : null,
         e.ip ? h('span', { class: 'pill muted' }, e.ip) : null,
+        e.mfa ? h('span', { class: 'pill muted' }, 'two-factor') : null,
+        e.newDevice ? h('span', { class: 'pill warn' }, 'new browser') : null,
       ),
     ),
   ))));

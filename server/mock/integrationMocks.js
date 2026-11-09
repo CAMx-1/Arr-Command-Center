@@ -432,7 +432,9 @@ export function makeSpeedtest({ now = Date.now() } = {}) {
 // ---------------------------------------------------------- Plex Media Server
 // Library sections, items with Guid ids and file paths, Fix Match search and
 // match, and metadata refresh. 1917 and Foundation start matched to the wrong
-// title, for the "wrong matches" demo.
+// title, for the "wrong matches" demo. Oppenheimer and 8 episodes of The Bear
+// are on disk but not in the library until that folder (or library) is
+// scanned, for "missing from Plex".
 export function makePlex() {
   const app = express();
   app.use((req, res, next) => (req.path === '/identity' || req.headers['x-plex-token'] === MOCK_KEY || req.query['X-Plex-Token'] === MOCK_KEY ? next() : res.status(401).send('Unauthorized')));
@@ -442,23 +444,51 @@ export function makePlex() {
     1: [
       { ratingKey: '11', type: 'movie', title: 'Dune: Part Two', year: 2024, Guid: guids(693134), Media: [{ Part: [{ file: 'C:\\Media\\Movies\\Dune Part Two (2024)\\Dune.Part.Two.mkv' }] }] },
       { ratingKey: '15', type: 'movie', title: '1917', year: 1917, Guid: guids(41372), Media: [{ Part: [{ file: 'C:\\Media\\Movies\\1917 (2019)\\1917.mkv' }] }] },
-      { ratingKey: '10', type: 'movie', title: 'Oppenheimer', year: 2023, Guid: guids(872585), Media: [{ Part: [{ file: 'C:\\Media\\Movies2\\Oppenheimer (2023)\\Oppenheimer.2023.1080p.mkv' }] }] },
     ],
     2: [
-      { ratingKey: '20', type: 'show', title: 'Severance', year: 2022, Guid: guids(95396, 371980), Location: [{ path: 'C:\\Media\\TV\\Severance' }] },
-      { ratingKey: '30', type: 'show', title: 'Foundation', year: 1951, Guid: guids(null, 79420), Location: [{ path: 'C:\\Media\\TV\\Foundation' }] },
-      { ratingKey: '40', type: 'show', title: 'The Bear', year: 2022, Guid: guids(136315, 388477), Location: [{ path: 'C:\\Media\\TV\\The Bear' }] },
+      { ratingKey: '20', type: 'show', title: 'Severance', year: 2022, leafCount: 18, Guid: guids(95396, 371980), Location: [{ path: 'C:\\Media\\TV\\Severance' }] },
+      { ratingKey: '30', type: 'show', title: 'Foundation', year: 1951, leafCount: 20, Guid: guids(null, 79420), Location: [{ path: 'C:\\Media\\TV\\Foundation' }] },
+      { ratingKey: '40', type: 'show', title: 'The Bear', year: 2022, leafCount: 20, Guid: guids(136315, 388477), Location: [{ path: 'C:\\Media\\TV\\The Bear' }] },
     ],
   };
+  // On disk, waiting for a scan: [section, folder, what the scan does].
+  const onDisk = [
+    ['1', 'C:\\Media\\Movies2\\Oppenheimer (2023)', () => items[1].push({ ratingKey: '10', type: 'movie', title: 'Oppenheimer', year: 2023, Guid: guids(872585), Media: [{ Part: [{ file: 'C:\\Media\\Movies2\\Oppenheimer (2023)\\Oppenheimer.2023.1080p.mkv' }] }] })],
+    ['2', 'C:\\Media\\TV\\The Bear', () => { items[2].find((x) => x.ratingKey === '40').leafCount = 28; }],
+  ];
+  const scans = [];
+  app.locals.scans = scans;
+  const hourAgo = Math.floor(Date.now() / 1000) - 3600;
+  const SECTIONS = [
+    { key: '1', type: 'movie', title: 'Movies', scannedAt: hourAgo, refreshing: false, Location: [{ id: 1, path: 'C:\\Media\\Movies' }, { id: 2, path: 'C:\\Media\\Movies2' }] },
+    { key: '2', type: 'show', title: 'TV Shows', scannedAt: hourAgo - 7200, refreshing: false, Location: [{ id: 3, path: 'C:\\Media\\TV' }] },
+  ];
+  const emptied = [];
+  app.locals.emptied = emptied;
+  app.put('/library/sections/:id/emptyTrash', (req, res) => { if (!SECTIONS.some((x) => x.key === req.params.id)) return res.status(404).send('Not found'); emptied.push(req.params.id); res.send(''); });
+  app.get('/', (req, res) => res.json(mc({ friendlyName: 'Demo Plex', machineIdentifier: 'mock-plex', version: '1.41.0.8992', platform: 'Linux', platformVersion: '6.8', myPlexUsername: 'demo-owner' })));
+  app.get('/library/sections/:id/refresh', (req, res) => {
+    if (!SECTIONS.some((x) => x.key === req.params.id)) return res.status(404).send('Not found');
+    const path = req.query.path ? String(req.query.path) : null;
+    scans.push({ section: req.params.id, path, force: req.query.force === '1' });
+    const sec = SECTIONS.find((x) => x.key === req.params.id); sec.scannedAt = Math.floor(Date.now() / 1000);
+    const low = (x) => x.toLowerCase().replace(/\\/g, '/');
+    for (let i = onDisk.length - 1; i >= 0; i--) {
+      const [sec, folder, add] = onDisk[i];
+      if (sec === req.params.id && (!path || low(folder) === low(path) || low(folder).startsWith(`${low(path)}/`))) { add(); onDisk.splice(i, 1); }
+    }
+    res.send('');
+  });
   const all = () => [...items[1], ...items[2]];
   const find = (rk) => all().find((x) => x.ratingKey === String(rk));
   const CANDIDATES = {
     15: [{ guid: 'plex://movie/1917-2019', name: '1917', year: 2019, score: 100, tmdb: 530915 }, { guid: 'plex://movie/1917-1917', name: '1917', year: 1917, score: 82, tmdb: 41372 }],
     30: [{ guid: 'plex://show/foundation-2021', name: 'Foundation', year: 2021, score: 98, tvdb: 358711 }, { guid: 'plex://show/foundation-1951', name: 'Foundation', year: 1951, score: 80, tvdb: 79420 }],
   };
-  app.get('/library/sections', (req, res) => res.json(mc({ Directory: [{ key: '1', type: 'movie', title: 'Movies' }, { key: '2', type: 'show', title: 'TV Shows' }] })));
+  app.get('/library/sections', (req, res) => res.json(mc({ Directory: SECTIONS })));
   app.get('/library/sections/:id/all', (req, res) => {
     if (req.query.duplicate) return res.json(mc({ Metadata: [] }));
+    if (req.query['X-Plex-Container-Size'] === '0') return res.json(mc({ size: 0, totalSize: (items[req.params.id] || []).length }));
     res.json(mc({ Metadata: (items[req.params.id] || []).map((x) => (req.query.includeGuids === '1' ? x : { ...x, Guid: undefined })) }));
   });
   app.get('/library/metadata/:rk/matches', (req, res) => {
@@ -474,5 +504,43 @@ export function makePlex() {
   });
   app.put('/library/metadata/:rk/refresh', (req, res) => (find(req.params.rk) ? res.send('') : res.status(404).send('Not found')));
   app.get('/identity', (req, res) => res.json(mc({ machineIdentifier: 'mock-plex', version: '1.41.0' })));
+
+  // plex.tv, for the demo's Users, Friends and sharing (cfg.plexTvBase points
+  // here). XML like the real /api/users and /api/servers/… calls.
+  const TV_SECTIONS = [{ id: '501', key: '1', title: 'Movies', type: 'movie' }, { id: '502', key: '2', title: 'TV Shows', type: 'show' }];
+  const people = [
+    { id: '1001', title: 'Sam Rivera', username: 'samr', email: 'sam@example.test', home: '0', restricted: '0', share: { id: '9001', libs: ['501', '502'], pending: '0' } },
+    { id: '1002', title: 'Kids', username: '', email: '', home: '1', restricted: '1', share: { id: '9002', libs: ['502'], pending: '0' } },
+    { id: '1003', title: 'Alex Chen', username: 'alexc', email: 'alex@example.test', home: '0', restricted: '0', share: null },
+  ];
+  app.locals.people = people;
+  let nextShare = 9100; let nextUser = 1100;
+  const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  const tag = (name, attrs, inner = '') => `<${name} ${Object.entries(attrs).map(([k, v]) => `${k}="${esc(v)}"`).join(' ')}${inner ? `>${inner}</${name}>` : '/>'}`;
+  const xml = (res, body) => res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<MediaContainer>${body}</MediaContainer>`);
+  const tv = express.Router();
+  tv.use(express.json());
+  tv.get('/api/v2/home/users', (req, res) => res.json({ users: [{ id: 1, title: 'demo-owner', email: 'owner@example.test', admin: true }, { id: 1002, title: 'Kids', restricted: true }] }));
+  tv.get('/api/users', (req, res) => xml(res, people.map((p) => tag('User', { id: p.id, title: p.title, username: p.username, email: p.email, home: p.home, restricted: p.restricted },
+    p.share ? tag('Server', { id: p.share.id, serverId: '77', machineIdentifier: 'mock-plex', name: 'Demo Plex', numLibraries: p.share.libs.length, allLibraries: p.share.libs.length === TV_SECTIONS.length ? '1' : '0', owned: '0', pending: p.share.pending }) : '')).join('')));
+  tv.get('/api/servers/mock-plex', (req, res) => xml(res, tag('Server', { name: 'Demo Plex', machineIdentifier: 'mock-plex', owned: '1' }, TV_SECTIONS.map((x) => tag('Section', x)).join(''))));
+  const byShare = (id) => people.find((p) => p.share && p.share.id === String(id));
+  tv.get('/api/servers/mock-plex/shared_servers/:id', (req, res) => {
+    const p = byShare(req.params.id); if (!p) return res.status(404).type('application/xml').send('<errors><error>Not Found</error></errors>');
+    xml(res, tag('SharedServer', { id: p.share.id, username: p.username, email: p.email, userID: p.id }, TV_SECTIONS.map((x) => tag('Section', { ...x, shared: p.share.libs.includes(x.id) ? '1' : '0' })).join('')));
+  });
+  const libIds = (b) => ((b.shared_server || {}).library_section_ids || []).map(String).filter((x) => TV_SECTIONS.some((t) => t.id === x));
+  tv.post('/api/servers/mock-plex/shared_servers', (req, res) => {
+    const ss = (req.body || {}).shared_server || {}; const libs = libIds(req.body || {});
+    if (!libs.length) return res.status(400).type('application/xml').send('<errors><error>Please select at least one library</error></errors>');
+    let p = ss.invited_id != null ? people.find((x) => x.id === String(ss.invited_id)) : people.find((x) => [x.username, x.email].includes(String(ss.invited_email || '').toLowerCase()));
+    if (p && p.share) return res.status(422).type('application/xml').send('<errors><error>This user already has access to this server</error></errors>');
+    if (!p) { const email = String(ss.invited_email || ''); p = { id: String(++nextUser), title: email, username: email.includes('@') ? '' : email, email: email.includes('@') ? email : '', home: '0', restricted: '0', share: null }; people.push(p); }
+    p.share = { id: String(++nextShare), libs, pending: '1' };
+    xml(res, tag('SharedServer', { id: p.share.id, invitedEmail: ss.invited_email || '' }));
+  });
+  tv.put('/api/servers/mock-plex/shared_servers/:id', (req, res) => { const p = byShare(req.params.id); if (!p) return res.status(404).send(''); const libs = libIds(req.body || {}); if (!libs.length) return res.status(400).send(''); p.share.libs = libs; xml(res, ''); });
+  tv.delete('/api/servers/mock-plex/shared_servers/:id', (req, res) => { const p = byShare(req.params.id); if (!p) return res.status(404).send(''); p.share = null; res.send(''); });
+  app.use('/__plextv', tv);
   return app;
 }

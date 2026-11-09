@@ -1,5 +1,6 @@
-// Settings → Notifications → Channels: ntfy, Gotify, Discord, Telegram and
-// webhook targets the server sends alerts to (alongside browser push). Works
+// Settings → Notifications → Channels: ntfy, Gotify, Discord, Telegram,
+// webhook, email, Pushover, Slack, Matrix and Apprise targets the server sends
+// alerts to (alongside browser push). Works
 // for the native iOS app too: install the ntfy app and subscribe to a topic.
 // Secrets come back masked from the server; leaving a masked field unchanged
 // keeps the stored value.
@@ -12,13 +13,24 @@ const TYPE_INFO = {
   discord: { label: 'Discord', hint: 'Channel → Edit → Integrations → Webhooks → New webhook → Copy URL.' },
   telegram: { label: 'Telegram', hint: 'Create a bot with @BotFather for the token; message the bot, then use your chat id (e.g. from @userinfobot).' },
   webhook: { label: 'Webhook', hint: 'POSTs JSON { title, body, url, category, at } to your URL (Home Assistant, n8n, …).' },
+  email: { label: 'Email', hint: 'Sends through your mail provider’s SMTP server. Gmail and iCloud need an app password (not your normal one): Gmail → Google Account → Security → App passwords; iCloud → Apple ID → Sign-In and Security → App-Specific Passwords.' },
+  pushover: { label: 'Pushover', hint: 'Create an application at pushover.net → Your Applications for the token; your user key is on the pushover.net dashboard.' },
+  slack: { label: 'Slack', hint: 'Slack → Apps → Incoming Webhooks → Add to a channel → copy the Webhook URL. Slack-compatible webhooks (Mattermost, Rocket.Chat) work too.' },
+  matrix: { label: 'Matrix', hint: 'Use a separate account for the bot, invite it to the room, and get its access token (Element: Settings → Help & About → Access Token). The room id is in the room’s settings → Advanced. In an encrypted room, these messages show as unencrypted.' },
+  apprise: { label: 'Apprise', hint: 'An Apprise API server (caronc/apprise) reaches 100+ services. Give the key of a configuration saved in Apprise (optionally a tag), or Apprise URLs to send to directly.' },
 };
+const SECURITY = [['starttls', 'STARTTLS (usually port 587)'], ['tls', 'SSL/TLS (usually port 465)'], ['none', 'None (port 25, a local relay only)']];
 const FIELDS = {
   ntfy: [['server', 'Server', 'https://ntfy.sh'], ['topic', 'Topic', 'arr-alerts-x7k2'], ['token', 'Access token (optional)', '', true], ['username', 'Username (optional)', ''], ['password', 'Password (optional)', '', true], ['priority', 'Priority (1–5)', '3']],
   gotify: [['server', 'Server', 'https://gotify.example.com'], ['token', 'App token', '', true], ['priority', 'Priority (0–10)', '5']],
   discord: [['webhookUrl', 'Webhook URL', 'https://discord.com/api/webhooks/…', true]],
   telegram: [['botToken', 'Bot token', '123456:ABC…', true], ['chatId', 'Chat id', '-1001234567890']],
   webhook: [['url', 'URL', 'https://hooks.example.com/arr', true], ['authHeader', 'Authorization header (optional)', 'Bearer …', true]],
+  email: [['host', 'SMTP server', 'smtp.gmail.com'], ['security', 'Encryption', '', false, SECURITY], ['port', 'Port (blank = usual for the encryption)', '587'], ['username', 'Username', 'you@gmail.com'], ['password', 'Password or app password', '', true], ['from', 'From address', 'you@gmail.com'], ['to', 'Send to (commas between addresses)', 'you@gmail.com']],
+  pushover: [['appToken', 'Application token', '', true], ['userKey', 'User or group key', '', true], ['device', 'Device (optional)', 'iphone'], ['priority', 'Priority (-2 quiet … 1 high)', '0']],
+  slack: [['webhookUrl', 'Webhook URL', 'https://hooks.slack.com/services/…', true]],
+  matrix: [['homeserver', 'Homeserver', 'https://matrix.org'], ['roomId', 'Room id', '!abc123:matrix.org'], ['accessToken', 'Bot access token', '', true]],
+  apprise: [['server', 'Apprise API server', 'http://apprise:8000'], ['key', 'Configuration key (optional)', 'arr'], ['tag', 'Tag (optional, with a key)', 'all'], ['urls', 'Apprise URLs (optional, instead of a key)', 'pover://user@token', true]],
 };
 
 async function call(method, url, body) {
@@ -61,15 +73,17 @@ export function channelsCard() {
     const addSel = h('select', { class: 'input', 'aria-label': 'Channel type' }, ...Object.entries(TYPE_INFO).map(([k, v]) => h('option', { value: k }, v.label)));
     mount(card,
       h('h3', {}, 'Notification channels'),
-      h('p', { class: 'dim settings-copy' }, 'Also send alerts to ntfy, Gotify, Discord, Telegram or a webhook. On iPhone, the free ntfy app gives the native app real push notifications.'),
+      h('p', { class: 'dim settings-copy' }, 'Also send alerts to ntfy, Gotify, Discord, Telegram, Slack, Matrix, Pushover, email, Apprise (100+ more services) or a webhook. On iPhone, the free ntfy app gives the native app real push notifications.'),
       rows.length ? h('div', { class: 'notify-channel-list' }, ...rows) : h('div', { class: 'dim', style: { margin: '6px 0 10px' } }, 'No channels yet.'),
       h('div', { class: 'notify-channel-add' }, addSel, h('button', { class: 'btn sm primary', type: 'button', onclick: () => openEditor({ type: addSel.value, enabled: true, categories: [] }) }, '+ Add channel')));
 
     function openEditor(c) {
       const isNew = !c.id;
       const inputs = {};
-      const fields = FIELDS[c.type].map(([key, label, ph, secret]) => {
-        const el = h('input', { class: 'input', type: secret ? 'password' : 'text', autocomplete: 'off', spellcheck: 'false', placeholder: ph, value: c[key] != null ? String(c[key]) : (key === 'server' && c.type === 'ntfy' ? 'https://ntfy.sh' : '') });
+      const fields = FIELDS[c.type].map(([key, label, ph, secret, options]) => {
+        const el = options
+          ? h('select', { class: 'input' }, ...options.map(([v, t]) => h('option', { value: v, selected: (c[key] || options[0][0]) === v ? 'selected' : null }, t)))
+          : h('input', { class: 'input', type: secret ? 'password' : 'text', autocomplete: 'off', spellcheck: 'false', placeholder: ph, value: c[key] != null ? String(c[key]) : (key === 'server' && c.type === 'ntfy' ? 'https://ntfy.sh' : '') });
         if (secret && c[key] === MASK) el.placeholder = 'Saved — leave blank to keep';
         if (secret && c[key] === MASK) el.value = '';
         inputs[key] = el;

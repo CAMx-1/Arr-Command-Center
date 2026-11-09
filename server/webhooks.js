@@ -6,19 +6,23 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 
 export const NS = 'webhooks';
-export const HOOK_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'whisparr', 'prowlarr', 'overseerr', 'tautulli'];
+export const HOOK_TYPES = ['sonarr', 'radarr', 'lidarr', 'readarr', 'whisparr', 'prowlarr', 'overseerr', 'tautulli', 'sabnzbd', 'qbittorrent'];
 const ARR = new Set(['sonarr', 'radarr', 'lidarr', 'readarr', 'whisparr', 'prowlarr']);
 const newToken = () => randomBytes(24).toString('base64url');
 
-// What happened, in a few words, from each app's payload.
-export function eventName(type, body) {
+// What happened, in a few words, from each app's payload. SABnzbd sends
+// through Apprise's JSON format ({ title, message, type }); qBittorrent runs a
+// command with ?event= in the address (no torrent details, see below).
+export function eventName(type, body, query = {}) {
   const b = body && typeof body === 'object' ? body : {};
+  if (type === 'sabnzbd') return String(b.title || b.type || 'event').slice(0, 40);
+  if (type === 'qbittorrent') return /^(added|finished|test)$/.test(String(query.event || '')) ? String(query.event) : 'event';
   if (ARR.has(type)) return String(b.eventType || 'event').slice(0, 40);
   if (type === 'overseerr') return String(b.notification_type || b.event || 'event').slice(0, 40);
   if (type === 'tautulli') return String(b.event || b.action || 'event').slice(0, 40);
   return 'event';
 }
-export const isTest = (name) => /^(test|test_notification)$/i.test(name);
+export const isTest = (name) => /^(test|test_notification)$/i.test(name) || /^(sabnzbd: )?test(ing)? notification/i.test(name);
 
 export function createWebhooks({ cfg, store, onEvent = () => {}, now = () => Date.now() }) {
   const read = () => store.get(NS, {}) || {};
@@ -43,7 +47,7 @@ export function createWebhooks({ cfg, store, onEvent = () => {}, now = () => Dat
     const key = req.params.key;
     const svc = (cfg.services || {})[key];
     if (!svc || !HOOK_TYPES.includes(svc.type) || !check(key, req.params.token)) return res.status(404).json({ error: 'Not found' });
-    const name = eventName(svc.type, req.body);
+    const name = eventName(svc.type, req.body, req.query);
     const all = read();
     all[key] = { ...all[key], lastAt: new Date(now()).toISOString(), lastEvent: name, count: (Number((all[key] || {}).count) || 0) + 1 };
     write(all);
@@ -56,6 +60,36 @@ export function createWebhooks({ cfg, store, onEvent = () => {}, now = () => Dat
     return services().map(([key, s]) => ({ key, label: s.label || key, type: s.type, path: `/api/hooks/${encodeURIComponent(key)}/${tokenFor(key)}`, lastAt: (all[key] || {}).lastAt || null, lastEvent: (all[key] || {}).lastEvent || null, count: (all[key] || {}).count || 0 }));
   }
   return { receive, list, rotate, tokenFor, check };
+}
+
+// qBittorrent: the "run external program" command that calls the hook. It
+// passes no torrent details: qBittorrent puts %N (name) etc. into the command
+// as text, which a crafted torrent name could use to run its own commands.
+export function qbitCommand(url, event) {
+  const u = `${url}?event=${event}`;
+  return `curl -fsS -m 10 -X POST "${u}"`;
+}
+export const qbitCommandWget = (url, event) => `wget -q -O /dev/null --post-data= "${url}?event=${event}"`;
+// Apprise address SABnzbd calls: json:// for http, jsons:// for https.
+export function appriseUrl(url) {
+  const u = new URL(url);
+  return `${u.protocol === 'https:' ? 'jsons' : 'json'}://${u.host}${u.pathname}`;
+}
+// The qBittorrent settings to change for our command: only the empty slots
+// (or ones already ours), so another program (an unrar script) is never
+// replaced. Returns { set: { … }, busy: ['finished' | 'added'] }.
+export function qbitPrefsPlan(prefs, url) {
+  const ours = (v) => typeof v === 'string' && v.includes('/api/hooks/');
+  const set = {}; const busy = [];
+  const slot = (enabledKey, programKey, event) => {
+    if (!(programKey in (prefs || {}))) return; // this version doesn't have it
+    const cur = String(prefs[programKey] || '').trim();
+    if (cur && !ours(cur) && prefs[enabledKey]) { busy.push(event); return; }
+    set[enabledKey] = true; set[programKey] = qbitCommand(url, event);
+  };
+  slot('autorun_enabled', 'autorun_program', 'finished');
+  slot('autorun_on_torrent_added_enabled', 'autorun_on_torrent_added_program', 'added');
+  return { set, busy };
 }
 
 // Debounce so a burst of events (a season pack) triggers one notification poll.

@@ -73,7 +73,9 @@ export function createMockFs(tree, { disks = [] } = {}) {
       const used = new Set(getItems().map((it) => norm(it.path).toLowerCase()));
       const unmapped = accessible ? (children(r.path) || []).filter((c) => c.type === 'folder' && !used.has(norm(c.path).toLowerCase()))
         .map((c) => ({ name: c.name, path: norm(c.path), relativePath: c.name })) : [];
-      return { ...r, accessible, freeSpace: accessible ? r.freeSpace || 1099511627776 : 0, unmappedFolders: unmapped };
+      // Like the real apps: the free space of the disk the folder is on.
+      const disk = disks.filter((d) => { const dp = norm(d.path); const rp = norm(r.path); return dp === '/' ? rp.startsWith('/') : rp === dp || rp.startsWith(`${dp}/`); }).sort((a, b) => norm(b.path).length - norm(a.path).length)[0];
+      return { ...r, accessible, freeSpace: accessible ? r.freeSpace || (disk ? disk.freeSpace : 1099511627776) : 0, unmappedFolders: unmapped };
     };
     app.get(`${prefix}/rootfolder`, (req, res) => res.json(rootFolders().map(rootView)));
     app.post(`${prefix}/rootfolder`, (req, res) => {
@@ -107,7 +109,7 @@ export function sonarrDemoFs() {
       Media: { TV: { Severance: { 'Season 1': Object.fromEntries([1, 2, 3, 4].map((e) => [`Severance.S01E0${e}.1080p.WEB-DL.mkv`, { __file: true }])) }, 'The Bear': {}, 'Shogun (2024)': {} } },
       Archive: { TV: { Foundation: {} }, TV2: { Severance: { 'Season 1': Object.fromEntries([1, 2, 3].map((e) => [`Severance.S01E0${e}.2160p.UHD.BluRay.mkv`, { __file: true }])), 'Season 2': { 'Severance.S02E10.2160p.WEB.mkv': { __file: true } } } } },
     },
-    config: { logs: {} }, proc: {}, data: { tv: {} },
+    config: { logs: {} }, proc: {}, data: { tv: {}, usenet: { tv: {} } },
   }, { disks: [
     { path: '/', label: 'Macintosh HD', freeSpace: 312e9, totalSpace: 994e9 },
     { path: '/Volumes/Media', label: 'Media', freeSpace: 1.2e12, totalSpace: 8e12 },
@@ -129,9 +131,9 @@ export function radarrDemoFs() {
     Volumes: {
       Movies: { 'Dune Part Two (2024)': { 'Dune.Part.Two.mkv': { __file: true } }, '1917.2019.PROPER.1080p.BluRay.x265': { '1917.mkv': { __file: true } } },
       Movies2: { 'Oppenheimer (2023)': {}, 'Dune Part Two (2024)': { 'Dune.Part.Two.2024.2160p.UHD.BluRay.mkv': { __file: true } } },
-      Movies3: { 'Furiosa.A.Mad.Max.Saga.2024.2160p.UHD.BluRay': { 'Furiosa.2024.2160p.mkv': { __file: true } }, 'Furiosa (2024) extras': { 'notes.txt': { __file: true } } },
+      Movies3: { 'Furiosa.A.Mad.Max.Saga.2024.2160p.UHD.BluRay': { 'Furiosa.2024.2160p.mkv': { __file: true } }, 'Furiosa (2024) extras': { 'notes.txt': { __file: true } }, downloads: { movies: {} } },
     },
-    config: {}, data: { movies: {} },
+    config: {}, data: { movies: {}, usenet: { movies: {} } },
   }, { disks: [
     { path: '/', label: 'Macintosh HD', freeSpace: 312e9, totalSpace: 994e9 },
     { path: '/Volumes/Movies', label: 'Movies', freeSpace: 0.8e12, totalSpace: 6e12 },

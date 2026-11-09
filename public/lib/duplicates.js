@@ -160,7 +160,7 @@ async function scanInto(body, arr, ctx, kind) {
         let ok = 0; const failed = [];
         for (const p of plan) {
           try { await arr.del(`${itemsPath}/${p.id}?deleteFiles=${p.deleteFiles}&addImportListExclusion=${opts.exclude}`); ok += 1; }
-          catch (e) { failed.push(`${p.path}: ${e.message}`); }
+          catch (e) { if (e.cancelled) break; failed.push(`${p.path}: ${e.message}`); }
           status.textContent = `Deleting… ${ok + failed.length}/${plan.length}`;
         }
         invalidate(`arr:${ctx.service.key}:${itemsPath}`);

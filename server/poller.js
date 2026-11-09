@@ -18,6 +18,7 @@ import * as push from './push.js';
 import * as channels from './channels.js';
 import { serviceGet } from './proxy.js';
 import { integrationEvents, setPiholeFetcher } from './integrationEvents.js';
+import { diskAlertEvents } from './diskForecast.js';
 import { piholeGet } from './proxy.js';
 setPiholeFetcher(piholeGet);
 
@@ -75,6 +76,8 @@ export async function collectEvents(cfg) {
       else events.push(...await integrationEvents(key, svc, { allowInsecureTruenas: !!(cfg.mock && svc.demoAllowInsecure) }));
     } catch { /* ignore per-service failures; other services still poll */ }
   }));
+  // Disks forecast to fill within a month (from stored daily readings).
+  try { events.push(...diskAlertEvents(store, cfg)); } catch { /* no readings yet */ }
 
   events.sort((a, b) => b.at - a.at);
   return events;

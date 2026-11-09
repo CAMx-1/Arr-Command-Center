@@ -1,9 +1,11 @@
 // "Tidy up" dialog (System tab).
 import { h, mount, spinner, empty, toast, openModal } from './ui.js';
-import { loadTidyUp, fixRequest } from './tidyUp.js';
+import { loadTidyUp, fixRequest, apiVersion } from './tidyUp.js';
+import { openPathFix } from './pathFix.js';
 import { roleAllows } from './roleUi.js';
 
-const nameOf = (it) => `${it.title}${it.year ? ` (${it.year})` : ''}`;
+const nameOf = (it) => `${it.title || it.artistName || it.authorName || 'Untitled'}${it.year ? ` (${it.year})` : ''}`;
+const countOf = (kind, s = {}) => (kind === 'artist' ? `${s.trackFileCount || 0} tracks` : kind === 'author' ? `${s.bookFileCount || 0} books` : `${s.episodeFileCount || 0} episodes`);
 
 export async function openTidyUp(arr, ctx, kind) {
   const body = h('div', {});
@@ -23,12 +25,12 @@ export async function openTidyUp(arr, ctx, kind) {
     const rows = g.items.map((it) => {
       const cb = h('input', { type: 'checkbox', checked: 'checked', 'aria-label': `Select ${nameOf(it)}`, onchange: (e) => { if (e.target.checked) sel.add(it.id); else sel.delete(it.id); paint(); } });
       return h('label', { class: 'row', style: { padding: '6px 12px', gap: '10px', cursor: 'pointer' } }, cb, h('div', { class: 'row-main' }, h('div', { class: 'row-title', style: { fontSize: '13px' } }, nameOf(it)),
-        h('div', { class: 'dim', style: { fontSize: '11px' } }, g.id === 'no-root' ? it.rootFolderPath : g.id === 'ended-complete' ? `${(it.statistics || {}).episodeFileCount} episodes` : it.path || '')));
+        h('div', { class: 'dim', style: { fontSize: '11px' } }, g.id === 'no-root' ? it.rootFolderPath : g.id === 'ended-complete' ? countOf(kind, it.statistics) : it.path || '')));
     });
     const run = async (rule, btn, extra) => {
       if (!sel.size) return;
       btn.disabled = true;
-      try { const r = fixRequest(kind, rule, [...sel], extra); await ctx.api.proxy(ctx.service.key, `api/v3/${r.path}`, { method: r.method, body: r.body }); toast(`${g.title}: fixed ${sel.size}`, 'success'); load(); }
+      try { const r = fixRequest(kind, rule, [...sel], extra); await ctx.api.proxy(ctx.service.key, `api/${apiVersion(kind)}/${r.path}`, { method: r.method, body: r.body }); toast(`${g.title}: fixed ${sel.size}`, 'success'); load(); }
       catch (e) { toast(e.message, 'error'); btn.disabled = false; }
     };
     let action = null;
@@ -42,7 +44,11 @@ export async function openTidyUp(arr, ctx, kind) {
       const b = h('button', { class: 'btn sm primary', onclick: () => run('profile', b, { profileId: pick.value }) }, 'Set profile');
       action = h('span', { style: { display: 'flex', gap: '6px', alignItems: 'center' } }, pick, b);
     }
-    if (g.fix === 'paths') action = h('a', { class: 'btn sm', href: `#/${encodeURIComponent(ctx.service.key)}?tab=system&tool=fixpaths` }, 'Open Fix paths');
+    if (g.fix === 'paths') {
+      action = kind === 'artist' ? h('button', { class: 'btn sm', onclick: () => openPathFix(arr, ctx, 'artist') }, 'Open Fix paths')
+        : kind === 'author' ? h('span', { class: 'dim', style: { fontSize: '12px' } }, 'Fix the root folders in Readarr (Settings → Media Management).')
+          : h('a', { class: 'btn sm', href: `#/${encodeURIComponent(ctx.service.key)}?tab=system&tool=fixpaths` }, 'Open Fix paths');
+    }
     paint();
     return h('div', { style: { margin: '0 0 16px' } },
       h('div', { class: 'section-title', style: { margin: '8px 0 4px' } }, `${g.title} (${g.items.length})`),

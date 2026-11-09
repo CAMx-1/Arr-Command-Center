@@ -1,6 +1,8 @@
 import { h, mount, tabs, skeletonList, empty, fmtRelative, timeEl, fmtBytes, copyable } from '../lib/ui.js';
 import { markManaged } from '../lib/plexDupes.js';
 import { tabWrongMatches } from '../lib/plexMatchesUI.js';
+import { tabMissingFromPlex } from '../lib/plexMissingUI.js';
+import { tabServer, tabSharing } from '../lib/plexServerUI.js';
 
 export async function renderPlex(root, ctx) {
   const svc = ctx.service;
@@ -10,8 +12,10 @@ export async function renderPlex(root, ctx) {
     { id: 'watchlist', label: 'Watchlist', render: (c) => tabWatchlist(c, ctx) },
     { id: 'duplicates', label: 'Duplicates', render: (c) => tabDuplicates(c, ctx) },
     { id: 'matches', label: 'Wrong matches', render: (c) => tabWrongMatches(c, ctx) },
+    { id: 'missing', label: 'Missing from Plex', render: (c) => tabMissingFromPlex(c, ctx) },
+    { id: 'server', label: 'Server', render: (c) => tabServer(c, ctx) },
     { id: 'users', label: 'Users', render: (c) => tabUsers(c, ctx) },
-    { id: 'friends', label: 'Friends', render: (c) => tabFriends(c, ctx) },
+    { id: 'friends', label: 'Friends & sharing', render: (c) => tabSharing(c, ctx) },
     { id: 'sessions', label: 'Now Playing', render: (c) => tabSessions(c, ctx) },
   ], `tabs-${svc.key}`, { activeId: ctx.params.tab, onChange: (id) => ctx.setParams({ tab: id === 'watchlist' ? '' : id }) });
   mount(root, bar, body);
@@ -106,26 +110,6 @@ async function tabUsers(root, ctx) {
           u.admin ? h('span', { class: 'pill ok' }, 'Admin') : null,
           u.restricted ? h('span', { class: 'pill warn' }, 'Managed') : null,
           u.email ? h('span', { class: 'dim' }, u.email) : null,
-        ),
-      ),
-    ))));
-  } catch (err) { needsAuth(root, err); }
-}
-
-async function tabFriends(root, ctx) {
-  mount(root, skeletonList());
-  try {
-    const friends = await ctx.api.plex.friends();
-    if (!friends.length) return mount(root, empty('', 'No friends found'));
-    mount(root, h('div', { class: 'list' }, ...friends.map((f) => h('div', { class: 'row' },
-      f.thumb ? h('img', { class: 'poster', src: f.thumb, loading: 'lazy', onerror: function () { this.replaceWith(h('div', { class: 'poster' }, (f.title || '?').slice(0, 1).toUpperCase())); } }) : h('div', { class: 'poster', style: { width: '40px', height: '40px', fontSize: '16px' } }, (f.title || '?').slice(0, 1).toUpperCase()),
-      h('div', { class: 'row-main' },
-        h('div', { class: 'row-title' }, f.title),
-        h('div', { class: 'meta-line', style: { marginTop: '4px' } },
-          f.home ? h('span', { class: 'pill info' }, 'Home') : null,
-          f.restricted ? h('span', { class: 'pill warn' }, 'Managed') : null,
-          f.username ? h('span', { class: 'dim' }, `@${f.username}`) : null,
-          f.email ? h('span', { class: 'dim' }, f.email) : null,
         ),
       ),
     ))));

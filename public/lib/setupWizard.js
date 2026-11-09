@@ -36,12 +36,12 @@ export async function openSetupWizard(ctx, { firstRun = false } = {}) {
   const intro = net.demo
     ? 'In the demo this looks only at the demo’s own apps.'
     : 'Looks on this server, the Docker host, the usual Docker container names (sonarr, radarr, …) and any hosts you add. It only opens each app’s public login page; it never reads or guesses keys.';
-  // config.json is read-only (the Docker setup): check keys, then hand over the lines to add.
+  // Neither config.json nor the data folder can be written: check keys, then hand over the lines to add.
   const copyOnly = !net.demo && !net.canSave;
   const body = h('div', {},
     firstRun ? h('p', { style: { margin: '0 0 10px' } }, h('b', {}, 'Nothing is set up yet.'), ' Let’s find your apps.') : null,
     h('p', { class: 'dim', style: { fontSize: '13px', margin: '0 0 10px' } }, intro),
-    copyOnly ? h('p', { style: { fontSize: '13px', margin: '0 0 10px' } }, 'This server can’t save config.json (it’s read-only, as in the Docker setup). Each app you check gives you the lines to add under "services" in config.json; restart Arr Command Center after editing it.') : null,
+    copyOnly ? h('p', { style: { fontSize: '13px', margin: '0 0 10px' } }, 'This server can’t save services: config.json and the data folder are both read-only. Each app you check gives you the lines to add under "services" in config.json; restart Arr Command Center after editing it.') : null,
     net.demo ? null : hosts,
     net.demo || !net.subnets.length ? null : h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center', fontSize: '13px', marginTop: '10px' } }, subnet,
       `Also check every address on ${net.subnets.slice(0, 2).map((s) => `${s}.0/24`).join(', ')} (can take a minute or two)`),

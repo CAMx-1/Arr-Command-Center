@@ -1,4 +1,6 @@
 import { tabIndexerHealth } from '../lib/indexerHealthUI.js';
+import { pushTargets, pushRelease, fromProwlarr } from '../lib/releasePush.js';
+import { isLocalMode } from '../lib/connections.js';
 import { h, mount, tabs, spinner, skeletonList, empty, toast, fmtBytes, fmtRelative, timeEl, debounce, openModal, closeModal, confirmModal } from '../lib/ui.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
@@ -345,7 +347,7 @@ function tabSearch(root, ctx, px) {
       const releases = await px.get(`search?query=${encodeURIComponent(q)}&type=search&limit=100`);
       if (!Array.isArray(releases) || !releases.length) return mount(results, empty('', 'No results', 'Try a different query'));
       releases.sort((a, b) => (b.seeders || 0) - (a.seeders || 0));
-      mount(results, ...releases.slice(0, 100).map((r) => releaseRow(r, px)));
+      mount(results, ...releases.slice(0, 100).map((r) => releaseRow(r, px, ctx)));
     } catch (err) {
       mount(results, empty('', 'Search failed', err.message));
     }
@@ -355,7 +357,21 @@ function tabSearch(root, ctx, px) {
   run();
 }
 
-function releaseRow(r, px) {
+// "+ Sonarr" / "+ Radarr" / …: the app grabs it with its own download client
+// and tracks it like its own grabs (Grab uses Prowlarr's download client).
+async function sendToApp(ctx, r, svc, btn) {
+  btn.disabled = true;
+  try {
+    const out = await pushRelease(ctx.api, svc, fromProwlarr(r), { indexerKey: ctx.service.key, local: isLocalMode() });
+    toast(out.text, out.ok ? 'success' : 'warn', out.ok ? 3500 : 8000);
+  } catch (e) { toast(`${svc.label}: ${e.message}`, 'error'); }
+  btn.disabled = false;
+}
+
+function releaseRow(r, px, ctx) {
+  const rel = fromProwlarr(r);
+  const targets = pushTargets(ctx.state.services, rel.cat);
+  const canSend = !!(rel.url || rel.magnetUrl);
   const cat = Array.isArray(r.categories) ? r.categories.map((c) => c.name).filter(Boolean).join(', ') : '';
   return h('div', { class: 'row' },
     h('div', { class: 'poster', style: { width: '40px', height: '40px', fontSize: '13px', fontWeight: '800' } }, r.protocol === 'usenet' ? 'NZB' : 'TOR'),
@@ -369,8 +385,9 @@ function releaseRow(r, px) {
         r.publishDate ? timeEl(r.publishDate, { class: 'dim' }) : null,
       ),
     ),
-    h('div', { class: 'row-actions' },
-      h('button', { class: 'btn sm primary', onclick: async (e) => {
+    h('div', { class: 'row-actions', style: { flexWrap: 'wrap' } },
+      ...targets.map((svc) => { const b = h('button', { class: 'btn sm', 'data-needs': 'write', disabled: canSend ? null : 'disabled', title: `Let ${svc.label} grab and track it (imports like its own grabs)`, onclick: (e) => { e.stopPropagation(); sendToApp(ctx, r, svc, b); } }, `+ ${svc.label}`); return b; }),
+      h('button', { class: 'btn sm primary', 'data-needs': 'write', title: 'Send to Prowlarr’s download client', onclick: async (e) => {
         e.stopPropagation();
         try { await px.post('search', { guid: r.guid, indexerId: r.indexerId }); toast(`Sent to download client: ${r.title}`, 'success'); }
         catch (err) { toast(`Grab failed: ${err.message}`, 'error', 3600); }

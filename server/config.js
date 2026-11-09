@@ -57,18 +57,18 @@ function serialize(task) {
 
 // Read config.json, apply `mutate(disk)` to it, and durably persist the result.
 // `mutate` returns an optional value that is passed back to the caller.
-async function atomicUpdateConfig(mutate) {
+async function atomicUpdateConfig(mutate, file = CONFIG_PATH) {
   return serialize(async () => {
-    const disk = JSON.parse(await fsp.readFile(CONFIG_PATH, 'utf8'));
+    const disk = JSON.parse(await fsp.readFile(file, 'utf8'));
     disk.services = disk.services || {};
     const result = mutate(disk);
     const tmp = path.join(
-      path.dirname(CONFIG_PATH),
+      path.dirname(file),
       `.config.${process.pid}.${randomUUID()}.tmp`
     );
     try {
       await fsp.writeFile(tmp, JSON.stringify(disk, null, 2) + '\n');
-      await fsp.rename(tmp, CONFIG_PATH);
+      await fsp.rename(tmp, file);
     } catch (err) {
       // Best-effort cleanup so failed writes don't leave orphan temp files.
       try { await fsp.unlink(tmp); } catch { /* already gone */ }
@@ -81,8 +81,79 @@ async function atomicUpdateConfig(mutate) {
 // Whether config.json can be saved from the UI: the file and its folder must
 // be writable (saving writes a temp file next to it, then renames it). The
 // Docker setup mounts it read-only, so there it can't.
-export function configWritable() {
-  try { fs.accessSync(CONFIG_PATH, fs.constants.W_OK); fs.accessSync(path.dirname(CONFIG_PATH), fs.constants.W_OK); return true; } catch { return false; }
+export function configWritable(file = CONFIG_PATH) {
+  try { fs.accessSync(file, fs.constants.W_OK); fs.accessSync(path.dirname(file), fs.constants.W_OK); return true; } catch { return false; }
+}
+
+// ---- Services saved from the UI when config.json can't be written ----
+// Services added, changed or removed in the UI are then kept in
+// <data>/services.json and layered over config.json when the server starts:
+// { services: { key: {...} }, removed: [key] }. The file holds API keys like
+// config.json does, so it's written readable by its owner only.
+const DATA_DIR = process.env.ACC_DATA_DIR ? path.resolve(process.env.ACC_DATA_DIR) : path.join(ROOT, 'data');
+export const OVERLAY_PATH = path.join(DATA_DIR, 'services.json');
+
+export function readOverlay(file = OVERLAY_PATH) {
+  try {
+    const o = JSON.parse(fs.readFileSync(file, 'utf8')) || {};
+    return { services: o.services && typeof o.services === 'object' && !Array.isArray(o.services) ? o.services : {}, removed: Array.isArray(o.removed) ? o.removed.map(String) : [] };
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.warn(`[config] could not read ${file} (${e.message}); ignoring it`);
+    return { services: {}, removed: [] };
+  }
+}
+
+// config.json's services with the saved changes on top.
+export function applyOverlay(services, overlay) {
+  const out = { ...services };
+  for (const k of overlay.removed) delete out[k];
+  for (const [k, v] of Object.entries(overlay.services)) if (v && typeof v === 'object' && v.type) out[k] = { ...v };
+  return out;
+}
+
+// Saves and removals from the UI go to config.json when the server can write
+// it, else to services.json. Paths are parameters for tests.
+export function createServiceWriter({ configPath = CONFIG_PATH, overlayPath = OVERLAY_PATH } = {}) {
+  const dataDir = path.dirname(overlayPath);
+  const fromData = new Set(Object.keys(readOverlay(overlayPath).services));
+  const target = () => {
+    if (configWritable(configPath)) return 'config';
+    try { fs.mkdirSync(dataDir, { recursive: true }); fs.accessSync(dataDir, fs.constants.W_OK); return 'data'; } catch { return null; }
+  };
+  const updateOverlay = (mutate) => serialize(async () => {
+    const o = readOverlay(overlayPath);
+    if (mutate(o) === false) return;
+    const tmp = path.join(dataDir, `.services.${process.pid}.${randomUUID()}.tmp`);
+    try { await fsp.writeFile(tmp, JSON.stringify(o, null, 2) + '\n', { mode: 0o600 }); await fsp.rename(tmp, overlayPath); }
+    catch (err) { try { await fsp.unlink(tmp); } catch { /* already gone */ } throw err; }
+  });
+  // Saving to config.json: drop any older copy in services.json, which would
+  // otherwise win on the next start.
+  const forget = (key) => (fs.existsSync(overlayPath) ? updateOverlay((o) => {
+    if (!(key in o.services) && !o.removed.includes(key)) return false;
+    delete o.services[key]; o.removed = o.removed.filter((k) => k !== key);
+    return true;
+  }) : Promise.resolve());
+  const inConfig = (key) => { try { return !!((JSON.parse(fs.readFileSync(configPath, 'utf8')).services || {})[key]); } catch { return false; } };
+  return {
+    target,
+    sourceOf: (key) => (fromData.has(key) ? 'data' : 'config'),
+    async save(key, service) {
+      const where = target();
+      if (!where) throw new Error('Neither config.json nor the data folder can be written');
+      if (where === 'config') { await atomicUpdateConfig((disk) => { disk.services[key] = service; }, configPath); await forget(key); fromData.delete(key); }
+      else { await updateOverlay((o) => { o.services[key] = service; o.removed = o.removed.filter((k) => k !== key); }); fromData.add(key); }
+      return where;
+    },
+    async remove(key) {
+      const where = target();
+      if (!where) throw new Error('Neither config.json nor the data folder can be written');
+      if (where === 'config') { await atomicUpdateConfig((disk) => { if (disk.services) delete disk.services[key]; }, configPath); await forget(key); }
+      else { const onDisk = inConfig(key); await updateOverlay((o) => { delete o.services[key]; if (onDisk && !o.removed.includes(key)) o.removed.push(key); }); }
+      fromData.delete(key);
+      return where;
+    },
+  };
 }
 
 // Persist a single service into config.json (add or update) and return it.
@@ -281,6 +352,8 @@ function buildMockConfig() {
   return {
     port: Number(process.env.PORT) || 7373,
     host: process.env.HOST || '127.0.0.1',
+    // The demo's plex.tv (users, friends, sharing) lives in its Plex mock.
+    plexTvBase: `http://127.0.0.1:${MOCK_PORTS.plex}/__plextv`,
     mock: true,
     auth: { enabled: false },
     services: {
@@ -360,6 +433,11 @@ export function loadConfig() {
   if (process.env.AUTH_PASSWORD) cfg.auth.password = process.env.AUTH_PASSWORD;
 
   cfg.services = cfg.services || {};
+  // Services saved from the UI while config.json was read-only.
+  const overlay = readOverlay();
+  const changed = [...overlay.removed, ...Object.keys(overlay.services)].filter((k) => k in cfg.services);
+  if (changed.length) console.log(`[config] ${OVERLAY_PATH} changes these config.json services (edit them in Settings, or delete that file): ${[...new Set(changed)].join(', ')}`);
+  cfg.services = applyOverlay(cfg.services, overlay);
   for (const key of Object.keys(cfg.services)) {
     applyServiceEnv(key, cfg.services[key]);
   }

@@ -1,6 +1,7 @@
 // UI density preference: "comfortable" (default) vs "compact". Persisted in
 // localStorage and applied via a `data-density` attribute on <html>, which CSS
 // keys off to tighten row/table/dashboard-feed spacing (see styles.css).
+import { prefsChanged } from './prefEvents.js';
 
 const DENSITY_KEY = 'acc:density';
 
@@ -38,6 +39,7 @@ export function setDensity(value, storage) {
   const density = normalizeDensity(value);
   try { storageFor(storage).setItem(DENSITY_KEY, density); } catch { /* ignore */ }
   applyDensity(density);
+  if (!storage) prefsChanged();
   return density;
 }
 

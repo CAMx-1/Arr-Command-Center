@@ -2,6 +2,7 @@ import { h, mount, spinner, empty, toast, fmtBytes, fmtRelative, fmtDate, pct, t
 import { createBookServiceClient } from '../lib/bookServices.js';
 import { openPathFix } from '../lib/pathFix.js';
 import { roleAllows } from '../lib/roleUi.js';
+import { openTidyUp } from '../lib/tidyUpUI.js';
 
 // Lidarr (music) & Readarr (books) share the *arr v1 API, so one renderer serves
 // both with type-specific labels/fields.
@@ -37,9 +38,12 @@ export function renderBindery(root, ctx) { return renderMB(root, ctx, 'bindery')
 function renderMB(root, ctx, type) {
   const svc = ctx.service;
   // Lidarr: re-point artists whose folders moved (same tool as Sonarr/Radarr).
-  ctx.setActions(type === 'lidarr' && svc.configured && roleAllows('admin')
-    ? h('button', { class: 'btn sm primary', title: 'Find artist folders that moved and re-point them', onclick: () => openPathFix(ctx.api.arrV1(svc.key), ctx, 'artist') }, '🛠 Fix paths')
-    : null);
+  // Lidarr and Readarr: Tidy up (same rules as Sonarr/Radarr).
+  const tidy = (type === 'lidarr' || type === 'readarr') && svc.configured
+    ? h('button', { class: 'btn sm', title: 'Entries that waste searches or clutter the library, with bulk fixes', onclick: () => openTidyUp(ctx.api.arrV1(svc.key), ctx, type === 'lidarr' ? 'artist' : 'author') }, 'Tidy up') : null;
+  const fix = type === 'lidarr' && svc.configured && roleAllows('admin')
+    ? h('button', { class: 'btn sm primary', title: 'Find artist folders that moved and re-point them', onclick: () => openPathFix(ctx.api.arrV1(svc.key), ctx, 'artist') }, '🛠 Fix paths') : null;
+  ctx.setActions(tidy || fix ? h('span', { style: { display: 'flex', gap: '8px' } }, tidy, fix) : null);
   if (!svc.configured) return mount(root, empty(CFG[type].icon, `${svc.label} isn’t configured`, 'Set the URL and API key in Settings.'));
   const cfg = CFG[type];
   const client = createBookServiceClient(ctx.api, svc);

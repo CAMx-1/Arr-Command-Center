@@ -109,7 +109,7 @@ export async function renderCleanup(root, ctx) {
           toast(`Removed ${s.item.title}${deleteFiles ? ` · freed ${fmtBytes(s.size)}` : ''}`, 'success');
         } catch (e) {
           removed.delete(id); paint();
-          toast(e.message || `Couldn't remove ${s.item.title}`, 'error');
+          if (!e.cancelled) toast(e.message || `Couldn't remove ${s.item.title}`, 'error');
         }
       },
     });

@@ -994,6 +994,28 @@ export async function pingService(svc, serviceKey) {
 
 // Server-side read of a download client's active list for live updates
 // (server/live.js). Uses the same sessions/auth as the proxy for each client.
+// A qBittorrent Web API call from the server (API key or the cached login),
+// re-logging in once on 401/403. `form` makes it a POST with form fields.
+// Returns parsed JSON, or the text for endpoints that answer "Ok.".
+export async function qbitApi(svc, serviceKey, path, { form, timeout = 10000 } = {}) {
+  const base = trimSlash(svc.baseUrl);
+  const run = async (sid) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    const headers = combinedHeaders(svc, { Referer: base, Origin: base, accept: 'application/json', ...(form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}) });
+    if (svc.apiKey) headers.Authorization = `Bearer ${svc.apiKey}`;
+    else if (sid) headers.Cookie = `SID=${sid}`;
+    try { return await fetch(`${base}/api/v2/${String(path).replace(/^\/+/, '')}`, { method: form ? 'POST' : 'GET', headers, body: form ? new URLSearchParams(form).toString() : undefined, redirect: 'manual', signal: controller.signal }); }
+    finally { clearTimeout(timer); }
+  };
+  let sid = svc.apiKey ? '' : await ensureQbitSid(svc, serviceKey);
+  let r = await run(sid);
+  if (!svc.apiKey && (r.status === 401 || r.status === 403)) { sid = await ensureQbitSid(svc, serviceKey, true); r = await run(sid); }
+  if (!r.ok) { const err = new Error(`qBittorrent HTTP ${r.status}`); err.status = r.status; throw err; }
+  const text = await r.text();
+  try { return JSON.parse(text); } catch { return text; }
+}
+
 export async function liveClientFetch(svc, serviceKey) {
   const base = trimSlash(svc.baseUrl);
   const json = async (response) => {
@@ -1064,7 +1086,8 @@ export function createProxyRouter(cfg, { authorize } = {}) {
     if (!authorize) return false;
     const denial = authorize(req, svc, subPath);
     if (!denial) return false;
-    res.status(denial.status || 403).json({ error: denial.error, role: denial.role });
+    if (denial.needsVerification) res.locals.needsVerification = true;
+    res.status(denial.status || 403).json({ error: denial.error, role: denial.role, ...(denial.needsVerification ? { needsVerification: true } : {}) });
     return true;
   };
 

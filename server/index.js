@@ -9,8 +9,8 @@ import { randomUUID, createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, publicConfig, localFallbackConfig, ALLOWED_SERVICE_TYPES, saveServiceToDisk, removeServiceFromDisk, configWritable, isInsecureExposure, buildServiceUpdate } from './config.js';
-import { createProxyRouter, pingService, serviceRequest, serviceGet, liveClientFetch } from './proxy.js';
+import { loadConfig, publicConfig, localFallbackConfig, ALLOWED_SERVICE_TYPES, saveServiceToDisk, removeServiceFromDisk, configWritable, createServiceWriter, isInsecureExposure, buildServiceUpdate } from './config.js';
+import { createProxyRouter, pingService, serviceRequest, serviceGet, liveClientFetch, qbitApi } from './proxy.js';
 import { startMockServices } from './mock/mockServices.js';
 import { createPlexAuth } from './plexAuth.js';
 import * as store from './store.js';
@@ -19,11 +19,20 @@ import * as push from './push.js';
 import * as channels from './channels.js';
 import { startPoller, pollOnce } from './poller.js';
 import { createInsightsRecorder, seedDemoHistory } from './insights.js';
+import { createDiskRecorder, forecastDisks, seedDemoDiskHistory, DISK_NS } from './diskForecast.js';
+import { loadSpacePlan } from './spacePlanner.js';
+import { mediaMismatches, matchCandidates, applyMatch, loadMediaTranscodes } from './mediaServerTools.js';
+import { runDoctor } from './setupDoctor.js';
+import { runCompat } from './compatCheck.js';
+import { createStepUp } from './stepUp.js';
+import { createUserPrefs } from './userPrefs.js';
+import { createYearReview } from './yearReview.js';
+import { createSelfBackup } from './selfBackup.js';
 import { createActivityLog } from './activity.js';
 import { createServiceAccess, pushFilter } from './serviceAccess.js';
 import { discover, cleanHosts, localSubnets, DEFAULT_PORTS, freeKey } from './discovery.js';
-import { restoreIndexerLink, cleanRelease, scrub } from './indexerSend.js';
-import { createWebhooks, debounced, arrWebhookNotification } from './webhooks.js';
+import { createIndexerSend } from './indexerSend.js';
+import { createWebhooks, debounced, arrWebhookNotification, qbitPrefsPlan, qbitCommand } from './webhooks.js';
 import { createDigest, describeSchedule } from './digest.js';
 import { createBotCore, createTelegramPoller, createDiscordHandler, publicBot, applyBotSettings, upsertBotUser } from './chatBot.js';
 import * as automation from './automation.js';
@@ -231,13 +240,35 @@ if (cfg.auth && cfg.auth.enabled) {
 }
 
 // Optional "Sign in with Plex" gate.
-const plexAuth = createPlexAuth(cfg, { root: ROOT, publicDir: PUBLIC_DIR });
+// A sign-in from a browser the account hasn't used before: tell that person
+// on their own devices (push), and an admin's alerts also go to the
+// notification channels (which belong to the admins).
+const lcName = (v) => String(v || '').toLowerCase();
+function signInAlert({ user, email, role, device, ip }) {
+  const msg = { title: 'New sign-in to Arr Command Center', body: `${user} signed in on ${device}${ip ? ` from ${ip}` : ''}. If this wasn’t you, open Settings → Sign-in & security and sign that session out.`, url: '/#/settings?tab=you&open=security', category: 'security' };
+  if (push.categoryEnabled('security')) {
+    const mine = [user, email].filter(Boolean).map(lcName);
+    push.sendToAll(push.notification({ title: msg.title, body: msg.body, url: msg.url, tag: `signin:${Date.now()}` }), { filter: (sub) => [sub.user, sub.email].filter(Boolean).some((v) => mine.includes(lcName(v))) }).catch(() => {});
+  }
+  if (role === 'admin') channels.sendToChannels(msg, { globalEnabled: (c) => push.categoryEnabled(c) }).catch(() => {});
+}
+const plexAuth = createPlexAuth(cfg, { root: ROOT, publicDir: PUBLIC_DIR, onNewDevice: signInAlert });
+// "Confirm it's you" before deleting files or changing roles (two-factor accounts).
+const stepUp = createStepUp(plexAuth);
 app.use('/api/auth', plexAuth.router);
 app.use(plexAuth.middleware);
 if (plexAuth.enabled) console.log('[startup] Plex authentication is ENABLED.');
 // Roles: every /api request is checked against the caller's role (admin /
 // user / guest). Without Plex sign-in everyone is an admin.
 const serviceAccess = createServiceAccess(store);
+// Where services added in the UI are saved: config.json, or data/services.json
+// when config.json is read-only (the Docker setup).
+const serviceWriter = createServiceWriter();
+const servicesFor = (req) => {
+  const pc = publicConfig(cfg).services;
+  for (const k of Object.keys(pc)) if (serviceWriter.sourceOf(k) === 'data') pc[k].savedHere = true;
+  return serviceAccess.filterMap(seeing(req), pc);
+};
 // A subscriber's role, only when it's certain: listed by name or email, or
 // (for the "any Plex user" default role) the subscription has the email too.
 // Older subscriptions only stored the username; those are sent as before.
@@ -255,15 +286,31 @@ const activity = createActivityLog({ store, cfg, roleOf: (req) => plexAuth.roleO
 app.use(activity.middleware);
 app.use(roleGuard.app);
 // Your sign-in sessions and two-factor (any signed-in role, for themselves).
+// Settings that follow you: per Plex user, or one shared profile with Basic auth.
+const prefsWho = (req) => {
+  if (plexAuth.enabled) return req.plexUser ? { key: `plex:${String(req.plexUser).toLowerCase()}`, label: req.plexUser } : null;
+  return cfg.auth && cfg.auth.enabled ? { key: 'basic', label: 'the shared sign-in' } : null;
+};
+const userPrefs = createUserPrefs({ store, whoOf: prefsWho });
+app.use('/api/account/prefs', userPrefs.router);
 app.use('/api/account', plexAuth.account);
 app.get('/api/activity', (req, res) => res.json(activity.list(req.query)));
 app.delete('/api/activity', (req, res) => { activity.clear(); res.json({ ok: true }); });
+app.use('/api/users', stepUp.app('changing roles'));
 mountUserRoutes(app, plexAuth, { plex, cfg });
+// Back up Arr Command Center itself (admin only; "Confirm it's you" with two-factor).
+const APP_VERSION = (() => { try { return String(JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version || ''); } catch { return ''; } })();
+const selfBackup = createSelfBackup({
+  cfg, store, serviceWriter, stepUp, plexAuth, appVersion: APP_VERSION,
+  onServiceSaved: (key) => { statusCache.invalidate(key); uptime.forget(key); },
+  after: (parts) => { if (parts.includes('notifications')) { push.reloadPush(); telegramBot.restart(); } },
+});
+app.use('/api/self-backup', selfBackup.router);
 // Service-specific app routes follow the same per-role service list.
 app.use((req, res, next) => {
   const role = seeing(req);
   if (role === 'admin' || !role) return next();
-  const m = /^\/api\/(?:insights\/history|truenas|backups|indexer)\/([^/]+)/.exec(req.path);
+  const m = /^\/api\/(?:insights\/history|truenas|backups|indexer|media)\/([^/]+)/.exec(req.path);
   const key = m ? decodeURIComponent(m[1]) : (/^\/api\/plex\//.test(req.path) && !/^\/api\/plex\/image$/.test(req.path) ? Object.keys(cfg.services).find((k) => cfg.services[k].type === 'plex') : null);
   if (key && !serviceAccess.allowed(role, key)) return res.status(403).json({ error: 'Your role can’t use this service', role });
   next();
@@ -297,7 +344,7 @@ if (!localOnly && !anyAuth) {
 }
 
 // Public (secret-free) config for the frontend.
-app.get('/api/config', (req, res) => { const pc = publicConfig(cfg); res.json({ ...pc, services: serviceAccess.filterMap(seeing(req), pc.services), buildId: BUILD_ID, auth: { plexEnabled: plexAuth.enabled, user: req.plexUser || null, role: plexAuth.roleOf(req) } }); });
+app.get('/api/config', (req, res) => { const pc = publicConfig(cfg); res.json({ ...pc, services: servicesFor(req), ...(plexAuth.roleOf(req) === 'admin' && !cfg.mock ? { serviceStorage: serviceWriter.target() } : {}), buildId: BUILD_ID, auth: { plexEnabled: plexAuth.enabled, user: req.plexUser || null, role: plexAuth.roleOf(req), prefsSync: !!prefsWho(req) }, recap: !!tautulliFor() }); });
 
 // Explicit credential-bearing export for the native local-fallback feature.
 // Authentication middleware above protects this route; normal /api/config and
@@ -558,6 +605,77 @@ app.get('/api/plex/mismatches', async (req, res) => {
     res.json({ checked: plexItems.length, compared: r.compared, items: r.items });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
+// Jellyfin / Emby: wrong matches (vs Sonarr/Radarr), Identify, and titles
+// that keep transcoding (Playback Reporting plugin). :key is the server.
+const mediaSvc = (req, res) => {
+  const svc = cfg.services[req.params.key];
+  if (!svc || svc.enabled === false || !['jellyfin', 'emby'].includes(svc.type)) { res.status(404).json({ error: 'Unknown media server' }); return null; }
+  return svc;
+};
+const arrItemsFor = (req) => {
+  const role = seeing(req);
+  const arrs = Object.entries(cfg.services).filter(([k, s]) => (s.type === 'sonarr' || s.type === 'radarr') && s.enabled !== false && serviceAccess.allowed(role, k));
+  return Promise.all(arrs.map(([k, s]) => serviceGet(s, `api/v3/${s.type === 'sonarr' ? 'series' : 'movie'}`, { timeout: 30000 })
+    .then((l) => (l || []).map((x) => ({ ...x, serviceKey: k, serviceLabel: s.label || k }))).catch(() => []))).then((x) => x.flat());
+};
+app.get('/api/media/:key/mismatches', async (req, res) => {
+  const svc = mediaSvc(req, res); if (!svc) return;
+  res.set('Cache-Control', 'no-store');
+  try { res.json(await mediaMismatches(svc, await arrItemsFor(req))); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.get('/api/media/:key/matches/:id', async (req, res) => {
+  const svc = mediaSvc(req, res); if (!svc) return;
+  const q = req.query || {};
+  try { res.json(await matchCandidates(svc, { kind: q.kind === 'show' ? 'show' : 'movie', title: q.title, year: q.year, idType: q.idType, id: q.id })); }
+  catch (e) { res.status(e.status && e.status < 500 ? e.status : 502).json({ error: e.message }); }
+});
+app.post('/api/media/:key/match/:id', express.json({ limit: '8kb' }), async (req, res) => {
+  const svc = mediaSvc(req, res); if (!svc) return;
+  try { await applyMatch(svc, req.params.id, (req.body || {}).result); res.json({ ok: true }); }
+  catch (e) { res.status(e.status && e.status < 500 ? e.status : 502).json({ error: e.message }); }
+});
+app.get('/api/media/:key/transcodes', async (req, res) => {
+  const svc = mediaSvc(req, res); if (!svc) return;
+  res.set('Cache-Control', 'no-store');
+  try { res.json(await loadMediaTranscodes(svc, { days: req.query.days })); }
+  catch (e) { res.status(e.status === 404 ? 404 : 502).json({ error: e.message }); }
+});
+
+// Plex server: libraries with scan / refresh details / empty trash, and who
+// the server is shared with (plex.tv; admins only, see roles.js).
+const plexErr = (res, e) => res.status(e.status && e.status < 500 ? e.status : 502).json({ error: e.message });
+app.get('/api/plex/server', async (req, res) => { res.set('Cache-Control', 'no-store'); try { res.json(await plex.plexServerInfo(cfg)); } catch (e) { plexErr(res, e); } });
+app.post('/api/plex/library/:key/:action', async (req, res) => { try { await plex.plexLibraryAction(cfg, req.params.key, req.params.action); res.json({ ok: true }); } catch (e) { plexErr(res, e); } });
+app.get('/api/plex/shares', async (req, res) => { res.set('Cache-Control', 'no-store'); try { res.json(await plex.plexShares(cfg)); } catch (e) { plexErr(res, e); } });
+app.post('/api/plex/shares', express.json({ limit: '4kb' }), async (req, res) => { try { await plex.plexShareInvite(cfg, req.body || {}); res.json({ ok: true }); } catch (e) { plexErr(res, e); } });
+app.put('/api/plex/shares/:id', express.json({ limit: '4kb' }), async (req, res) => { try { await plex.plexShareUpdate(cfg, req.params.id, (req.body || {}).libraries); res.json({ ok: true }); } catch (e) { plexErr(res, e); } });
+app.delete('/api/plex/shares/:id', async (req, res) => { try { await plex.plexShareRemove(cfg, req.params.id); res.json({ ok: true }); } catch (e) { plexErr(res, e); } });
+
+// Imported in Sonarr/Radarr but not showing in Plex (or with fewer episodes).
+app.get('/api/plex/missing', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const role = seeing(req);
+    const arrs = Object.entries(cfg.services).filter(([k, s]) => (s.type === 'sonarr' || s.type === 'radarr') && s.enabled !== false && serviceAccess.allowed(role, k));
+    const [plexItems, sections, ...lists] = await Promise.all([plex.plexLibraryItems(cfg), plex.plexSections(cfg),
+      ...arrs.map(([k, s]) => serviceGet(s, `api/v3/${s.type === 'sonarr' ? 'series' : 'movie'}`, { timeout: 30000 })
+        .then((list) => (list || []).map((x) => ({
+          kind: s.type === 'sonarr' ? 'show' : 'movie', serviceKey: k, serviceLabel: s.label || k, id: x.id, title: x.title, year: x.year, path: x.path, rootFolderPath: x.rootFolderPath,
+          tmdbId: x.tmdbId, tvdbId: x.tvdbId,
+          files: s.type === 'sonarr' ? Number((x.statistics || {}).episodeFileCount) || 0 : (x.hasFile ? 1 : 0),
+          added: s.type === 'radarr' ? ((x.movieFile && x.movieFile.dateAdded) || null) : null,
+        })))
+        .catch(() => []))]);
+    const r = plex.findMissingInPlex(plexItems, lists.flat(), sections);
+    res.json({ checked: plexItems.length, ...r, sections: sections.filter((x) => x.type === 'movie' || x.type === 'show').map(({ key, type, title }) => ({ key, type, title })) });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Scan one folder of a Plex library, or the whole library (no path).
+app.post('/api/plex/scan', express.json({ limit: '4kb' }), async (req, res) => {
+  const b = req.body || {};
+  try { await plex.plexScan(cfg, String(b.section || ''), b.path == null || b.path === '' ? null : b.path); res.json({ ok: true }); }
+  catch (e) { res.status(/^Bad /.test(e.message) ? 400 : 502).json({ error: e.message }); }
+});
 app.get('/api/plex/matches/:ratingKey', async (req, res) => {
   try { res.json(await plex.plexMatchCandidates(cfg, req.params.ratingKey, { title: req.query.title, year: req.query.year })); } catch (e) { res.status(502).json({ error: e.message }); }
 });
@@ -603,7 +721,7 @@ app.get('/api/plex/image', async (req, res) => {
 });
 
 // The proxy (handles its own raw body parsing).
-app.use('/api/proxy', createProxyRouter(cfg, { authorize: roleGuard.proxy }));
+app.use('/api/proxy', createProxyRouter(cfg, { authorize: (req, svc, subPath) => roleGuard.proxy(req, svc, subPath) || stepUp.proxy(req, svc, subPath) }));
 
 // Live updates (Server-Sent Events) for download queues and now-playing.
 const liveHub = createLiveHub({ getService: (key) => cfg.services[key], fetchJson: (svc, p) => serviceGet(svc, p, { timeout: 8000 }), fetchClient: (svc, key) => liveClientFetch(svc, key) });
@@ -622,6 +740,67 @@ app.get('/api/trash/:app/profile/:slug', async (req, res) => {
 
 // Library growth: one size snapshot per Sonarr/Radarr/Lidarr instance per day.
 const insights = createInsightsRecorder({ cfg, store });
+const diskRecorder = createDiskRecorder({ cfg, store });
+// Compatibility check: each service's version and the APIs the tools use
+// (admins; read-only GETs).
+app.get('/api/compat', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json(await runCompat(cfg, { canSee: (k) => serviceAccess.allowed(seeing(req), k) })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Setup doctor: read-only checks across the apps and download clients
+// (admins: it reads download-client settings, though it never returns keys).
+app.get('/api/doctor', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json(await runDoctor(cfg, { canSee: (k) => serviceAccess.allowed(seeing(req), k) })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Free-up-space planner: ranked titles that could go (all disks, or one disk
+// from the forecast). Read-only; the browser deletes through the apps.
+// Year in review (Tautulli). Everyone gets their own year; admins can pick
+// anyone, or everyone together.
+const yearReview = createYearReview();
+const tautulliFor = () => Object.entries(cfg.services).find(([, s]) => s.type === 'tautulli' && s.enabled !== false) || null;
+app.get('/api/recap', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const tau = tautulliFor();
+  if (!tau) return res.status(404).json({ error: 'Year in review needs Tautulli, which keeps the watch history. Add it in Settings → Services.' });
+  const thisYear = new Date().getFullYear();
+  const year = Number(req.query.year) || thisYear;
+  if (!Number.isInteger(year) || year < 2008 || year > thisYear) return res.status(400).json({ error: 'Pick a year from 2008 to this year.' });
+  const admin = plexAuth.roleOf(req) === 'admin';
+  try {
+    const out = await yearReview.recap({ svcKey: tau[0], svc: tau[1], year, tz: String(req.query.tz || ''), viewer: plexAuth.enabled ? { user: req.plexUser, email: req.plexEmail } : null, admin, pick: req.query.user ? String(req.query.user) : null });
+    res.json({ ...out, source: tau[1].label || 'Tautulli' });
+  } catch (e) {
+    res.status(e.status || 502).json({ error: e.status ? e.message : `Couldn’t read Tautulli: ${e.message}` });
+  }
+});
+
+app.get('/api/space/plan', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const role = seeing(req);
+  const canSee = (k) => serviceAccess.allowed(role, k);
+  let scope = null;
+  if (req.query.disk) {
+    scope = forecastDisks(store.get(DISK_NS, {}), store.get('librarySnapshots', {}), cfg, { visible: canSee }).find((d) => d.key === String(req.query.disk));
+    if (!scope) return res.status(404).json({ error: 'That disk isn’t in the forecast any more. Pick another, or All disks.' });
+  }
+  const plexKey = Object.keys(cfg.services).find((k) => cfg.services[k].type === 'plex');
+  try {
+    const plan = await loadSpacePlan(cfg, { canSee, scope, plexItems: async () => (plex.hasToken(cfg) && plex.plexServerUrl(cfg) && (!plexKey || canSee(plexKey)) ? plex.plexLibraryItems(cfg) : null) });
+    res.json({ ...plan, scope: scope ? { key: scope.key, label: scope.label, free: scope.free, total: scope.total, rate: scope.rate, days: scope.days, services: scope.services } : null });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Disk-full forecast for the disks that hold the apps' root folders.
+app.get('/api/disks/forecast', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const role = seeing(req);
+  res.json({ disks: forecastDisks(store.get(DISK_NS, {}), store.get('librarySnapshots', {}), cfg, { visible: (k) => serviceAccess.allowed(role, k) }) });
+});
 app.get('/api/insights/history/:key', (req, res) => {
   if (!cfg.services[req.params.key]) return res.status(404).json({ error: 'Unknown service' });
   res.json(insights.history(req.params.key));
@@ -694,6 +873,15 @@ app.post('/api/webhooks/:key/install', express.json({ limit: '2kb' }), async (re
   if (!/^https?:\/\/[^/\s]+/.test(base)) return res.status(400).json({ error: 'Enter the address this app can reach Arr Command Center at, e.g. http://192.168.1.10:7373' });
   const v = ['sonarr', 'radarr', 'whisparr'].includes(svc.type) ? 'v3' : 'v1';
   const url = `${base}${hook.path}`;
+  if (svc.type === 'qbittorrent') {
+    try {
+      const plan = qbitPrefsPlan(await qbitApi(svc, req.params.key, 'app/preferences'), url);
+      if (!Object.keys(plan.set).length) return res.status(409).json({ error: 'qBittorrent already runs another program when a torrent finishes. Add the command below to that program yourself.', busy: plan.busy, command: qbitCommand(url, 'finished') });
+      await qbitApi(svc, req.params.key, 'app/setPreferences', { form: { json: JSON.stringify(plan.set) } });
+      return res.json({ ok: true, events: Object.keys(plan.set).filter((k) => k.endsWith('_program')).map((k) => (k === 'autorun_program' ? 'finished' : 'added')), busy: plan.busy });
+    } catch (e) { return res.status(502).json({ error: e.message }); }
+  }
+  if (!['sonarr', 'radarr', 'lidarr', 'readarr', 'whisparr', 'prowlarr'].includes(svc.type)) return res.status(400).json({ error: 'Add this one in the app itself (see the steps)' });
   try {
     const existing = await serviceGet(svc, `api/${v}/notification`);
     const mine = (existing || []).find((n) => n.implementation === 'Webhook' && ((n.fields || []).find((f) => f.name === 'url') || {}).value === url);
@@ -753,48 +941,27 @@ app.post('/api/config/service', express.json({ limit: '32kb' }), async (req, res
   if (built.error) return res.status(400).json({ error: built.error });
   const clean = built.clean;
   try {
-    // Durable write first; only reflect into the live config once persisted.
-    await saveServiceToDisk(key, clean);
+    // Durable write first (config.json, or data/services.json when
+    // config.json is read-only); only reflect into the live config once saved.
+    const where = await serviceWriter.save(key, clean);
     cfg.services[key] = { ...clean }; // apply live (proxy/status read cfg.services per request)
     statusCache.invalidate(key);
     uptime.forget(key);
-    res.json({ ok: true, services: publicConfig(cfg).services });
+    res.json({ ok: true, savedIn: where, services: servicesFor(req) });
   } catch (err) {
-    res.status(500).json({ error: `Could not write config.json: ${err.message}` });
+    res.status(500).json({ error: `Could not save the service: ${err.message}` });
   }
 });
 
-// ---- Send an indexer result to SABnzbd or an *arr (Newznab indexer page).
-// The browser only has links with the indexer key redacted; the server puts
-// it back (indexer's own host only) and redacts replies again.
-const SEND_API = { sabnzbd: null, sonarr: 'v3', radarr: 'v3', whisparr: 'v3', lidarr: 'v1', readarr: 'v1', bindery: 'v1' };
-app.post('/api/indexer/:key/send', express.json({ limit: '16kb' }), async (req, res) => {
-  const idx = cfg.services[req.params.key];
-  const b = req.body || {};
-  const to = typeof b.to === 'string' ? cfg.services[b.to] : null;
-  if (!idx || idx.type !== 'indexer' || idx.enabled === false) return res.status(404).json({ error: 'Unknown indexer' });
-  if (!to || to.enabled === false || !(to.type in SEND_API) || !serviceAccess.allowed(seeing(req), b.to)) return res.status(404).json({ error: 'Unknown service' });
-  let release;
-  try { release = cleanRelease(b.release); release.downloadUrl = restoreIndexerLink(release.downloadUrl, idx); }
-  catch (e) { return res.status(400).json({ error: e.message }); }
-  try {
-    if (to.type === 'sabnzbd') {
-      const r = await serviceGet(to, `api?mode=addurl&name=${encodeURIComponent(release.downloadUrl)}&nzbname=${encodeURIComponent(release.title)}&output=json`);
-      if (r && r.status === false) return res.status(502).json({ error: scrub(String(r.error || 'SABnzbd refused it'), idx, to) });
-      return res.json({ ok: true });
-    }
-    const reply = await serviceRequest(to, `api/${SEND_API[to.type]}/release/push`, { method: 'POST', body: release });
-    res.json({ reply: scrub(reply, idx, to) });
-  } catch (e) {
-    const msg = e.body && (Array.isArray(e.body) ? e.body.map((x) => x && x.errorMessage).filter(Boolean).join('; ') : e.body.message);
-    res.status(502).json({ error: scrub(String(msg || e.message), idx, to) });
-  }
-});
+// ---- Send an indexer or Prowlarr result to SABnzbd or an *arr.
+// The browser only has links with the source's key redacted; the server puts
+// it back (the source's own host only) and redacts replies again.
+app.post('/api/indexer/:key/send', express.json({ limit: '16kb' }), createIndexerSend({ getService: (k) => cfg.services[k], canUse: (req, k) => serviceAccess.allowed(seeing(req), k), serviceGet, serviceRequest }));
 
 // ---- Setup wizard: find apps on the network, then check a key before saving.
 // The demo only looks at its own mock apps, never the real default ports.
 let mockPorts = null;
-app.get('/api/setup/networks', (req, res) => res.json({ subnets: cfg.mock ? [] : localSubnets(), demo: !!cfg.mock, canSave: !cfg.mock && configWritable() }));
+app.get('/api/setup/networks', (req, res) => res.json({ subnets: cfg.mock ? [] : localSubnets(), demo: !!cfg.mock, canSave: !cfg.mock && !!serviceWriter.target() }));
 app.post('/api/setup/discover', express.json({ limit: '4kb' }), async (req, res) => {
   const body = req.body || {};
   let ports = DEFAULT_PORTS;
@@ -840,13 +1007,13 @@ app.delete('/api/config/service/:key', async (req, res) => {
   const key = req.params.key;
   if (!cfg.services[key]) return res.status(404).json({ error: 'Unknown service' });
   try {
-    await removeServiceFromDisk(key);
+    const where = await serviceWriter.remove(key);
     delete cfg.services[key];
     statusCache.invalidate(key);
     uptime.forget(key);
-    res.json({ ok: true, services: publicConfig(cfg).services });
+    res.json({ ok: true, savedIn: where, services: servicesFor(req) });
   } catch (err) {
-    res.status(500).json({ error: `Could not write config.json: ${err.message}` });
+    res.status(500).json({ error: `Could not save the change: ${err.message}` });
   }
 });
 
@@ -904,8 +1071,8 @@ if (!process.env.NOTIFY_DISABLE) {
 // only runs when enabled and its configured interval has elapsed. Disable with
 // AUTOMATION_DISABLE=1.
 let automationTimer = null;
-const insightsFirst = setTimeout(() => insights.tick().then(() => { if (cfg.mock) seedDemoHistory(store); }).catch(() => {}), cfg.mock ? 3000 : 60000);
-const insightsTimer = setInterval(() => insights.tick().catch(() => {}), 3600000);
+const insightsFirst = setTimeout(() => Promise.all([insights.tick(), diskRecorder.tick()]).then(() => { if (cfg.mock) { seedDemoHistory(store); seedDemoDiskHistory(store); } }).catch(() => {}), cfg.mock ? 3000 : 60000);
+const insightsTimer = setInterval(() => { insights.tick().catch(() => {}); diskRecorder.tick().catch(() => {}); }, 3600000);
 telegramBot.start();
 const digestTimer = setInterval(() => digest.tick().catch(() => {}), 5 * 60000);
 if (digestTimer.unref) digestTimer.unref();

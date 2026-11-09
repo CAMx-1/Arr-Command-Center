@@ -259,6 +259,13 @@ export function classifyLocalPath(pathname) {
     || pathname.startsWith('/api/setup/')
     || pathname.startsWith('/api/account')
     || pathname.startsWith('/api/indexer/')
+    || pathname.startsWith('/api/disks/')
+    || pathname.startsWith('/api/space/')
+    || pathname === '/api/recap'
+    || pathname.startsWith('/api/self-backup')
+    || pathname.startsWith('/api/media/')
+    || pathname.startsWith('/api/doctor')
+    || pathname.startsWith('/api/compat')
     || pathname.startsWith('/api/digest')
     || pathname.startsWith('/api/bot')
     || pathname === '/api/live' || pathname.startsWith('/api/live/')) return 'server-only';

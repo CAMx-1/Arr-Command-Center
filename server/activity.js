@@ -48,6 +48,17 @@ const APP_ROUTES = [
   [/^\/api\/bot/, '', 'changed chat bot settings'],
   [/^\/api\/webhooks\/[^/]+\/install/, '', 'added a webhook to an app'],
   [/^\/api\/indexer\/[^/]+\/send/, '', 'sent an indexer result to an app'],
+  [/^\/api\/plex\/scan/, '', 'started a Plex library scan'],
+  [/^\/api\/media\/[^/]+\/match\//, '', 'fixed a Jellyfin/Emby match'],
+  [/^\/api\/plex\/library\/[^/]+\/scan$/, '', 'scanned a Plex library'],
+  [/^\/api\/plex\/library\/[^/]+\/refresh$/, '', 'refreshed a Plex library’s details'],
+  [/^\/api\/plex\/library\/[^/]+\/emptyTrash$/, '', 'emptied a Plex library’s trash'],
+  [/^\/api\/plex\/shares$/, 'POST', 'shared the Plex server with someone'],
+  [/^\/api\/plex\/shares\/[^/]+$/, 'PUT', 'changed which Plex libraries someone has'],
+  [/^\/api\/plex\/shares\/[^/]+$/, 'DELETE', 'stopped sharing the Plex server with someone'],
+  [/^\/api\/self-backup\/export/, '', 'made a backup of Arr Command Center'],
+  [/^\/api\/self-backup\/preview/, '', 'opened a backup of Arr Command Center'],
+  [/^\/api\/self-backup\/restore/, '', 'restored a backup of Arr Command Center'],
   [/^\/api\/account\/2fa\/confirm/, '', 'turned on two-factor sign-in'],
   [/^\/api\/account\/2fa\/disable/, '', 'turned off two-factor sign-in'],
   [/^\/api\/account\/sessions/, '', 'signed out a session'],
@@ -68,6 +79,8 @@ export function createActivityLog({ store, cfg, roleOf = () => 'admin', now = ()
     const p = req.path;
     if (!p.startsWith('/api/') || p.startsWith('/api/auth/') || p.startsWith('/api/live')) return next();
     res.on('finish', () => {
+      // "Confirm it's you" prompts aren't refusals; the retry is what counts.
+      if (res.locals && res.locals.needsVerification) return;
       try {
         const role = roleOf(req) || 'none';
         const user = req.plexUser || (role === 'admin' && !req.plexRole ? 'admin' : 'unknown');

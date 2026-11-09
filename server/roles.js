@@ -126,12 +126,16 @@ function httpError(status, message) { const e = new Error(message); e.status = s
 const ADMIN_ROUTES = [
   /^\/api\/config\/service(\/|$)/,
   /^\/api\/config\/local-fallback$/, // exports service credentials
+  /^\/api\/self-backup(\/|$)/, // backups of Arr Command Center hold every API key
   /^\/api\/login-log$/,
   /^\/api\/diagnostics$/,
   /^\/api\/notify\/channels(\/|$)/,
   /^\/api\/automation(\/|$)/,
   /^\/api\/push\/(prefs|poll|status)$/,
   /^\/api\/plex\/(users|friends|match\/[^/]+)$/,
+  /^\/api\/plex\/shares(\/|$)/,
+  /^\/api\/media\/[^/]+\/match\/[^/]+$/,
+  /^\/api\/plex\/library\/[^/]+\/emptyTrash$/,
   /^\/api\/users(\/|$)/,
   /^\/api\/activity$/,
   /^\/api\/digest(\/|$)/,
@@ -139,6 +143,8 @@ const ADMIN_ROUTES = [
   /^\/api\/backups(\/|$)/,
   /^\/api\/webhooks(\/|$)/,
   /^\/api\/setup(\/|$)/,
+  /^\/api\/doctor(\/|$)/,
+  /^\/api\/compat(\/|$)/,
 ];
 const SELF_ROUTES = [/^\/api\/push\/(subscribe|unsubscribe|test|public-key)$/, /^\/api\/account(\/|$)/];
 
@@ -275,6 +281,8 @@ export function classifyProxyRequest(type, method, subPath, query = {}, body = n
     case 'jellyfin':
     case 'emby': {
       if (/^(system\/(configuration|logs)|auth\/keys|startup|environment)/.test(lower)) return 'admin';
+      // Playback Reporting's raw SQL endpoint and Identify (re-matching) are admin-only.
+      if (/^(emby\/)?(user_usage_stats(\/|$)|items\/remotesearch\/apply)/.test(lower)) return 'admin';
       if (read) return 'read';
       if (/^(users|system|auth|plugins|packages|repositories|scheduledtasks|devices|notifications\/admin)(\/|$)/.test(lower)) return 'admin';
       if (/^sessions\/[^/]+\/(playing|system|command)/.test(lower)) return 'admin';

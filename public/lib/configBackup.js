@@ -25,6 +25,7 @@ export async function encryptPortableBackup(payload, passphrase) {
   return { format: FORMAT, version: 1, kdf: { name: 'PBKDF2-SHA256', iterations: ITERATIONS, salt: bytesToBase64(salt) }, cipher: { name: 'AES-256-GCM', iv: bytesToBase64(iv), data: bytesToBase64(new Uint8Array(encrypted)) } };
 }
 export async function decryptPortableBackup(envelope, passphrase) {
+  if (envelope && envelope.format === 'arrcc-server-backup') throw new Error('That’s a backup of an Arr Command Center server. Restore it on the server: Settings → System → Back up Arr Command Center.');
   if (!envelope || envelope.format !== FORMAT || envelope.version !== 1 || envelope.kdf?.iterations !== ITERATIONS) throw new Error('Unsupported or invalid ArrCC backup file');
   if (String(passphrase || '').length < 8) throw new Error('Backup passphrase must be at least 8 characters');
   try {

@@ -40,33 +40,54 @@ async function parse(res) {
   return data;
 }
 
+// "Confirm it's you": when the server asks first (two-factor accounts, before
+// deleting files or changing roles), show the dialog, then retry once.
+// Parallel requests share one dialog. A cancel stays in effect while more
+// requests keep asking (a loop of deletes), until they pause for a moment.
+let confirming = null;
+let cancelledAt = 0;
+const cancelled = () => Object.assign(new Error('Cancelled'), { cancelled: true });
+async function send(url, init) {
+  // The dialog's own requests never wait on the dialog.
+  if (String(url).startsWith('/api/account/verify')) return fetch(url, init);
+  const res = await fetch(url, init);
+  if (res.status !== 403 && res.status !== 401) return res;
+  if (!(res.headers.get('content-type') || '').includes('application/json')) return res;
+  const data = await res.clone().json().catch(() => null);
+  if (!data || !data.needsVerification) return res;
+  if (Date.now() - cancelledAt < 1500) { cancelledAt = Date.now(); throw cancelled(); }
+  if (!confirming) confirming = import('./passkeys.js').then((m) => m.confirmIdentity({ reason: data.error })).finally(() => { confirming = null; });
+  if (!(await confirming)) { cancelledAt = Date.now(); throw cancelled(); }
+  return fetch(url, init);
+}
+
 export const api = {
   // App-level (not proxied)
-  async config() { return parse(await fetch('/api/config')); },
-  async version() { return parse(await fetch('/api/version', { cache: 'no-store' })); },
-  async status() { return parse(await fetch('/api/status')); },
-  async diagnostics() { return parse(await fetch('/api/diagnostics')); },
-  async system() { return parse(await fetch('/api/system', { cache: 'no-store' })); },
-  async operations({ limit = 100, fresh = false } = {}) { return parse(await fetch(`/api/operations?limit=${encodeURIComponent(limit)}${fresh ? `&fresh=${Date.now()}` : ''}`)); },
+  async config() { return parse(await send('/api/config')); },
+  async version() { return parse(await send('/api/version', { cache: 'no-store' })); },
+  async status() { return parse(await send('/api/status')); },
+  async diagnostics() { return parse(await send('/api/diagnostics')); },
+  async system() { return parse(await send('/api/system', { cache: 'no-store' })); },
+  async operations({ limit = 100, fresh = false } = {}) { return parse(await send(`/api/operations?limit=${encodeURIComponent(limit)}${fresh ? `&fresh=${Date.now()}` : ''}`)); },
   // Plex API (server holds the token)
   plex: {
-    watchlist: async () => parse(await fetch('/api/plex/watchlist')),
-    users: async () => parse(await fetch('/api/plex/users')),
-    friends: async () => parse(await fetch('/api/plex/friends')),
-    sessions: async () => parse(await fetch('/api/plex/sessions')),
-    duplicates: async () => parse(await fetch('/api/plex/duplicates')),
+    watchlist: async () => parse(await send('/api/plex/watchlist')),
+    users: async () => parse(await send('/api/plex/users')),
+    friends: async () => parse(await send('/api/plex/friends')),
+    sessions: async () => parse(await send('/api/plex/sessions')),
+    duplicates: async () => parse(await send('/api/plex/duplicates')),
   },
   // Custom links (Organizr-style)
-  async links() { return parse(await fetch('/api/links')); },
-  async addLink(link) { return parse(await fetch('/api/links', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(link) })); },
-  async removeLink(id) { return parse(await fetch(`/api/links/${encodeURIComponent(id)}`, { method: 'DELETE' })); },
-  async loginLog() { return parse(await fetch('/api/login-log')); },
+  async links() { return parse(await send('/api/links')); },
+  async addLink(link) { return parse(await send('/api/links', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(link) })); },
+  async removeLink(id) { return parse(await send(`/api/links/${encodeURIComponent(id)}`, { method: 'DELETE' })); },
+  async loginLog() { return parse(await send('/api/login-log')); },
   // Plain JSON from one of this server's own /api routes.
-  async getJson(path) { return parse(await fetch(path, { cache: 'no-store' })); },
-  async sendJson(path, body, method = 'POST') { return parse(await fetch(path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) })); },
-  async saveService(key, service) { return parse(await fetch('/api/config/service', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, service }) })); },
-  async deleteService(key) { return parse(await fetch(`/api/config/service/${encodeURIComponent(key)}`, { method: 'DELETE' })); },
-  async exportLocalFallback() { return parse(await fetch('/api/config/local-fallback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true }) })); },
+  async getJson(path) { return parse(await send(path, { cache: 'no-store' })); },
+  async sendJson(path, body, method = 'POST') { return parse(await send(path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) })); },
+  async saveService(key, service) { return parse(await send('/api/config/service', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, service }) })); },
+  async deleteService(key) { return parse(await send(`/api/config/service/${encodeURIComponent(key)}`, { method: 'DELETE' })); },
+  async exportLocalFallback() { return parse(await send('/api/config/local-fallback', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true }) })); },
 
   // Generic proxied request to a service
   async proxy(service, path, { method = 'GET', body, headers } = {}) {
@@ -76,14 +97,14 @@ export const api = {
       opts.body = JSON.stringify(body);
     }
     const clean = path.replace(/^\/+/, '');
-    return parse(await fetch(`/api/proxy/${service}/${clean}`, opts));
+    return parse(await send(`/api/proxy/${service}/${clean}`, opts));
   },
 
   // Proxied POST with an application/x-www-form-urlencoded body (qBittorrent).
   async proxyForm(service, path, params = {}) {
     const clean = path.replace(/^\/+/, '');
     const body = new URLSearchParams(params).toString();
-    return parse(await fetch(`/api/proxy/${service}/${clean}`, {
+    return parse(await send(`/api/proxy/${service}/${clean}`, {
       method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body,
     }));
   },

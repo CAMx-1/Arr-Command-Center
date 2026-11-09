@@ -3,6 +3,8 @@ import { liveRefresh } from '../lib/live.js';
 import { hive, posterHexCard } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { mediaServerFor } from '../lib/mediaServers.js';
+import { wrongMatchesTab, mediaServerSource } from '../lib/plexMatchesUI.js';
+import { tabMediaTranscodes } from '../lib/transcodesUI.js';
 
 export async function renderMediaServer(root, ctx) {
   const svc = ctx.service;
@@ -15,7 +17,9 @@ export async function renderMediaServer(root, ctx) {
     { id: 'latest', label: 'Recently Added', render: (node) => latestTab(node, media, ctx) },
     { id: 'sessions', label: 'Now Playing', render: (node) => sessionsTab(node, media, ctx) },
     { id: 'users', label: 'Users', render: (node) => usersTab(node, media, ctx) },
-  ], `tabs-${svc.key}`);
+    { id: 'matches', label: 'Wrong matches', render: (node) => wrongMatchesTab(node, mediaServerSource(svc)) },
+    { id: 'transcodes', label: 'Transcodes', render: (node) => tabMediaTranscodes(node, ctx) },
+  ], `tabs-${svc.key}`, { activeId: ctx.params.tab, onChange: (id) => ctx.setParams({ tab: id === 'libraries' ? '' : id }) });
   mount(root, bar, body);
 }
 

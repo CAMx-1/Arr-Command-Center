@@ -57,7 +57,7 @@ function pollForAuth(pinId, code, popup) {
       if (cd.mfaRequired) {
         cleanup(); clearPending();
         if (popup && !popup.closed) popup.close();
-        showCodeStep();
+        showCodeStep(cd.methods || { code: true, recovery: true });
         return;
       }
       if (cd.authorized) {
@@ -215,9 +215,24 @@ buildLoginHive();
 let _lhTimer;
 window.addEventListener('resize', () => { clearTimeout(_lhTimer); _lhTimer = setTimeout(buildLoginHive, 200); });
 
+// Passkeys (WebAuthn): base64url ↔ ArrayBuffer for the browser API.
+function b64uToBuf(s) { const b = atob(String(s).replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((String(s).length + 3) % 4)); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer; }
+function bufToB64u(buf) { const u = new Uint8Array(buf); let s = ''; for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function passkeysUsable() { return !!(window.PublicKeyCredential && navigator.credentials && window.isSecureContext && !/^\d{1,3}(\.\d{1,3}){3}$/.test(location.hostname)); }
+async function passkeyAnswer() {
+  const r = await fetch('/api/auth/2fa/passkey/options', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  const o = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(o.error || 'Couldn’t start the passkey check');
+  let cred;
+  try { cred = await navigator.credentials.get({ publicKey: { ...o, challenge: b64uToBuf(o.challenge), allowCredentials: (o.allowCredentials || []).map((c) => ({ ...c, id: b64uToBuf(c.id) })) } }); }
+  catch (e) { throw new Error(e && e.name === 'NotAllowedError' ? 'Cancelled, or no passkey for this account on this device.' : (e && e.message) || 'The passkey didn’t work.'); }
+  const a = cred.response;
+  return { id: cred.id, rawId: bufToB64u(cred.rawId), type: cred.type, response: { clientDataJSON: bufToB64u(a.clientDataJSON), authenticatorData: bufToB64u(a.authenticatorData), signature: bufToB64u(a.signature), userHandle: a.userHandle ? bufToB64u(a.userHandle) : null } };
+}
+
 // Two-factor: Plex approved the account; now a code from the authenticator
-// app (or a recovery code). The server holds the pending sign-in for 5 min.
-function showCodeStep() {
+// app, a recovery code, or a passkey. The server holds the sign-in for 5 min.
+function showCodeStep(methods) {
   const face = document.querySelector('.login-face');
   btn.style.display = 'none';
   const form = document.createElement('form');
@@ -225,7 +240,7 @@ function showCodeStep() {
   form.autocomplete = 'off';
   const label = document.createElement('p');
   label.className = 'dim';
-  label.textContent = 'Enter the 6-digit code from your authenticator app, or a recovery code.';
+  label.textContent = methods.code ? 'Enter the 6-digit code from your authenticator app, or a recovery code.' : 'Or enter one of your recovery codes.';
   const input = document.createElement('input');
   input.className = 'input'; input.id = 'mfa-code'; input.inputMode = 'numeric'; input.autocomplete = 'one-time-code';
   input.placeholder = '123456'; input.maxLength = 11; input.setAttribute('aria-label', 'Two-factor code');
@@ -234,7 +249,28 @@ function showCodeStep() {
   form.append(label, input, go);
   face.insertBefore(form, statusEl);
   setStatus('');
-  input.focus();
+  const finish = (d) => {
+    setStatus(typeof d.recoveryLeft === 'number' ? `Signed in with a recovery code (${d.recoveryLeft} left). Redirecting…` : 'Signed in! Redirecting…');
+    setTimeout(() => { location.href = '/'; }, typeof d.recoveryLeft === 'number' ? 1500 : 0);
+  };
+  // Passkey first when there is one: it's one tap.
+  if (methods.passkey && passkeysUsable()) {
+    const pk = document.createElement('button');
+    pk.type = 'button'; pk.className = 'btn primary login-btn'; pk.id = 'passkey-btn'; pk.textContent = 'Use a passkey';
+    form.insertBefore(pk, label);
+    go.className = 'btn login-btn';
+    pk.addEventListener('click', async () => {
+      pk.disabled = true; setStatus('Waiting for your passkey…');
+      try {
+        const passkey = await passkeyAnswer();
+        const r = await fetch('/api/auth/2fa', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ passkey }) });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.authorized) return finish(d);
+        setStatus(d.error || 'The passkey didn’t work.', true);
+      } catch (e) { setStatus(e.message, true); }
+      pk.disabled = false;
+    });
+  } else input.focus();
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const code = input.value.trim();
@@ -243,11 +279,7 @@ function showCodeStep() {
     try {
       const r = await fetch('/api/auth/2fa', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
       const d = await r.json().catch(() => ({}));
-      if (r.ok && d.authorized) {
-        setStatus(typeof d.recoveryLeft === 'number' ? `Signed in with a recovery code (${d.recoveryLeft} left). Redirecting…` : 'Signed in! Redirecting…');
-        setTimeout(() => { location.href = '/'; }, typeof d.recoveryLeft === 'number' ? 1500 : 0);
-        return;
-      }
+      if (r.ok && d.authorized) return finish(d);
       setStatus(d.error || 'That code didn’t work.', true);
       if (r.status === 401 && /expired|Start again/.test(d.error || '')) { form.remove(); btn.style.display = ''; btn.disabled = false; busy = false; }
       else { input.select(); }

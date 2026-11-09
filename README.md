@@ -152,7 +152,8 @@ two minutes you get a "down" alert, and a "recovered" alert when it comes back.*
 ![Push notification categories and ntfy/Discord channels](docs/notifications.png)
 
 *Choose what to be alerted about (including problems and the weekly digest), then fan
-alerts out to ntfy, Gotify, Discord, Telegram or any webhook, each with its own categories. ntfy alerts for new requests include Approve/Decline buttons, so you can
+alerts out to ntfy, Gotify, Discord, Telegram, email, Pushover, Slack, Matrix, Apprise or any
+webhook, each with its own categories. ntfy alerts for new requests include Approve/Decline buttons, so you can
 act from the lock screen.*
 
 ### Push notifications (iOS / Safari)
@@ -217,8 +218,9 @@ type in. Tick the switch to also try every address on the server's own /24 netwo
 app it finds, it asks only for the API key (or login), checks it, and saves the service. It
 only contacts private addresses and only opens each app's public login page; it never sends
 or guesses keys while looking. Run it again any time from **Settings → Services → Find
-services** (admins). If `config.json` is read-only, as in the Docker setup, the wizard checks
-each key and gives you the lines to paste into `config.json` instead.
+services** (admins). If `config.json` is read-only, as in the Docker setup, it saves the
+services in `data/services.json` instead (see [Docker](#docker)). If the data folder can't be
+written either, it checks each key and gives you the lines to paste into `config.json`.
 
 ---
 
@@ -311,19 +313,36 @@ Push notifications about a hidden service only go to people who can see it. Whil
 is on, services you add later are included.
 
 **Two-factor sign-in** (admins) — **Settings → You → Sign-in & security**. After Plex, the
-sign-in page asks for a 6-digit code from an authenticator app (1Password, iOS Passwords,
-Google Authenticator, Authy, …). Setup shows a link that opens your authenticator app and the
-key to type in, then 10 one-time recovery codes, shown once. Turning it on signs out your other
-browsers. A code is accepted 30 seconds either side of now and only once; five wrong codes pause
-code entry for a few minutes. Turning it off, or making new recovery codes, needs a current code.
-If you lose your phone and your recovery codes, stop the server, remove your entry (your Plex
-username in lower case) under `"twoFactor"` in `data/store.json`, and start it again.
+sign-in page asks for a second step: a 6-digit code from an authenticator app (1Password, iOS
+Passwords, Google Authenticator, Authy, …) or a **passkey** (Touch ID, Face ID, Windows Hello, a
+security key, or a password manager that keeps passkeys). Setting up the app shows a QR code to
+scan, a link that opens the app, and the key to type in. The first method you add gives you 10
+one-time recovery codes, shown once, and signs out your other browsers. A code is accepted 30
+seconds either side of now and only once; five wrong codes pause code entry for a few minutes.
+Passkeys need the server on https (or `localhost`) and only work on the address they were made
+on. Removing a passkey, turning two-factor off or making new recovery codes asks you to confirm
+it's you first. If you lose your phone and your recovery codes, stop the server, remove your
+entry (your Plex username in lower case) under `"twoFactor"` in `data/store.json`, and start it
+again.
 
 **Where you're signed in** — the same section lists each browser signed in to your account
 (device, last active, IP), with **Sign out** for each and **Sign out everywhere else**. Admins
 also see everyone else's sessions and can end them. Signing out ends the session on the server,
 so a copied cookie stops working too. Two-factor and the session list need Sign in with Plex;
 with Basic auth, change the password to sign everyone out.
+
+**Confirm it's you** — with two-factor on, deleting files (removing a title with its files,
+deleting a file, removing a download with its data), changing roles or the services a role sees,
+and making or restoring a backup of Arr Command Center ask for a code, a recovery code or a
+passkey, unless you confirmed in the last 10 minutes. Signing in with two-factor counts. The
+server checks it on each of those requests, and the page retries the request after you confirm.
+
+**Sign-in alerts** — when your account signs in on a browser it hasn't used before, you get a
+push notification on your devices (category "Sign-ins from a new device"); an admin's alert also
+goes to the notification channels. An account's first browser doesn't alert, and browsers that
+were already signed in are remembered without one. **Known browsers** in the same section lists
+them, and **Forget the other browsers** makes the next sign-in anywhere else alert. Turning
+alerts off asks you to confirm it's you. The Login log marks sign-ins from a new browser.
 
 ### Migrating Readarr to Bindery
 
@@ -400,8 +419,13 @@ cp config.example.json config.json   # edit with your values
 docker compose up -d --build
 ```
 
-`docker-compose.yml` bind-mounts your `config.json` read-only. Prefer env vars? Drop the
-volume and use `env_file: .env` instead (see the commented lines).
+`docker-compose.yml` bind-mounts your `config.json` read-only. Services you add, change or
+remove in Settings (or with the setup wizard) are then saved in `data/services.json`, which is
+applied over `config.json` when the server starts. Settings marks those services **Saved in data
+folder**, and the server log lists the `config.json` services it changes. To go back to the
+`config.json` version of a service, delete its entry from `data/services.json` (or the whole
+file) and restart. Prefer env vars? Drop the volume and use `env_file: .env` instead (see the
+commented lines); environment variables still win over both files.
 
 ### System Monitor disks in Docker
 
@@ -471,9 +495,10 @@ docker run -d --name arr-command-center \
   arr-command-center
 ```
 
-Always mount `data/`: it holds everything the app saves (custom links, push
-subscriptions, automation state, login log, Plex token) and the Plex sign-in
-secret. Without it, that data is lost and everyone is signed out on each rebuild.
+Always mount `data/`: it holds everything the app saves (services saved from Settings, users
+and two-factor, custom links, push subscriptions, notification channels, automation state, disk
+history, login log, Plex token, and the copies made before restoring a backup) and the Plex
+sign-in secret. Without it, that data is lost and everyone is signed out on each rebuild.
 Behind HTTPS (e.g. Cloudflare Tunnel), also pass `-e SECURE_COOKIES=true`.
 
 If your arr services are also in Docker, put this container on the **same Docker network**
@@ -517,15 +542,108 @@ internal traffic typically bypasses Cloudflare Access — in that case just omit
   with a line for what your download clients are pulling right now. Users can start a test.
   Auth: an API token from Admin → API tokens ("Read results", plus "Run speedtest").
 
-**Send indexer results to an app** (Newznab indexer search) — besides **+ Send to SAB**, each
-result has a button for each app that takes its category: TV → Sonarr/Whisparr, movies → Radarr,
-music → Lidarr, books and audiobooks → Readarr/Bindery. The app checks the release against its
-quality profile and, if it wants it, grabs it with its own download client, so it's tracked and
-imported like the app's own grabs. If it doesn't want it, you see the app's reason. Users and
-admins. Both buttons send through the server (see Security notes).
+**Back up Arr Command Center** (Settings → System, admins) — one file with your services and
+their API keys, users and roles and the services each role sees, two-factor and passkeys,
+notification channels, push devices and categories, the weekly digest, the chat bot, incoming
+webhook addresses, automation, links, everyone's saved settings, and the history behind the
+disk forecast, the activity log and the login log. The file is encrypted with a passphrase you
+choose (at least 10 characters). Nobody can open it without the passphrase, and a lost passphrase
+can't be recovered. Not in the file: `config.json`'s sign-in settings, port and disks, and who's
+signed in. **Restore** opens a backup and shows, part by part, what's in it and what's here now;
+tick the parts to put back. Services in the backup are added or replaced, and services that
+aren't in it stay. History is joined with what's here. Each other part replaces what's here.
+Before anything changes, what will be replaced is saved as another backup with the same
+passphrase in `data/backups/` (the last five are kept and can be downloaded from the same
+section). It won't restore a user list in which you're no longer an admin, and it warns when it
+would turn your two-factor on or off. Restored services go to `config.json`, or to
+`data/services.json` when `config.json` is read-only. This is separate from **Backups** (the
+apps' own backups) and from the iPhone app's local-mode backup.
 
-**Tidy up** (Sonarr, Radarr → System) — finds ended shows that are complete but still monitored,
-films still missing two years after release, unmonitored entries with no files, and entries whose
+**Settings that follow you** (Settings → You → Settings on every device) — your theme, colour
+and density, pinned, ordered and hidden services, Home workspaces, and list or hexagon views
+are saved to your account on the server, so every browser you sign in on looks the same. A
+browser that hasn't synced before takes the account's settings, and a message says which ones.
+After that, a change on one browser reaches the others when they next open or you come back to
+the tab, and different settings changed on two browsers at the same time are both kept. Turn it off on a device to let
+that device keep its own settings. Saved per Plex user, or as one shared profile with Basic
+auth; with no sign-in it's off. Only those settings are saved, never service addresses or keys.
+
+**Year in review** (Home in December and January; Settings → You; Tautulli → Year in review) —
+a year of watching from Tautulli: hours watched, plays, top five shows and films, the busiest
+night, the longest binge and streak, what you rewatched and what you watched on, with a picture
+to save or share: a hexagon (a 1232 × 1410 PNG with see-through corners) or a box (1080 × 1350,
+easier to read on a phone). Hex is the default on desktop and Box on phones; the **Hex / Box**
+switch changes it on that device only. **Month by month** shows a tower of hexagons for each
+month, with the busiest month lit up; point at or tap a month for its hours. Everyone sees their own year, matched to
+Tautulli by Plex username, email or friendly name; admins can pick anyone, or everyone together.
+Plays shorter than a minute don't count, times are in your browser's time zone, and plays after
+midnight count for the evening before, until 5 am. Earlier years are there too, and before
+December the year so far. **Hide** removes the Home card for that year.
+
+**Disk-full forecast** (Home; System tab) — the server notes each disk's free space once a day
+(through Sonarr, Radarr, Whisparr, Lidarr and Readarr) and works out when it will fill from the
+last 30 days; for the first week it uses the library growth from Insights instead. Home shows a
+card when a disk is expected to fill within 30 days, and the System tab shows the forecast under
+each disk, with a chart. You get a notification (category "Problems") when a disk is expected to
+fill within 30 days, and again within 7 days or when it's nearly full. **Hide for a week** hides
+the card.
+
+**Free up space** (the disk card on Home, or the System tab) — ranks the movies and shows on a
+disk by the space they'd free and how much they're watched (Tautulli's history): never watched in
+the 90 days or more since they were added, last watched over a year ago, or just large (20 GB or
+more). Titles added in the last 30 days or watched in the last 90 aren't suggested. Titles
+Maintainerr excludes or that are tagged `keep` in Sonarr/Radarr are listed as kept, and titles
+Maintainerr is about to delete are marked. Set how much space you want and it ticks enough titles
+to get there. Admins can delete the ticked titles through Sonarr/Radarr, with an import exclusion
+and the Seerr request cleared. The files go to the app's Recycle Bin if it has one; you're asked
+twice, and must tick a box first when an app has no Recycle Bin. CSV export.
+
+**Missing from Plex** (Plex → Missing from Plex) — movies and episodes Sonarr and Radarr have
+imported that Plex doesn't show, and folders no Plex library includes. Titles are matched by
+folder (or folder name, when Plex sees the disks under other paths), then by TMDB/TVDB id. **Scan
+this folder** asks Plex to scan just that folder, and **Scan them all** does every one. Users and
+admins.
+
+**Plex server and sharing** (Plex → Server, Plex → Friends & sharing) — the server's version and
+each library with its item count and last scan, with **Scan** and **Refresh details** (users and
+admins) and **Empty trash** (admins; asks twice). Friends & sharing (admins) lists who you share
+with and which libraries: change their libraries, invite someone by Plex username or email (with
+or without downloads), or stop sharing (asks twice). Sharing goes through plex.tv and needs the
+Plex token of the server's owner.
+
+**Setup doctor** (Settings → Services, and each app's System tab; admins) — reads your apps'
+settings and points out the mistakes that usually stop imports or hard links, each with a plain
+fix and a link: root folders the app can't reach, no download client, Completed Download
+Handling off, hard links off with a torrent client, a download category that's empty, shared by
+two apps or watched by none, download folders the app can't see (and the remote path mapping
+that would fix it), torrents downloading to another disk than the library, Prowlarr not syncing
+to an app, and the apps' own health warnings explained. It only reads. **Ignore** hides a finding
+in this browser.
+
+**Compatibility check** (Settings → Services, admins) — asks each app its version and what it
+supports (it only reads), then lists which Arr Command Center tools will work with your setup and
+what the rest need: for example Radarr 4.2 or newer for Collections, SABnzbd 4.3 or newer for
+Instant updates, the Playback Reporting plugin for Jellyfin transcodes, or Plex's newer agents
+for Wrong matches.
+
+**More notification channels** — besides ntfy, Gotify, Discord, Telegram and webhooks: **email**
+(any SMTP server, with TLS or STARTTLS; for Gmail or iCloud use an app password), **Pushover**,
+**Slack** (an incoming webhook), **Matrix** (a room and an access token) and **Apprise** (an
+Apprise API server, with a config key or Apprise URLs). **Test** shows the service's own error,
+with your secrets removed.
+
+**Send search results to an app** (Newznab indexer search, Prowlarr → Search) — besides **+ Send
+to SAB** (indexer search) or **Grab** (Prowlarr, with its own download client), each result has
+a button for each app that takes its category: TV → Sonarr/Whisparr, movies → Radarr, music →
+Lidarr, books and audiobooks → Readarr/Bindery. Usenet and torrent results both work, including
+magnet links. The app checks the release against its quality profile and, if it wants it, grabs
+it with its own download client, so it's tracked and imported like the app's own grabs; Prowlarr
+results show the indexer as "<name> (Prowlarr)" there. If it doesn't want it, you see the app's
+reason. Users and admins. The buttons send through the server (see Security notes).
+
+**Tidy up** (Sonarr, Radarr → System; the Tidy up button on Lidarr and Readarr) — finds ended
+shows, artists and authors that are complete but still monitored, films still missing two years
+after release, unmonitored entries with no files, and entries whose
 quality profile or root folder is gone. Each group has a bulk fix for the ones you tick: unmonitor,
 set a quality profile, remove the entries (their files are kept), or open Fix paths.
 
@@ -545,7 +663,9 @@ Bazarr's own search instead.
 last 7, 30 or 90 days where 60% or more of the plays transcoded, with the reason from Tautulli's
 stream data (subtitles burned into the picture, a video codec the player can't play, a bitrate
 over the player's limit, audio conversion, or only the container changing) and what to do about
-it. **Tag for replacement** adds a `transcodes` tag to the title in Sonarr or Radarr.
+it. **Tag for replacement** adds a `transcodes` tag to the title in Sonarr or Radarr. Jellyfin
+and Emby have the same tab, from the Playback Reporting plugin's play log (which records the
+video and audio conversion, so its reasons are less detailed).
 
 **Seeding clean-up** (qBittorrent → Seeding clean-up) — finished torrents that have reached a
 ratio and/or a seeding time (either or both; 0 ignores a limit), optionally only in some
@@ -559,6 +679,8 @@ from the Sonarr/Radarr entry in the same folder. Folders are matched by full pat
 name when Plex and the apps see the disks under different mount points. **Fix match** (admins)
 lists Plex's own match candidates, marks the one that agrees with Sonarr/Radarr, applies it and
 refreshes the title's details. Needs a Plex service (`"type": "plex"`) with the server's address.
+Jellyfin and Emby have the same check (→ Wrong matches), where **Identify** (admins) uses their
+own search.
 
 **Instant updates** (Settings → Services → Instant updates, admins) — Sonarr, Radarr, Lidarr,
 Readarr, Whisparr, Prowlarr, Seerr and Tautulli can call a secret webhook address when something
@@ -566,8 +688,14 @@ happens, so open pages update and notifications go out at once instead of on the
 to a minute). **Add to …** creates the webhook in an *arr app (its Settings → Connect) with every
 event it supports switched on. Seerr and Tautulli get short instructions, including the JSON body
 Tautulli needs. **New address** replaces the secret. Each app's row shows the last event received.
-The apps must be able to reach this server: if Cloudflare Access or another login is in front of
-it, let `/api/hooks/` through, or give the apps the server's local address.
+SABnzbd (4.3 or newer) and qBittorrent can call it too, so downloads update the moment they're
+added or finish: SABnzbd through its built-in Apprise notifications (the steps give you the
+address to paste), qBittorrent through Run external program. **Add to qBittorrent** fills that in
+for "torrent finished" and, on qBittorrent 4.6 or newer, "torrent added", but never replaces a
+program you already run there. The command needs `curl` (or `wget`) where qBittorrent runs, and
+passes no torrent details. The apps must be able to reach this server: if Cloudflare Access or
+another login is in front of it, let `/api/hooks/` through, or give the apps the server's local
+address.
 
 **Big libraries** — Sonarr and Radarr libraries keep only the rows, table rows or hexagons near
 the screen in the page, so there's no "Load more" and long libraries scroll smoothly. With a
@@ -710,12 +838,14 @@ any change for guests). The server still enforces every rule.
 **Requests, streaming & downloads**
 - **Overseerr / Seerr** — pending & all requests with one-click **approve/decline**,
   issues, recently added, and a **discover** search to create new requests.
-- **Plex** — watchlist, shared users, now-playing sessions and a wrong-match check, with a server-side image
-  proxy so posters render (Plex token never touches the browser).
-- **Jellyfin & Emby** — shared library browser, recently added media, users, and live
-  sessions with direct-play/transcode state; artwork streams through the authenticated proxy.
+- **Plex** — watchlist, shared users, now-playing sessions, wrong matches, missing from Plex,
+  library scans and sharing, with a server-side image proxy so posters render (Plex token never
+  touches the browser).
+- **Jellyfin & Emby** — shared library browser, recently added media, users, live sessions
+  with direct-play/transcode state, wrong matches and transcodes; artwork streams through the
+  authenticated proxy.
 - **Tautulli** — active streams (direct-play/transcode, bandwidth), history, statistics,
-  graphs, and the titles that keep transcoding.
+  graphs, the titles that keep transcoding, and each person's year in review.
 - **SABnzbd** — live queue with **pause/resume**, per-item remove, **speed-limit** control,
   and download history.
 - **qBittorrent** — live torrent list with state, ratio, speeds, and controls, plus a seeding clean-up.
@@ -727,7 +857,7 @@ any change for guests). The server still enforces every rule.
 - **NZBGet** — shared Usenet queue/history UI with pause/resume, group/history removal,
   disk/remaining statistics, and absolute speed limits.
 - **Bazarr** — missing subtitles by language and show with batch search, and history.
-- **Prowlarr** — indexer overview.
+- **Prowlarr** — indexer overview, indexer health, and search with results sent to an app.
 - **Autobrr** — recent releases with push outcome (pushed/rejected/error) and reason,
   announce/push stats, enable/disable filters, and IRC network + channel health.
 - **Maintainerr** — "Leaving soon" list of everything scheduled for deletion with days left
@@ -760,6 +890,10 @@ any change for guests). The server still enforces every rule.
 
 - `config.json` and `.env` are git-ignored — they hold your secrets. Keep them off version
   control.
+- `data/` holds secrets too: two-factor keys, notification channel tokens and push keys
+  (`store.json`), the API keys of services saved from Settings (`services.json`, readable only by
+  its owner), and the encrypted copies made before a restore (`backups/`). It's git-ignored and
+  left out of Docker images. Back it up, but keep it private.
 - The dashboard proxies **anything** under `/api/proxy/<service>/…` to your services using
   the stored credentials. Anyone who can reach the dashboard can control your stack, so:
   - bind it to your LAN/VPN, and/or
@@ -773,9 +907,24 @@ any change for guests). The server still enforces every rule.
 - Webhook addresses (Instant updates) work without signing in, because the apps can't sign in;
   the secret in each address is what protects it. Treat them like passwords and use **New
   address** if one leaks. Wrong addresses get "not found", and repeated wrong guesses from one
-  address are locked out for a while.
+  address are locked out for a while. The qBittorrent command and the SABnzbd Apprise address
+  contain the same kind of secret. The qBittorrent command passes no torrent details, so a
+  torrent's name can't add to the command.
 - With Sign in with Plex, every sign-in is a session stored on the server. Signing out, Sign out
   everywhere else, removing a user or turning on two-factor ends sessions at once.
+- With two-factor on, deleting files, changing roles and making or restoring a backup need a
+  confirmation from the last 10 minutes, checked by the server (see **Confirm it's you**).
+  Passkeys are checked by the server itself; no outside service is involved.
+- Sign-in alerts give each browser a random cookie, and the server keeps only a hash of it.
+- A backup of Arr Command Center holds every API key, encrypted with your passphrase
+  (PBKDF2-SHA256 with 600,000 rounds, then AES-256-GCM). Use a passphrase you don't use anywhere
+  else. Making and restoring backups are admin-only.
+- Settings that follow you saves only look-and-layout settings from a fixed list, never service
+  addresses or keys.
+- Email channels check the mail server's certificate, and only send a password over an encrypted
+  connection (or to a mail server on the same machine).
+- The setup doctor and the compatibility check only read from your apps; they never change a
+  setting.
 - The setup wizard is admin-only, only contacts private network addresses and only opens the
   apps' public pages. The network-wide scan runs only when you tick it.
 

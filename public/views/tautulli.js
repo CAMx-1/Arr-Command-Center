@@ -1,4 +1,5 @@
 import { tabTranscodes } from '../lib/transcodesUI.js';
+import { renderRecap } from '../lib/recapUI.js';
 import { showcaseName } from '../lib/showcase.js';
 import { liveRefresh } from '../lib/live.js';
 import { h, mount, tabs, spinner, skeletonList, empty, pct, poster, toast, timeEl, openModal, closeModal, autoRefresh } from '../lib/ui.js';
@@ -19,6 +20,7 @@ export async function renderTautulli(root, ctx) {
     { id: 'stats', label: 'Statistics', render: (c) => tabStats(c, tau, svc.key) },
     { id: 'graphs', label: 'Graphs', render: (c) => tabGraphs(c, tau, svc.key) },
     { id: 'transcodes', label: 'Transcodes', render: (c) => tabTranscodes(c, tau, ctx) },
+    { id: 'recap', label: 'Year in review', render: (c) => renderRecap(c, ctx) },
   ], `tabs-${svc.key}`, { activeId: ctx.params.tab, onChange: (id) => ctx.setParams({ tab: id === 'streams' ? '' : id }) });
   mount(root, bar, body);
 }

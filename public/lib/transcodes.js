@@ -5,6 +5,7 @@ const lc = (v) => String(v || '').toLowerCase();
 const isTranscode = (row) => lc(row.transcode_decision) === 'transcode';
 const CODEC = { hevc: 'HEVC (H.265)', h265: 'HEVC (H.265)', av1: 'AV1', vp9: 'VP9', h264: 'H.264', mpeg2video: 'MPEG-2', vc1: 'VC-1', truehd: 'Dolby TrueHD', dca: 'DTS', dts: 'DTS', 'dts-hd ma': 'DTS-HD MA', flac: 'FLAC', pgs: 'PGS (image)', vobsub: 'VobSub (image)', ass: 'ASS', ssa: 'SSA' };
 const name = (c) => CODEC[lc(c)] || String(c || '').toUpperCase() || 'this format';
+export const codecName = name;
 
 export function groupHistory(rows, { minPlays = 2, minShare = 0.6 } = {}) {
   const by = new Map();

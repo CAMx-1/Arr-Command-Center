@@ -1,6 +1,7 @@
 // View mode: "hex" (honeycomb) vs "list" (rectangles). A global default is stored
 // in localStorage; each page may override it. Effective mode = page override ?? global.
 import { h } from './ui.js';
+import { prefsChanged } from './prefEvents.js';
 
 const GLOBAL_KEY = 'view-mode';
 const pageKey = (page) => `view-mode:${page}`;
@@ -19,12 +20,13 @@ export function globalMode() {
   if (raw === 'list' || raw === 'hex' || raw === 'table') return raw;
   return isSmallScreen() ? 'list' : 'hex';
 }
-export function setGlobalMode(m) { localStorage.setItem(GLOBAL_KEY, m === 'list' ? 'list' : 'hex'); }
+export function setGlobalMode(m) { localStorage.setItem(GLOBAL_KEY, m === 'list' ? 'list' : 'hex'); prefsChanged(); }
 
 export function pageOverride(page) { const value = localStorage.getItem(pageKey(page)); return ['hex', 'list', 'table'].includes(value) ? value : null; }
 export function setPageOverride(page, m) {
   if (m === null || m === undefined) localStorage.removeItem(pageKey(page));
   else localStorage.setItem(pageKey(page), ['list', 'table'].includes(m) ? m : 'hex');
+  prefsChanged();
 }
 
 export function effectiveMode(page) { return pageOverride(page) || globalMode(); }

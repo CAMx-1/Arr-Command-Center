@@ -1,6 +1,7 @@
 // Persisted per-service preferences: visibility (hidden) and display order.
 // Affects the sidebar hive and the Home services section. Routing still works
 // for hidden services if navigated to directly.
+import { prefsChanged } from './prefEvents.js';
 const HIDDEN_KEY = 'svc-hidden';
 const ORDER_KEY = 'svc-order';
 
@@ -34,6 +35,7 @@ export function setServicePinned(key, pinned, storage) {
     keys.push(key);
   }
   try { target?.setItem(PINNED_KEY, JSON.stringify(keys)); } catch { /* unavailable */ }
+  if (!storage) prefsChanged();
   return { keys, pinned: keys.includes(key), removed };
 }
 
@@ -55,6 +57,7 @@ export function movePinnedService(key, direction, storage) {
   if (from < 0 || to < 0 || to >= keys.length) return keys;
   [keys[from], keys[to]] = [keys[to], keys[from]];
   try { target?.setItem(PINNED_KEY, JSON.stringify(keys)); } catch { /* unavailable */ }
+  if (!storage) prefsChanged();
   return keys;
 }
 
@@ -64,6 +67,7 @@ export function setHidden(key, hidden) {
   const s = readHidden();
   if (hidden) s.add(key); else s.delete(key);
   localStorage.setItem(HIDDEN_KEY, JSON.stringify([...s]));
+  prefsChanged();
 }
 
 function readOrder() {
@@ -71,7 +75,7 @@ function readOrder() {
   catch { return []; }
 }
 
-export function setOrder(keys) { localStorage.setItem(ORDER_KEY, JSON.stringify(keys)); }
+export function setOrder(keys) { localStorage.setItem(ORDER_KEY, JSON.stringify(keys)); prefsChanged(); }
 
 // Reorder `services` by the saved order. Services without a saved position keep
 // their incoming order and are appended after the saved ones (stable sort).

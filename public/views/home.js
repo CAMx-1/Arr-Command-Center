@@ -19,9 +19,12 @@ import { persistentSWR, cachedGet } from '../lib/cache.js';
 import { seerrRequestBadge } from '../lib/seerrStatus.js';
 import { createBookServiceClient } from '../lib/bookServices.js';
 import { setupNeeded, openSetupWizard } from '../lib/setupWizard.js';
+import { diskBanner } from '../lib/diskForecastUI.js';
+import { recapBanner } from '../lib/recapUI.js';
 import { downloadClientFor } from '../lib/downloadClients.js';
 import { autobrrClient, maintainerrClient, tdarrClient, absClient, normalizeTdarrWorkers } from '../lib/extraServices.js';
 import { mediaServerFor } from '../lib/mediaServers.js';
+import { prefsChanged } from '../lib/prefEvents.js';
 
 // ---- Activity source definitions ----
 const ACTIVITY_DEFS = [
@@ -48,7 +51,7 @@ function loadActivityPrefs() {
   } catch { /* ignore */ }
   return { ...ACTIVITY_DEFAULTS };
 }
-function saveActivityPrefs(prefs) { localStorage.setItem('activity-sources', JSON.stringify(prefs)); }
+function saveActivityPrefs(prefs) { localStorage.setItem('activity-sources', JSON.stringify(prefs)); prefsChanged(); }
 
 export async function renderHome(root, ctx) {
   const { api, state } = ctx;
@@ -109,7 +112,7 @@ export async function renderHome(root, ctx) {
     .map((widget) => h('section', {
       class: `dashboard-widget widget-${widget.id} size-${widget.size}`, dataset: { widget: widget.id },
     }, h('div', { class: 'dashboard-widget-head' }, h('h2', { class: 'section-title' }, widget.label)), content[widget.id]));
-  mount(root, h('div', { class: 'dashboard-grid', dataset: { dashboard: dashboard.id } }, ...widgets));
+  mount(root, diskBanner(ctx), recapBanner(ctx), h('div', { class: 'dashboard-grid', dataset: { dashboard: dashboard.id } }, ...widgets));
 
   layoutHoneycomb(honeycomb, tileEls);
   for (const svc of shown) hydrateCardStats(svc, workspaceCtx);
@@ -564,7 +567,7 @@ async function hydrateStreams(ctx) {
 
 // Upcoming widget view mode: a chronological list (default) or a month calendar.
 function getUpcomingView() { try { return localStorage.getItem('upcoming-view') === 'calendar' ? 'calendar' : 'list'; } catch { return 'list'; } }
-function setUpcomingView(v) { try { localStorage.setItem('upcoming-view', v === 'calendar' ? 'calendar' : 'list'); } catch { /* ignore */ } }
+function setUpcomingView(v) { try { localStorage.setItem('upcoming-view', v === 'calendar' ? 'calendar' : 'list'); prefsChanged(); } catch { /* ignore */ } }
 
 // Header: a window label + a List/Calendar segmented toggle. Switching re-runs
 // hydrateUpcoming (which refetches for the mode's date range) without a reload.

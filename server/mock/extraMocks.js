@@ -69,6 +69,7 @@ export function makeMaintainerr() {
     { id: 1, title: 'Leaving soon – unwatched movies', description: 'Movies nobody has watched in 6 months', isActive: true, arrAction: 0, deleteAfterDays: 30, type: 'movie', addDate: iso(120 * DAY), libraryId: '1', mediaServerType: 'plex', handledMediaAmount: 18, totalSizeBytes: 214748364800, handledMediaSizeBytes: 322122547200 },
     { id: 2, title: 'Ended shows – fully watched', description: 'Ended series everyone has finished', isActive: true, arrAction: 0, deleteAfterDays: 14, type: 'show', addDate: iso(60 * DAY), libraryId: '2', mediaServerType: 'plex', handledMediaAmount: 4, totalSizeBytes: 96636764160, handledMediaSizeBytes: 150323855360 },
     { id: 3, title: 'Low-rated requests', description: 'Paused while reviewing rules', isActive: false, arrAction: 1, deleteAfterDays: 7, type: 'movie', addDate: iso(20 * DAY), libraryId: '1', mediaServerType: 'plex', handledMediaAmount: 0, totalSizeBytes: 0, handledMediaSizeBytes: 0 },
+    { id: 4, title: 'Old 4K copies', description: '4K copies of films nobody played this year', isActive: true, arrAction: 0, deleteAfterDays: 21, type: 'movie', addDate: iso(40 * DAY), libraryId: '1', mediaServerType: 'plex', handledMediaAmount: 0 },
   ];
   let media = {
     1: [
@@ -80,8 +81,13 @@ export function makeMaintainerr() {
       { id: 21, collectionId: 2, mediaServerId: '51002', tmdbId: 1399, tvdbId: 121361, addDate: iso(12 * DAY), sizeBytes: 96636764160, image_path: '', mediaData: { title: 'Game of Thrones', type: 'show', addedAt: iso(900 * DAY) } },
     ],
     3: [],
+    // Old 4K copies (for the free-up-space planner: already leaving).
+    4: [
+      { id: 41, collectionId: 4, mediaServerId: '48216', tmdbId: 157336, addDate: iso(10 * DAY), sizeBytes: 75161927680, image_path: '', mediaData: { title: 'Interstellar', type: 'movie', addedAt: iso(800 * DAY) } },
+    ],
   };
-  const exclusions = [];
+  // Foundation (Plex rating key 30) is kept out of every rule.
+  const exclusions = [{ id: 1, mediaServerId: '30', ruleGroupId: null, parent: null, type: 'show' }];
   let running = false;
   app.get('/api/app/status', (req, res) => res.json(JSON.stringify({ status: 1, version: '3.29.0', commitTag: '', updateAvailable: false })));
   app.get('/api/collections', (req, res) => res.json(collections));
