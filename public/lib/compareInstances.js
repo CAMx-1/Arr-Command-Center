@@ -7,8 +7,11 @@ const norm = (v) => (v === undefined ? null : v);
 const lower = (s) => String(s || '').toLowerCase();
 
 // Field-by-field differences of two flat objects, ignoring ids and noise.
+// Settings only one side has (one app newer than the other, e.g. Sonarr 5's
+// new options next to Sonarr 4) aren't compared.
 export function diffFields(a, b, { ignore = ['id'] } = {}) {
-  const keys = [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])].filter((k) => !ignore.includes(k)).sort();
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k);
+  const keys = [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])].filter((k) => !ignore.includes(k) && has(a, k) && has(b, k)).sort();
   return keys.filter((k) => JSON.stringify(norm((a || {})[k])) !== JSON.stringify(norm((b || {})[k])))
     .filter((k) => typeof (a || {})[k] !== 'object' || (a || {})[k] === null)
     .map((k) => ({ field: k, a: norm((a || {})[k]), b: norm((b || {})[k]) }));

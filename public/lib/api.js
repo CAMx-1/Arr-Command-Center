@@ -110,12 +110,14 @@ export const api = {
   },
 
   // ---- Sonarr / Radarr (v3) helpers ----
-  arr(service) {
+  arr(service) { return this.arrAt(service, 'v3'); },
+  // The same for another API version, e.g. Sonarr 5's 'v5'.
+  arrAt(service, version) {
     return {
-      get: (p) => this.proxy(service, `api/v3/${p}`),
-      post: (p, body) => this.proxy(service, `api/v3/${p}`, { method: 'POST', body }),
-      put: (p, body) => this.proxy(service, `api/v3/${p}`, { method: 'PUT', body }),
-      del: (p, body) => this.proxy(service, `api/v3/${p}`, { method: 'DELETE', body }),
+      get: (p) => this.proxy(service, `api/${version}/${p}`),
+      post: (p, body) => this.proxy(service, `api/${version}/${p}`, { method: 'POST', body }),
+      put: (p, body) => this.proxy(service, `api/${version}/${p}`, { method: 'PUT', body }),
+      del: (p, body) => this.proxy(service, `api/${version}/${p}`, { method: 'DELETE', body }),
     };
   },
 

@@ -540,12 +540,16 @@ async function openEditSeries(arr, ctx, s) {
 
 // ---- Interactive search: pick a season, then an episode, then browse releases ----
 function openInteractive(ctx, arr, s) {
-  const seasons = (s.seasons || [])
-    .filter((x) => x.seasonNumber > 0)
-    .sort((a, b) => b.seasonNumber - a.seasonNumber);
+  // Sonarr searches a season or an episode, never a whole series (Sonarr 5
+  // refuses seriesId on its own; v4 returned its RSS feed instead). With only
+  // specials, offer those.
+  const all = (s.seasons || []).slice().sort((a, b) => b.seasonNumber - a.seasonNumber);
+  const regular = all.filter((x) => x.seasonNumber > 0);
+  const seasons = regular.length ? regular : all.filter((x) => x.seasonNumber === 0);
   if (!seasons.length) {
-    // No seasons metadata — fall back to a whole-series interactive search.
-    return openReleaseSearch(ctx, ctx.service.key, `seriesId=${s.id}`, s.title);
+    const app = (ctx.service && ctx.service.label) || 'Sonarr';
+    toast(`${app} has no seasons for ${s.title} yet. Refresh it in ${app}, then search again.`, 'info');
+    return null;
   }
 
   // Season picker as a row of buttons instead of a native <select>: on iPhone
@@ -555,9 +559,9 @@ function openInteractive(ctx, arr, s) {
   const seasonBar = h('div', { class: 'season-chips', role: 'radiogroup', 'aria-label': 'Season' },
     ...seasons.map((x) => h('button', {
       type: 'button', class: 'btn sm season-chip', role: 'radio', dataset: { season: String(x.seasonNumber) },
-      'aria-label': `Season ${x.seasonNumber}`,
+      'aria-label': x.seasonNumber ? `Season ${x.seasonNumber}` : 'Specials',
       onclick: () => { if (seasonNumber !== x.seasonNumber) { seasonNumber = x.seasonNumber; paintSeasons(); loadEpisodes(); } },
-    }, `S${x.seasonNumber}`)));
+    }, x.seasonNumber ? `S${x.seasonNumber}` : 'Specials')));
   const paintSeasons = () => {
     for (const b of seasonBar.children) {
       const on = Number(b.dataset.season) === seasonNumber;
@@ -590,7 +594,7 @@ function openInteractive(ctx, arr, s) {
       if (!episodes.length) return mount(epList, empty('', 'No episodes in this season'));
       mount(epList,
         h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' } },
-          h('button', { class: 'btn sm', onclick: () => openReleaseSearch(ctx, ctx.service.key, `seriesId=${s.id}&seasonNumber=${sn}`, `${s.title} — Season ${sn}`) }, 'Search whole season'),
+          h('button', { class: 'btn sm', onclick: () => openReleaseSearch(ctx, ctx.service.key, `seriesId=${s.id}&seasonNumber=${sn}`, `${s.title} — ${sn ? `Season ${sn}` : 'Specials'}`) }, 'Search whole season'),
         ),
         ...episodes.map((ep) => episodeRow(ep, s, ctx)),
       );

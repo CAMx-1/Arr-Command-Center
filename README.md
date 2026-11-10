@@ -748,6 +748,23 @@ clears the request in Seerr).
 **Release and delay profiles** (System tab) — view everyone; admins add, edit and delete.
 The default delay profile can't be deleted.
 
+**Sonarr 5** (beta; tested with 5.0.0.2941 and an upgraded copy of a 4.0.20 library) — everything
+works as with Sonarr 4, with these differences:
+- Release profiles are read and saved through Sonarr's v5 API, so a profile can use several
+  indexers. Sonarr 5's own options (excluded tags, rejecting unaired releases, season packs
+  before every episode airs) are listed and kept when you save. Sonarr 5's older v3 API, which
+  the rest of the app uses, stores "All indexers" as indexer 0, which matches no indexer, so a
+  profile saved that way stops applying. Arr Command Center 1.12.0 and older saved it that way.
+  Such profiles are marked "applies to no indexer"; saving one here repairs it.
+- Sonarr 5 keeps size limits on each quality profile instead of the quality definitions, so
+  **Check files** uses the item's quality profile.
+- Interactive search always asks for a season (Specials for a series that only has those),
+  because Sonarr 5 refuses a search for a whole series.
+- Sonarr 5 only accepts tag names made of letters, numbers and dashes (no spaces), and says so
+  when you try another.
+- **Compare with…** only compares settings both instances have, so a Sonarr 4 and a Sonarr 5
+  instance don't differ on options only Sonarr 5 has.
+
 **Indexer health** (Prowlarr → Health) — searches, failure rate, grabs, grab failures and
 response time per indexer for a chosen period, flags paused, failing, slow and never-grabbing
 indexers with suggestions. Admins can Test or Disable an indexer.

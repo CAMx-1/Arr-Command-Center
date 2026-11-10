@@ -10,7 +10,7 @@ import { openFileHealth } from '../lib/fileHealthUI.js';
 import { openInsights } from '../lib/insightsUI.js';
 import { openTidyUp } from '../lib/tidyUpUI.js';
 import { openCollections } from '../lib/collectionsUI.js';
-import { releaseSection, delaySection } from '../lib/releaseDelay.js';
+import { releaseSection, delaySection, releaseProfilesV5 } from '../lib/releaseDelay.js';
 import { isLocalMode } from '../lib/connections.js';
 import { openPathFix } from '../lib/pathFix.js';
 import { openDuplicates } from '../lib/duplicates.js';
@@ -35,15 +35,19 @@ function openRequestedTool(arr, ctx, kind) {
 export async function tabSystem(root, arr, ctx, kind) {
   mount(root, skeletonList());
   try {
-    const [health, disks, status, blocklist, tags, profiles, formats, releases, delays, indexers] = await Promise.all([
+    const statusP = arr.get('system/status').catch(() => ({}));
+    // Sonarr 5: release profiles through /api/v5 (see releaseProfilesV5).
+    const relArrP = statusP.then((st) => (ctx.api && ctx.api.arrAt && releaseProfilesV5(ctx.service && ctx.service.type, st && st.version) ? ctx.api.arrAt(ctx.service.key, 'v5') : arr));
+    const [health, disks, status, blocklist, tags, profiles, formats, [relArr, releases, relErr], delays, indexers] = await Promise.all([
       arr.get('health').catch(() => []),
       arr.get('diskspace').catch(() => []),
-      arr.get('system/status').catch(() => ({})),
+      statusP,
       arr.get('blocklist?page=1&pageSize=20&sortKey=date&sortDirection=descending').catch(() => ({ records: [] })),
       arr.get('tag/detail').catch(() => arr.get('tag').catch(() => [])),
       arr.get('qualityprofile').catch(() => []),
       arr.get('customformat').catch(() => []),
-      arr.get('releaseprofile').catch(() => null),
+      // Not falling back to v3 when v5 fails: saving through v3 loses indexers.
+      relArrP.then(async (ra) => { try { return [ra, await ra.get('releaseprofile'), null]; } catch (e) { return [ra, null, ra === arr ? null : e]; } }),
       arr.get('delayprofile').catch(() => null),
       roleAllows('admin') ? arr.get('indexer').catch(() => []) : Promise.resolve([]),
     ]);
@@ -123,8 +127,9 @@ export async function tabSystem(root, arr, ctx, kind) {
         h('div', { class: 'section-title', style: { margin: '0', flex: '1' } }, 'Custom formats'),
         roleAllows('admin') && !isLocalMode() ? h('button', { class: 'btn sm', onclick: () => openTrashSync(arr, ctx, kind, reload) }, 'Sync from TRaSH Guides…') : null),
       formatsSection(formats, profiles, arr, reload),
-      releases ? h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Release profiles') : null,
-      releases ? releaseSection({ releases, tags, indexers, arr, reload }) : null,
+      releases || relErr ? h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Release profiles') : null,
+      releases ? releaseSection({ releases, tags, indexers, arr: relArr, reload, multiIndexer: relArr !== arr })
+        : relErr ? h('div', { class: 'dim' }, `Couldn’t read release profiles through Sonarr’s v5 API: ${relErr.message}`) : null,
       delays ? h('div', { class: 'section-title', style: { marginTop: '16px' } }, 'Delay profiles') : null,
       delays ? delaySection({ delays, tags, arr, reload }) : null,
     );

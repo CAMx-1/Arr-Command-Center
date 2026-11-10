@@ -5,6 +5,14 @@ import { roleAllows } from './roleUi.js';
 
 export const DEFAULT_DELAY_ORDER = 2147483647;
 
+// Sonarr 5 lets a release profile use several indexers (indexerIds). Its old
+// v3 API shows only the first, and saving "All indexers" through it stores
+// indexer 0, which matches no indexer, so the profile silently stops
+// applying. Sonarr 5 and newer are read and saved through /api/v5 instead.
+export function releaseProfilesV5(type, version) {
+  return type === 'sonarr' && Number(String(version || '').split('.')[0]) >= 5;
+}
+
 // Older Sonarr (v3) sends terms as one comma string; v4/Radarr send arrays.
 export function termsOf(v) {
   if (Array.isArray(v)) return v.map((t) => (typeof t === 'string' ? t : t && t.key) || '').map((t) => t.trim()).filter(Boolean);
@@ -18,7 +26,9 @@ export function parseTerms(text) {
 
 export function validateRelease(r) {
   const errors = [];
-  if (!termsOf(r.required).length && !termsOf(r.ignored).length) errors.push('Add at least one “must contain” or “must not contain” term.');
+  // Sonarr 5's air-date and season-pack options work without any terms.
+  const rules = !!(r.airDateRestriction || r.allowSeasonPackWithoutAllEpisodesAired);
+  if (!termsOf(r.required).length && !termsOf(r.ignored).length && !rules) errors.push('Add at least one “must contain” or “must not contain” term.');
   for (const t of [...termsOf(r.required), ...termsOf(r.ignored)]) {
     if (/^\/.*\/[a-z]*$/i.test(t)) { try { new RegExp(t.replace(/^\/(.*)\/[a-z]*$/i, '$1')); } catch { errors.push(`“${t}” isn’t a valid regular expression.`); } }
   }
@@ -55,14 +65,44 @@ export function delaySummary(d) {
   return parts.join(' · ');
 }
 
+// Sonarr 5's extra release profile options, as short phrases.
+export function releaseExtras(r, tags = []) {
+  const out = [];
+  if ((r.excludedTags || []).length) out.push(`except tags: ${tagNames(r.excludedTags, tags).join(', ')}`);
+  if (r.airDateRestriction) {
+    const g = Number(r.airDateGracePeriod) || 0;
+    out.push(`rejects unaired releases${g ? ` (grace ${g} hour${Math.abs(g) === 1 ? '' : 's'})` : ''}`);
+  }
+  if (r.allowSeasonPackWithoutAllEpisodesAired) out.push('season packs before every episode airs');
+  return out;
+}
+// Sonarr 5 profile saved through the v3 API with "All indexers" (by an older
+// version of this app or another tool): indexer 0 matches no indexer, so the
+// profile isn't applied at all. Saving it here (v5) repairs it.
+export const releaseOnNoIndexer = (r) => Array.isArray(r && r.indexerIds) && r.indexerIds.includes(0);
+const NO_INDEXER = 'Sonarr has this profile on indexer 0, which matches no indexer, so it isn’t applied to any release. It was probably saved through Sonarr’s old v3 API with “All indexers”.';
+
+// Indexer names for a profile: indexerIds (Sonarr 5) or indexerId (older).
+export function releaseIndexers(r, indexers = []) {
+  const ids = Array.isArray(r.indexerIds) ? r.indexerIds : (r.indexerId ? [r.indexerId] : []);
+  return ids.filter((id) => id > 0).map((id) => ((indexers || []).find((i) => i.id === id) || {}).name || `#${id}`);
+}
+
 // ------------------------------------------------------------------ UI
-const tagNames = (ids, tags) => (ids || []).map((id) => (tags.find((t) => t.id === id) || {}).label || `#${id}`);
+function tagNames(ids, tags) { return (ids || []).map((id) => ((tags || []).find((t) => t.id === id) || {}).label || `#${id}`); }
 const field = (label, input, hint) => h('label', { style: { display: 'grid', gap: '4px', fontSize: '13px' } }, h('span', {}, label), input, hint ? h('span', { class: 'dim', style: { fontSize: '11px' } }, hint) : null);
 
 function tagPicker(tags, selected) {
   const sel = new Set(selected || []);
   const box = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } }, ...(tags.length ? tags.map((t) => h('label', { class: 'pill muted', style: { cursor: 'pointer', gap: '4px', display: 'inline-flex', alignItems: 'center' } },
     h('input', { type: 'checkbox', checked: sel.has(t.id) ? 'checked' : null, onchange: (e) => { if (e.target.checked) sel.add(t.id); else sel.delete(t.id); } }), t.label)) : [h('span', { class: 'dim', style: { fontSize: '12px' } }, 'No tags yet. Create tags in the Tags section.')]));
+  return { el: box, value: () => [...sel] };
+}
+
+function indexerPicker(indexers, selected) {
+  const sel = new Set((selected || []).filter((id) => id > 0));
+  const box = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } }, ...((indexers || []).length ? indexers.map((i) => h('label', { class: 'pill muted', style: { cursor: 'pointer', gap: '4px', display: 'inline-flex', alignItems: 'center' } },
+    h('input', { type: 'checkbox', checked: sel.has(i.id) ? 'checked' : null, onchange: (e) => { if (e.target.checked) sel.add(i.id); else sel.delete(i.id); } }), i.name)) : [h('span', { class: 'dim', style: { fontSize: '12px' } }, 'No indexers to choose from.')]));
   return { el: box, value: () => [...sel] };
 }
 
@@ -78,18 +118,24 @@ async function remove(arr, path, item, reload, label, btn) {
   catch (e) { toast(e.message, 'error'); }
 }
 
-export function editRelease(original, { arr, tags, indexers, reload }) {
-  const r = { enabled: true, required: [], ignored: [], indexerId: 0, tags: [], ...structuredClone(original || {}) };
+export function editRelease(original, { arr, tags, indexers, reload, multiIndexer = false }) {
+  // Sonarr 5's v5 API refuses a new profile without airDateGracePeriod.
+  const fresh = multiIndexer ? { indexerIds: [], excludedTags: [], airDateRestriction: false, airDateGracePeriod: 0, allowSeasonPackWithoutAllEpisodesAired: false } : { indexerId: 0 };
+  const r = { enabled: true, required: [], ignored: [], tags: [], ...fresh, ...structuredClone(original || {}) };
   const asArrays = original ? Array.isArray(original.required) || Array.isArray(original.ignored) : true;
   const name = h('input', { class: 'input', value: r.name || '', placeholder: 'e.g. No cams' });
   const req = h('textarea', { class: 'input', rows: 3, placeholder: 'One per line, or /regex/i' }, termsOf(r.required).join('\n'));
   const ign = h('textarea', { class: 'input', rows: 3, placeholder: 'One per line, or /regex/i' }, termsOf(r.ignored).join('\n'));
   const enabled = h('input', { type: 'checkbox', role: 'switch', checked: r.enabled !== false ? 'checked' : null });
-  const idx = h('select', { class: 'input' }, h('option', { value: '0' }, 'All indexers'), ...(indexers || []).map((i) => h('option', { value: String(i.id), selected: i.id === r.indexerId ? 'selected' : null }, i.name)));
+  // One indexer (older Sonarr, Radarr) or any number (Sonarr 5; none ticked = all).
+  const idx = multiIndexer ? null : h('select', { class: 'input' }, h('option', { value: '0' }, 'All indexers'), ...(indexers || []).map((i) => h('option', { value: String(i.id), selected: i.id === r.indexerId ? 'selected' : null }, i.name)));
+  const ixp = multiIndexer ? indexerPicker(indexers, r.indexerIds) : null;
   const tp = tagPicker(tags, r.tags);
+  const extras = releaseExtras(r, tags);
   const err = h('div', { class: 'dim', style: { color: 'var(--down, #e11d48)', fontSize: '12px' } });
   const submit = () => {
-    const out = { ...r, name: name.value.trim(), enabled: enabled.checked, indexerId: Number(idx.value) || 0, tags: tp.value() };
+    const out = { ...r, name: name.value.trim(), enabled: enabled.checked, tags: tp.value() };
+    if (multiIndexer) { out.indexerIds = ixp.value(); delete out.indexerId; } else out.indexerId = Number(idx.value) || 0;
     out.required = asArrays ? parseTerms(req.value) : parseTerms(req.value).join(',');
     out.ignored = asArrays ? parseTerms(ign.value) : parseTerms(ign.value).join(',');
     const errors = validateRelease(out);
@@ -98,7 +144,9 @@ export function editRelease(original, { arr, tags, indexers, reload }) {
   };
   openModal({ title: original ? `Edit release profile${r.name ? ` — ${r.name}` : ''}` : 'New release profile', body: h('div', { style: { display: 'grid', gap: '10px' } },
     field('Name', name), field('Must contain', req, 'A release needs at least one of these.'), field('Must not contain', ign, 'A release with any of these is rejected.'),
-    field('Indexer', idx), field('Tags', tp.el, 'With no tags it applies to everything.'),
+    multiIndexer ? field('Indexers', ixp.el, 'With none ticked it applies to every indexer.') : field('Indexer', idx), field('Tags', tp.el, 'With no tags it applies to everything.'),
+    extras.length ? h('p', { class: 'dim', style: { fontSize: '12px', margin: 0 } }, `Also set in Sonarr: ${extras.join('; ')}. Saving here keeps them.`) : null,
+    multiIndexer && releaseOnNoIndexer(r) ? h('p', { style: { fontSize: '12px', margin: 0, color: 'var(--warn, #b45309)' } }, `${NO_INDEXER} Saving applies it to the indexers ticked above (none ticked: every indexer).`) : null,
     h('label', { style: { display: 'flex', gap: '6px', alignItems: 'center', fontSize: '13px' } }, enabled, 'Enabled'), err),
   footer: h('div', { style: { display: 'flex', gap: '8px' } }, h('button', { class: 'btn', onclick: closeModal }, 'Cancel'), h('button', { class: 'btn primary', onclick: submit }, 'Save')) });
 }
@@ -133,23 +181,26 @@ export function editDelay(original, { arr, tags, reload }) {
   footer: h('div', { style: { display: 'flex', gap: '8px' } }, h('button', { class: 'btn', onclick: closeModal }, 'Cancel'), h('button', { class: 'btn primary', onclick: submit }, 'Save')) });
 }
 
-export function releaseSection({ releases, tags, indexers, arr, reload }) {
+// arr: the client release profiles are read and saved with (Sonarr 5: /api/v5).
+export function releaseSection({ releases, tags, indexers, arr, reload, multiIndexer = false }) {
   const admin = roleAllows('admin');
   const list = releases || [];
-  const deps = { arr, tags: tags || [], indexers, reload };
+  const deps = { arr, tags: tags || [], indexers, reload, multiIndexer };
   return h('div', {},
     admin ? h('div', { style: { margin: '0 0 6px' } }, h('button', { class: 'btn sm', onclick: () => editRelease(null, deps) }, '+ Release profile')) : null,
     list.length ? h('div', { class: 'list' }, ...list.map((r) => {
-      const req = termsOf(r.required); const ign = termsOf(r.ignored);
+      const req = termsOf(r.required); const ign = termsOf(r.ignored); const ixNames = releaseIndexers(r, indexers);
       const del = admin ? h('button', { class: 'btn sm danger', onclick: () => remove(arr, 'releaseprofile', r, reload, 'Release profile', del) }, 'Delete') : null;
       return h('div', { class: 'row', style: { alignItems: 'flex-start' } },
         h('div', { class: 'row-main' },
-          h('div', { class: 'row-title', style: { fontSize: '14px' } }, r.name || 'Unnamed', ' ', r.enabled === false ? h('span', { class: 'pill muted' }, 'off') : null),
+          h('div', { class: 'row-title', style: { fontSize: '14px' } }, r.name || 'Unnamed', ' ', r.enabled === false ? h('span', { class: 'pill muted' }, 'off') : null,
+            releaseOnNoIndexer(r) ? h('span', { class: 'pill warn', title: `${NO_INDEXER} Edit and save it here to fix it.` }, 'applies to no indexer') : null),
           h('div', { class: 'meta-line', style: { flexWrap: 'wrap', marginTop: '2px' } },
             ...req.map((t) => h('span', { class: 'pill ok', title: 'Must contain' }, `+ ${t}`)),
             ...ign.map((t) => h('span', { class: 'pill down', title: 'Must not contain' }, `− ${t}`)),
             h('span', { class: 'dim' }, (r.tags || []).length ? `tags: ${tagNames(r.tags, deps.tags).join(', ')}` : 'all items'),
-            r.indexerId ? h('span', { class: 'dim' }, `indexer: ${((indexers || []).find((i) => i.id === r.indexerId) || {}).name || r.indexerId}`) : null)),
+            ixNames.length ? h('span', { class: 'dim' }, `${ixNames.length === 1 ? 'indexer' : 'indexers'}: ${ixNames.join(', ')}`) : null,
+            ...releaseExtras(r, deps.tags).map((x) => h('span', { class: 'dim' }, x)))),
         admin ? h('div', { class: 'row-actions' }, h('button', { class: 'btn sm', onclick: () => editRelease(r, deps) }, 'Edit'), del) : null);
     })) : h('div', { class: 'dim' }, 'No release profiles.'));
 }
