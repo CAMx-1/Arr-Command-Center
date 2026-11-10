@@ -72,8 +72,9 @@ export function isAllowedImageUrl(u, serverUrl) {
 }
 
 // Parse a Plex library "duplicate" Metadata item into { title, year, type,
-// section, parts:[{file,size}] }. Exported for testing. A Plex duplicate has
-// more than one Media/Part (the same movie/episode present as multiple files).
+// section, parts:[{file,size}] } (episodes also get show, season, episode).
+// Exported for testing. A Plex duplicate has more than one Media/Part (the
+// same movie/episode present as multiple files).
 export function parseDuplicateItem(m, section) {
   const parts = [];
   for (const media of (m.Media || [])) {
@@ -81,7 +82,13 @@ export function parseDuplicateItem(m, section) {
       if (p && p.file) parts.push({ file: p.file, size: Number(p.size) || 0 });
     }
   }
-  return { title: m.title, year: m.year, type: m.type, section, ratingKey: m.ratingKey, parts };
+  const out = { title: m.title, year: m.year, type: m.type, section, ratingKey: m.ratingKey, parts };
+  if (m.type === 'episode') {
+    out.show = m.grandparentTitle || null;
+    out.season = m.parentIndex != null ? Number(m.parentIndex) : null;
+    out.episode = m.index != null ? Number(m.index) : null;
+  }
+  return out;
 }
 
 // Ask the Plex server for duplicates across all movie/show libraries. Works even
@@ -99,7 +106,9 @@ export async function getDuplicates(cfg) {
   for (const d of dirs) {
     if (!['movie', 'show'].includes(d.type)) continue;
     try {
-      const data = await pj(`${base}/library/sections/${d.key}/all?duplicate=1`, t, cid);
+      // A TV library lists shows unless asked for episodes (type=4), and an
+      // episode is what has two files.
+      const data = await pj(`${base}/library/sections/${d.key}/all?${d.type === 'show' ? 'type=4&' : ''}duplicate=1`, t, cid);
       const md = (data.MediaContainer && data.MediaContainer.Metadata) || [];
       for (const m of md) {
         const item = parseDuplicateItem(m, d.title);

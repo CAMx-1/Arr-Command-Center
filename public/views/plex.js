@@ -58,7 +58,9 @@ async function tabDuplicates(root, ctx) {
         `${items.length} ${items.length === 1 ? 'title has' : 'titles have'} more than one file on disk. Remove the copy you don't want on disk (or via Plex with media deletion enabled).`),
       h('div', { class: 'list' }, ...items.map((it) => h('div', { class: 'row' },
         h('div', { class: 'row-main' },
-          h('div', { class: 'row-title' }, `${it.title || 'Unknown'}${it.year ? ` (${it.year})` : ''}`,
+          h('div', { class: 'row-title' }, it.type === 'episode' && it.show
+            ? `${it.show} · S${String(it.season ?? 0).padStart(2, '0')}E${String(it.episode ?? 0).padStart(2, '0')}${it.title ? ` · ${it.title}` : ''}`
+            : `${it.title || 'Unknown'}${it.year ? ` (${it.year})` : ''}`,
             h('span', { class: 'pill warn', style: { marginLeft: '8px' } }, `${it.parts.length} files`),
             it.section ? h('span', { class: 'pill muted', style: { marginLeft: '6px' } }, it.section) : null),
           ...it.parts.map((p) => h('div', { class: 'meta-line', style: { marginTop: '4px', wordBreak: 'break-all', display: 'block' } },

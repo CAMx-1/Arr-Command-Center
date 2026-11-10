@@ -820,11 +820,27 @@ that the app doesn't manage but that are named like a title you have (with their
 and whether Plex shows them as duplicates), and the same title in another instance (marked "probably
 on purpose" for 4K/anime/kids instances). Export to CSV.
 
+In Sonarr the finder is grouped by show. Each show opens to where its copies are (entries in
+Sonarr, folders Sonarr doesn't manage) and its seasons with duplicate episodes; each season opens
+to every episode that's on disk more than once, with each file's quality, size and path, which
+file Sonarr uses, the best copy, and whether Plex sees it. Files are found by listing each show's
+folder once, plus Plex's duplicate episodes when Plex is connected; extras, samples and Plex's
+optimized versions don't count, as in Sonarr's own scan. A file Sonarr doesn't track has its
+quality read from its name (marked *). When a season has better copies Sonarr could use, **Use
+the better copies…** imports them for that season through Sonarr's Manual Import (see below). Sonarr
+can only delete files it tracks, so other copies are deleted on disk or in Plex. The CSV includes
+every copy of every duplicate episode. Plex → Duplicates now lists TV episodes too, by show,
+season and episode.
+
 **Keep this copy instead** — when an unmanaged copy is better, Radarr (whole movie) or Sonarr
-(chosen episodes) imports it through its own Manual Import: the file is moved into the item's
-folder and renamed, and the app removes the old file itself, to its **Recycle Bin** if one is set
-(you're warned, and must confirm, if not). Arr Command Center never needs write access to your
-drives.
+(chosen episodes) imports it through its own Manual Import, after checking each file the way its
+own Manual Import does (its reasons, like "Not an upgrade", are shown, and only clean upgrades are
+preselected). A file from another folder is moved into the item's folder and renamed, and Radarr
+or Sonarr removes the old file, to its **Recycle Bin** if one is set (you're warned, and must
+confirm, if not). A better copy already in the show's own folder is imported where it is; the
+episode's old file is then deleted through Sonarr (same Recycle Bin rules) unless another episode
+still uses it, and the new file is renamed if Rename Episodes is on. Arr Command Center never
+needs write access to your drives.
 
 **Problem notifications** — besides downloads and requests, the poller reports unhealthy Portainer
 containers, unreachable Docker environments, degraded TrueNAS pools, Unraid disk problems or a

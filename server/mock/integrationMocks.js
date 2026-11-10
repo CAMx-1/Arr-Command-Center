@@ -487,7 +487,15 @@ export function makePlex() {
   };
   app.get('/library/sections', (req, res) => res.json(mc({ Directory: SECTIONS })));
   app.get('/library/sections/:id/all', (req, res) => {
-    if (req.query.duplicate) return res.json(mc({ Metadata: [] }));
+    if (req.query.duplicate) {
+      // Demo: Severance S01E01-03 is on two drives (1080p and 2160p).
+      if (req.params.id !== '2' || String(req.query.type) !== '4') return res.json(mc({ Metadata: [] }));
+      const part = (dir, name, size) => ({ Part: [{ file: `C:\\Media\\${dir}\\Severance\\Season 1\\${name}`, size }] });
+      return res.json(mc({ Metadata: [1, 2, 3].map((e) => ({
+        ratingKey: String(2100 + e), type: 'episode', title: ['Good News About Hell', 'Half Loop', 'In Perpetuity'][e - 1], grandparentTitle: 'Severance', parentIndex: 1, index: e,
+        Media: [part('TV', `Severance.S01E0${e}.1080p.WEB-DL.mkv`, 4e9), part('TV2', `Severance.S01E0${e}.2160p.UHD.BluRay.mkv`, 14e9 + e * 1e8)],
+      })) }));
+    }
     if (req.query['X-Plex-Container-Size'] === '0') return res.json(mc({ size: 0, totalSize: (items[req.params.id] || []).length }));
     res.json(mc({ Metadata: (items[req.params.id] || []).map((x) => (req.query.includeGuids === '1' ? x : { ...x, Guid: undefined })) }));
   });

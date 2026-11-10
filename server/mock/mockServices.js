@@ -142,6 +142,7 @@ const QUALITY_RANK = { 1: 1, 4: 2, 5: 2, 9: 3, 3: 3, 15: 3, 7: 4, 18: 5, 19: 6 }
 function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, library, fs, recycled, episodeFiles }) {
   const commands = new Map();
   let nextCmd = 1000;
+  let nextFileId = 7001;
   const qualities = [
     { id: 1, quality: { id: 1, name: 'SDTV' }, title: 'SDTV', minSize: 2, maxSize: 100 },
     { id: 2, quality: { id: 4, name: 'HDTV-720p' }, title: 'HDTV-720p', minSize: 17.1, maxSize: 400 },
@@ -151,6 +152,25 @@ function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, libr
     { id: 6, quality: { id: 19, name: 'Bluray-2160p' }, title: 'Bluray-2160p', minSize: 102, maxSize: 1000 },
   ];
   app.get('/api/v3/qualitydefinition', (req, res) => res.json(qualities));
+  const isVideo = (n) => /\.(mkv|mp4|avi|m4v|ts)$/i.test(n);
+  const walkVideos = (dir) => { const out = []; const walk = (d) => { for (const c of (fs && fs.children(d)) || []) { if (c.type === 'file') { if (isVideo(c.name)) out.push(c); } else walk(c.path); } }; walk(dir); return out; };
+  const UNKNOWN_Q = { quality: { id: 0, name: 'Unknown', source: 'unknown', resolution: 0 }, revision: { version: 1, real: 0, isRepack: false } };
+  app.get('/api/v3/manualimport', (req, res, next) => {
+    // Real Sonarr/Radarr ignore `folder` when a seriesId/movieId is given (and
+    // no downloadId): they list that item's own files, then any other video
+    // file in its folder with no episodes and unknown quality.
+    const id = Number(kind === 'series' ? req.query.seriesId : req.query.movieId);
+    if (!id || req.query.downloadId) return next();
+    const it = library().find((x) => x.id === id);
+    if (!it) return res.json([]);
+    const own = kind === 'series' ? (episodeFiles || []).filter((ef) => ef.seriesId === id) : (it.movieFile ? [{ ...it.movieFile, path: `${it.path}/${it.movieFile.relativePath}` }] : []);
+    const known = new Set(own.map((f) => String(f.path).toLowerCase()));
+    const ref = kind === 'series' ? { series: { id, title: it.title } } : { movie: { id, title: it.title, year: it.year } };
+    const tracked = own.map((f, i) => ({ id: i + 1, path: f.path, relativePath: f.relativePath, folderName: String(it.path).split('/').pop(), name: String(f.relativePath).split('/').pop().replace(/\.[^.]+$/, ''), size: f.size || 0, ...ref, quality: f.quality, languages: [{ id: 1, name: 'English' }], releaseGroup: f.releaseGroup || '', rejections: [],
+      ...(kind === 'series' ? { seasonNumber: f.seasonNumber, episodes: (f.episodeIds || []).map((eid) => ({ id: eid, seasonNumber: Math.floor((eid - 5000) / 100), episodeNumber: eid % 100, episodeFileId: f.id, hasFile: true })), episodeFileId: f.id } : { movieFileId: f.id }) }));
+    const other = walkVideos(String(it.path)).filter((c) => !known.has(String(c.path).toLowerCase())).map((c, i) => ({ id: tracked.length + i + 1, path: c.path, relativePath: c.path.slice(String(it.path).length + 1), folderName: String(it.path).split('/').pop(), name: c.name.replace(/\.[^.]+$/, ''), size: 0, ...ref, quality: UNKNOWN_Q, languages: [{ id: 0, name: 'Unknown' }], releaseGroup: '', rejections: [], ...(kind === 'series' ? { seasonNumber: null, episodes: [] } : {}) }));
+    return res.json([...tracked, ...other]);
+  });
   app.get('/api/v3/manualimport', (req, res) => {
     // Folder import (movies): every video file in the folder, mapped to the
     // given movie, rejected when it isn't better than the current file.
@@ -187,19 +207,37 @@ function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, libr
     const id = String(req.query.downloadId || '');
     res.json(JSON.parse(JSON.stringify(candidates[id] || candidates.default || [])));
   });
+  // Reprocess: evaluates each file for the given series or movie. With no
+  // episodes, Sonarr matches them from the file name; unknown quality and
+  // language are read from the name; "Not an upgrade" when the current file is
+  // as good. Like Sonarr 4, the release group comes back only if one was sent.
+  const groupOf = (name) => { const m = /-([A-Za-z0-9]+)$/.exec(String(name).replace(/\.[^.]+$/, '')); return m && !/^(DL|RIP)$/i.test(m[1]) ? m[1] : ''; };
   app.post('/api/v3/manualimport', (req, res) => {
     const items = Array.isArray(req.body) ? req.body : [];
     res.json(items.map((it) => {
-      const rejections = [];
+      const name = String(it.path || '').split('/').pop();
+      const quality = it.quality && it.quality.quality && it.quality.quality.id ? it.quality : { quality: qualityFromName(name), revision: { version: 1, real: 0, isRepack: false } };
+      const langs = Array.isArray(it.languages) && it.languages.some((l) => l && l.id) ? it.languages : [{ id: 1, name: 'English' }];
+      const rank = (q) => QUALITY_RANK[q && q.id] || 0;
       if (kind === 'series') {
-        if (!it.seriesId) rejections.push({ reason: 'Unknown Series', type: 'permanent' });
-        else if (!(it.episodeIds || []).length) rejections.push({ reason: 'No episodes selected', type: 'permanent' });
         const s = library().find((x) => x.id === it.seriesId);
-        return { ...it, series: s ? { id: s.id, title: s.title } : undefined, episodes: (it.episodeIds || []).map((eid) => ({ id: eid, seasonNumber: it.seasonNumber, episodeNumber: (eid % 100) || 1 })), episodeIds: undefined, rejections };
+        if (!s) return { ...it, quality, languages: langs, episodes: [], episodeIds: undefined, rejections: [{ reason: 'Unknown Series', type: 'permanent' }] };
+        let ids = (it.episodeIds || []).map(Number);
+        if (!ids.length && it.seasonNumber == null) { const m = /S(\d+)E(\d+)/i.exec(name); if (m) ids = [5000 + Number(m[1]) * 100 + Number(m[2])]; }
+        const fileFor = (eid) => (episodeFiles || []).find((ef) => ef.seriesId === s.id && (ef.episodeIds || []).includes(eid));
+        const episodes = ids.map((eid) => { const f = fileFor(eid); return { id: eid, seriesId: s.id, seasonNumber: Math.floor((eid - 5000) / 100), episodeNumber: eid % 100, title: `Episode ${eid % 100}`, episodeFileId: f ? f.id : 0, hasFile: !!f }; });
+        const rejections = [];
+        if (!episodes.length) rejections.push({ reason: it.seasonNumber == null ? 'Unable to determine if file is a sample' : 'Episodes not selected', type: 'permanent' });
+        const cur = episodes.map((e) => fileFor(e.id)).find(Boolean);
+        const curQ = cur && cur.quality && cur.quality.quality;
+        if (curQ && rank(quality.quality) <= rank(curQ)) rejections.push({ reason: `Not an upgrade for existing episode file(s). Existing quality: ${curQ.name}. New Quality ${quality.quality.name}.`, type: 'permanent' });
+        return { ...it, seasonNumber: episodes.length ? episodes[0].seasonNumber : (it.seasonNumber ?? null), episodes, episodeIds: undefined, quality, languages: langs, releaseGroup: it.releaseGroup ? groupOf(name) : '', releaseType: episodes.length > 1 ? 'multiEpisode' : 'singleEpisode', rejections, customFormats: [], customFormatScore: 0 };
       }
-      if (!it.movieId) rejections.push({ reason: 'Unknown Movie', type: 'permanent' });
       const m = library().find((x) => x.id === it.movieId);
-      return { ...it, movie: m ? { id: m.id, title: m.title, year: m.year } : undefined, rejections };
+      if (!m) return { ...it, quality, languages: langs, rejections: [{ reason: 'Unknown Movie', type: 'permanent' }] };
+      const curQ = m.movieFile && m.movieFile.quality && m.movieFile.quality.quality;
+      const rejections = curQ && rank(quality.quality) <= rank(curQ) ? [{ reason: `Not an upgrade for existing movie file. Existing quality: ${curQ.name}. New Quality ${quality.quality.name}.`, type: 'permanent' }] : [];
+      return { ...it, movie: { id: m.id, title: m.title, year: m.year }, quality, languages: langs, releaseGroup: it.releaseGroup || groupOf(name), rejections, customFormats: [], customFormatScore: 0 };
     }));
   });
   app.post('/api/v3/command', (req, res) => {
@@ -209,13 +247,22 @@ function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, libr
     if (body.name === 'ManualImport') {
       const ids = new Set((body.files || []).map((f) => f.downloadId).filter(Boolean));
       if (ids.size) setQueue(getQueue().filter((q) => !ids.has(q.downloadId)));
-      // Folder import into a series: replace each episode's file.
+      // Folder import into a series. A file already inside the series folder
+      // is imported where it is: the episodes point at it and the old file
+      // stays on disk with no episodes (as real Sonarr does). Otherwise
+      // the file is moved in and each episode's old file is recycled.
       if (kind === 'series' && fs && episodeFiles) {
         for (const f of body.files || []) {
           if (f.downloadId) continue;
           const s = library().find((x) => x.id === f.seriesId);
           if (!s) continue;
           const name = String(f.path).split('/').pop();
+          const ids = (f.episodeIds || []).map(Number);
+          if (String(f.path).toLowerCase().startsWith(`${String(s.path).toLowerCase()}/`)) {
+            for (const old of episodeFiles.filter((ef) => ef.seriesId === s.id && (ef.episodeIds || []).some((id) => ids.includes(id)))) old.episodeIds = old.episodeIds.filter((id) => !ids.includes(id));
+            episodeFiles.push({ id: nextFileId++, seriesId: s.id, seasonNumber: Math.floor((ids[0] - 5000) / 100), relativePath: String(f.path).slice(String(s.path).length + 1), path: f.path, quality: f.quality, size: 8e9, episodeIds: ids, releaseGroup: f.releaseGroup || '' });
+            continue;
+          }
           for (const old of episodeFiles.filter((ef) => ef.seriesId === s.id && (ef.episodeIds || []).some((id) => (f.episodeIds || []).includes(id)))) {
             recycled.push(old.path);
             fs.remove(old.path);
@@ -225,7 +272,7 @@ function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, libr
           const season = /S(\d+)E/i.exec(name);
           const dest = `${s.path}/Season ${season ? Number(season[1]) : 1}/${name}`;
           fs.addFile(dest);
-          episodeFiles.push({ id: 7000 + episodeFiles.length + recycled.length, seriesId: s.id, seasonNumber: season ? Number(season[1]) : 1, relativePath: dest.slice(s.path.length + 1), path: dest, quality: f.quality, size: 8e9, episodeIds: f.episodeIds });
+          episodeFiles.push({ id: nextFileId++, seriesId: s.id, seasonNumber: season ? Number(season[1]) : 1, relativePath: dest.slice(s.path.length + 1), path: dest, quality: f.quality, size: 8e9, episodeIds: f.episodeIds, releaseGroup: f.releaseGroup || '' });
         }
       }
       // Folder import into a movie that already has a file: the old file goes
@@ -246,6 +293,22 @@ function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, libr
           m.hasFile = true;
           m.sizeOnDisk = m.movieFile.size;
         }
+      }
+    }
+    // RenameFiles: the standard demo naming, in the season folder.
+    if (body.name === 'RenameFiles' && kind === 'series' && fs && episodeFiles) {
+      const s = library().find((x) => x.id === body.seriesId);
+      for (const fid of body.files || []) {
+        const ef = s && episodeFiles.find((x) => x.id === fid && x.seriesId === s.id);
+        if (!ef || !(ef.episodeIds || []).length) continue;
+        const season = Math.floor((ef.episodeIds[0] - 5000) / 100);
+        const eps = ef.episodeIds.map((id) => `E${String(id % 100).padStart(2, '0')}`).join('');
+        const ext = (/\.[^.]+$/.exec(String(ef.path)) || ['.mkv'])[0];
+        const rel = `Season ${season}/${s.title}${s.year ? ` (${s.year})` : ''} - S${String(season).padStart(2, '0')}${eps} - Episode ${ef.episodeIds[0] % 100} [${(ef.quality && ef.quality.quality && ef.quality.quality.name) || 'Unknown'}]${ext}`;
+        fs.remove(`${s.path}/${ef.relativePath}`);
+        ef.relativePath = rel;
+        ef.path = `${s.path}/${rel}`;
+        fs.addFile(ef.path);
       }
     }
     res.status(201).json({ id: cmd.id, name: cmd.name, status: cmd.status });
@@ -453,7 +516,11 @@ function makeSonarr(opts = {}) {
   });
   app.get('/api/v3/episode', (req, res) => {
     const season = Number(req.query.seasonNumber) || 1;
-    res.json(Array.from({ length: 8 }, (_, i) => ({ id: 5000 + season * 100 + i + 1, seriesId: Number(req.query.seriesId) || 1, seasonNumber: season, episodeNumber: i + 1, title: `Episode ${i + 1}`, airDateUtc: new Date(Date.now() - (8 - i) * 86400000).toISOString(), hasFile: i % 3 !== 0, monitored: true })));
+    const seriesId = Number(req.query.seriesId) || 1;
+    // Each episode points at the episode file that covers it, as real Sonarr does.
+    const fileOf = (id) => (episodeFiles.find((f) => f.seriesId === seriesId && (f.episodeIds || []).includes(id)) || {}).id || 0;
+    const count = seriesId === 1 && season === 2 ? 10 : 8;
+    res.json(Array.from({ length: count }, (_, i) => { const id = 5000 + season * 100 + i + 1; const fid = fileOf(id); return { id, seriesId, seasonNumber: season, episodeNumber: i + 1, title: `Episode ${i + 1}`, airDateUtc: new Date(Date.now() - (count - i) * 86400000).toISOString(), hasFile: fid ? true : i % 3 !== 0, episodeFileId: fid, monitored: true }; }));
   });
   app.get('/api/v3/release', (req, res) => res.json(mockReleases('Severance')));
   app.post('/api/v3/release', (req, res) => res.status(201).json({ guid: req.body.guid, approved: true }));
@@ -494,15 +561,27 @@ function makeSonarr(opts = {}) {
   const episodeFiles = opts.series ? [] : [1, 2, 3, 4].map((e) => ({ id: 700 + e, seriesId: 1, seasonNumber: 1, relativePath: `Season 1/Severance.S01E0${e}.1080p.WEB-DL.mkv`, path: `/Volumes/Media/TV/Severance/Season 1/Severance.S01E0${e}.1080p.WEB-DL.mkv`, quality: { quality: { id: 3, name: 'WEBDL-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 4e9, episodeIds: [5100 + e], mediaInfo: e === 3 ? null : { videoCodec: 'h264', audioCodec: 'EAC3', audioChannels: 5.1, audioStreamCount: 1, resolution: '1920x1080', runTime: '0:55:10' } }));
   const recycledTv = [];
   app.locals.recycled = recycledTv;
+  app.locals.fs = fs;
   // Paths are rewritten when Fix paths moves the series; keep files in step.
   const filesFor = (s) => episodeFiles.filter((ef) => ef.seriesId === s.id).map((ef) => ({ ...ef, path: `${s.path}/${ef.relativePath}` }));
   app.delete('/api/v3/episodefile/:id', (req, res) => {
     const i = episodeFiles.findIndex((ef) => ef.id === Number(req.params.id));
     if (i < 0) return res.status(404).json({ message: 'NotFound' });
     const s = series.find((x) => x.id === episodeFiles[i].seriesId);
-    recycledTv.push(s ? `${s.path}/${episodeFiles[i].relativePath}` : episodeFiles[i].path);
+    const where = s ? `${s.path}/${episodeFiles[i].relativePath}` : episodeFiles[i].path;
+    recycledTv.push(where);
+    fs.remove(where);
     episodeFiles.splice(i, 1);
     res.json({});
+  });
+  // Parse: just the parts the app reads (release group, numbers).
+  app.get('/api/v3/parse', (req, res) => {
+    const title = String(req.query.title || '');
+    if (!title) return res.json(null);
+    const name = String(req.query.path || title).split('/').pop().replace(/\.[^.]+$/, '');
+    const m = /S(\d+)E(\d+)/i.exec(name);
+    const g = /-([A-Za-z0-9]+)$/.exec(name);
+    res.json({ title, parsedEpisodeInfo: { releaseGroup: g && !/^(DL|RIP)$/i.test(g[1]) ? g[1] : null, seasonNumber: m ? Number(m[1]) : 0, episodeNumbers: m ? [Number(m[2])] : [] } });
   });
   app.get('/api/v3/episodefile', (req, res) => { const s = series.find((x) => x.id === Number(req.query.seriesId)); res.json(s ? filesFor(s) : []); });
   let mediaManagementTv = { id: 1, recycleBin: opts.series ? '' : '/Volumes/Media/.recycle', recycleBinCleanupDays: 7, copyUsingHardlinks: !opts.series };
