@@ -14,6 +14,7 @@ import { releaseSection, delaySection, releaseProfilesV5 } from '../lib/releaseD
 import { isLocalMode } from '../lib/connections.js';
 import { openPathFix } from '../lib/pathFix.js';
 import { openDuplicates } from '../lib/duplicates.js';
+import { openExistingFolders } from '../lib/existingFoldersUI.js';
 
 const HEALTH_CLS = { error: 'down', warning: 'warn', notice: 'info' };
 // Health checks that Fix paths can resolve: missing root folders and items
@@ -23,13 +24,15 @@ export function isPathHealth(check) {
     || /root folder|missing root|does not exist|is missing/i.test((check && check.message) || '');
 }
 
-// ?tool=fixpaths | duplicates opens a tool (used by the command palette).
+// ?tool=fixpaths | duplicates | addfolders | checkfiles opens a tool (used by the command palette).
 function openRequestedTool(arr, ctx, kind) {
   const tool = ctx.params && ctx.params.tool;
   if (!tool) return;
   if (ctx.setParams) ctx.setParams({ tool: '' });
   if (tool === 'fixpaths') openPathFix(arr, ctx, kind);
   else if (tool === 'duplicates') openDuplicates(arr, ctx, kind);
+  else if (tool === 'addfolders') openExistingFolders(arr, ctx, kind);
+  else if (tool === 'checkfiles') openFileHealth(arr, ctx, kind);
 }
 
 export async function tabSystem(root, arr, ctx, kind) {
@@ -67,7 +70,8 @@ export async function tabSystem(root, arr, ctx, kind) {
         ...commands.map(([name, label]) => h('button', { class: 'btn sm', onclick: () => run(name) }, label)),
         h('button', { class: 'btn sm primary', title: 'Re-point moved libraries to the real disk (e.g. after a Windows → Mac move)', onclick: () => openPathFix(arr, ctx, kind) }, '🛠 Fix paths'),
         h('button', { class: 'btn sm', title: 'Find duplicate entries and choose which to delete', onclick: () => openDuplicates(arr, ctx, kind) }, '🔍 Find duplicates'),
-        h('button', { class: 'btn sm', title: 'Find files that look broken or mislabelled', onclick: () => openFileHealth(arr, ctx, kind) }, '🩺 Check files'),
+        h('button', { class: 'btn sm', title: 'Find files that look broken, mislabelled or in the wrong language', onclick: () => openFileHealth(arr, ctx, kind) }, '🩺 Check files'),
+        h('button', { class: 'btn sm', title: `Add folders in your root folders that ${ctx.service.label} doesn’t manage yet`, onclick: () => openExistingFolders(arr, ctx, kind) }, '📂 Add existing folders'),
         h('button', { class: 'btn sm', title: 'Where the space goes, largest titles and growth', onclick: () => openInsights(arr, ctx, kind) }, '📊 Insights'),
         h('button', { class: 'btn sm', title: 'Entries that waste searches or clutter the library, with bulk fixes', onclick: () => openTidyUp(arr, ctx, kind) }, 'Tidy up'),
         kind === 'movie' ? h('button', { class: 'btn sm', title: 'Trilogies and franchises you’ve started but not finished', onclick: () => openCollections(arr, ctx) }, 'Collections') : null,

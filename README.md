@@ -736,6 +736,16 @@ the quality's minimum, a 2160p label on an HD picture, or an old codec like XviD
 or Replace (deletes the file through the app, to its Recycle Bin if set, and searches; asks
 first). CSV export.
 
+It also checks **audio and subtitle languages** against the language you watch in (English unless
+you pick another, or turn it off), from the language tags inside each file: no audio in your
+language in a title whose original language is yours is a problem (an Italian-only copy of an
+English film); your language not being the first audio track is a check (iTA-ENG releases start in
+Italian in many players); a foreign-language title with neither audio nor subtitles in your language
+is a note. A Japanese anime with English subtitles, or an English dub after the Japanese track, is
+fine. Files without language tags aren't flagged (they're counted). "Not a problem" stops flagging a
+file's languages, and when another copy of the title is on disk (a folder the app doesn't manage, or
+another file for the episode in the show's folder) it's shown with a link to Find duplicates.
+
 **Insights** (System tab) — storage by quality, resolution and video codec, the largest titles,
 a rough HEVC saving estimate (assumes re-encoded H.264 ends up half the size) and growth over
 time from a size snapshot the server saves once a day per instance.
@@ -809,6 +819,23 @@ with the keyboard), or map a whole moved folder ("old → new", with suggestions
 re-points only the ticked items, **without moving files**, adds the new root folders, can remove
 dead ones, and rescans just those items. The last five fixes can each be undone, and the plan can
 be exported as CSV. Admins only.
+
+**Add existing folders** (Sonarr, Radarr → System tab) — the folders in your root folders that
+the app doesn't manage yet (its own unmapped-folder list), matched to a show or movie by name and
+year with the app's own lookup, then added **at their own path**, as Sonarr's and Radarr's Library
+Import do. Nothing is moved, renamed or searched for, and monitoring defaults to off (Sonarr: nothing,
+episodes on disk, or all; Radarr: no or yes). Quality profile, series type, season folders and minimum
+availability default to what the titles already in that root folder use. Each folder shows how sure the
+match is (same name and year, same name, or "check"); among several titles with the name, one already
+in the app or a far better-known one is taken, otherwise you choose from the list or search another
+name. Only sure matches are ticked, one folder per title. Folders whose title is already in the app
+are listed apart (they're other copies; see Find duplicates), and downloads of single episodes or
+seasons, failed downloads, movie packs, empty folders and folders you hide aren't offered (with the
+reason). After adding, it waits for the app to read the folders: Radarr can't name a file with no
+year in the folder or file name ("Juno/Juno.mkv"), so those are linked with Radarr's Manual Import
+where they are (quality from the name, or from the file type as Radarr does), and files the app still
+can't read (episodes without numbers, a sequel in the same folder) are listed for Manual Import. Adding
+asks twice; linking files needs delete rights, as other Manual Imports do. CSV export.
 
 **Duplicate finder** (Sonarr, Radarr → System tab) — groups entries by shared TMDB/TVDB/IMDb id
 ("same title") or, when ids are missing, by title and year ("possible"; never preselected). Two

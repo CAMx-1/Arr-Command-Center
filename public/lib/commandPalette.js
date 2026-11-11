@@ -20,6 +20,8 @@ function commandSet({ services, go, openSearch, openShortcuts }) {
       for (const tab of ['queue', 'wanted', 'history', 'system']) commands.push({ label: `${service.label}: ${tab}`, hint: 'Service tab', run: () => go(service.key, { tab }) });
       commands.push({ label: `${service.label}: Fix paths`, hint: 'Tool', run: () => go(service.key, { tab: 'system', tool: 'fixpaths' }) });
       commands.push({ label: `${service.label}: Find duplicates`, hint: 'Tool', run: () => go(service.key, { tab: 'system', tool: 'duplicates' }) });
+      commands.push({ label: `${service.label}: Add existing folders`, hint: 'Tool', run: () => go(service.key, { tab: 'system', tool: 'addfolders' }) });
+      commands.push({ label: `${service.label}: Check files`, hint: 'Tool', run: () => go(service.key, { tab: 'system', tool: 'checkfiles' }) });
       for (const view of loadSavedViews(service.key)) commands.push({ label: `${service.label}: ${view.name}`, hint: 'Saved view', run: () => go(service.key, view.params) });
     }
   }

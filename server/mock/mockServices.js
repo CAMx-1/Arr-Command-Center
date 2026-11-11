@@ -146,6 +146,7 @@ function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, libr
   const qualities = [
     { id: 1, quality: { id: 1, name: 'SDTV' }, title: 'SDTV', minSize: 2, maxSize: 100 },
     { id: 2, quality: { id: 4, name: 'HDTV-720p' }, title: 'HDTV-720p', minSize: 17.1, maxSize: 400 },
+    { id: 7, quality: { id: 5, name: 'WEBDL-720p' }, title: 'WEBDL-720p', minSize: 12.5, maxSize: 400 },
     { id: 3, quality: { id: 3, name: 'WEBDL-1080p' }, title: 'WEBDL-1080p', minSize: 12.5, maxSize: 400 },
     { id: 4, quality: { id: 7, name: 'Bluray-1080p' }, title: 'Bluray-1080p', minSize: 50.4, maxSize: 400 },
     { id: 5, quality: { id: 18, name: 'WEBDL-2160p' }, title: 'WEBDL-2160p', minSize: 34.5, maxSize: 1000 },
@@ -289,7 +290,8 @@ function mountManualImportMock(app, { kind, candidates, getQueue, setQueue, libr
           }
           if (body.importMode !== 'copy') fs.remove(f.path);
           fs.addFile(`${m.path}/${name}`);
-          m.movieFile = { id: (m.movieFile ? m.movieFile.id : 900) + 1, movieId: m.id, relativePath: name, path: `${m.path}/${name}`, quality: f.quality, size: 61203283968 };
+          // Radarr reads the media info of a file it imports.
+          m.movieFile = { id: (m.movieFile ? m.movieFile.id : 900) + 1, movieId: m.id, relativePath: name, path: `${m.path}/${name}`, quality: f.quality, size: 61203283968, mediaInfo: { videoCodec: 'x264', audioCodec: 'AC3', audioChannels: 5.1, audioStreamCount: 1, audioLanguages: 'eng', subtitles: '', resolution: '1920x1080', runTime: `${Math.floor((m.runtime || 110) / 60)}:${String((m.runtime || 110) % 60).padStart(2, '0')}:00` } };
           m.hasFile = true;
           m.sizeOnDisk = m.movieFile.size;
         }
@@ -412,6 +414,46 @@ function mountBackupMock(app, appName, v) {
   });
 }
 
+// Lookups for "Add existing folders" and Add series/movie: a small catalog
+// searched by name; titles already in the library come back as the library
+// entry (with its id and path), as in the real apps.
+const cleanT = (t) => String(t || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/&/g, ' and ').replace(/['’`]/g, '').replace(/\s*\((?:us|uk|19\d\d|20\d\d)\)\s*$/, '').replace(/[^a-z0-9]+/g, ' ').trim().replace(/^the /, '');
+const EN = { id: 1, name: 'English' };
+const SERIES_CATALOG = [
+  ['Friends', 1994, 79168, 'NBC', 'ended', 10, 'Six friends navigate life and love in Manhattan.'],
+  ["That '70s Show", 1998, 73787, 'FOX', 'ended', 8, 'Teenagers hang out in a Wisconsin basement in the 1970s.'],
+  ['Ghosts (2019)', 2019, 359728, 'BBC One', 'ended', 5, 'A young couple inherit a country house full of ghosts.'],
+  ['Ghosts (US)', 2021, 384435, 'CBS', 'continuing', 4, 'A couple open a bed and breakfast in a haunted house.'],
+  ['Medium', 2005, 73265, 'NBC', 'ended', 7, 'A mother uses her psychic gifts to help solve crimes.'],
+  ["It's Always Sunny in Philadelphia", 2005, 75805, 'FXX', 'continuing', 17, 'Five friends run a bar in Philadelphia.'],
+  ['Californication', 2007, 80349, 'Showtime', 'ended', 7, 'A novelist struggles with writer’s block and his family.'],
+  ['Severance', 2022, 371980, 'Apple TV+', 'continuing', 2, 'Employees at Lumon undergo a procedure that severs their memories.'],
+  ['The Bear', 2022, 388477, 'FX', 'continuing', 3, 'A young chef returns to Chicago to run his family sandwich shop.'],
+  ['Foundation', 2021, 358711, 'Apple TV+', 'continuing', 2, 'Exiles race to save humanity.'],
+].map(([title, year, tvdbId, network, status, n, overview]) => ({ title, sortTitle: cleanT(title), year, tvdbId, network, status, overview, titleSlug: cleanT(title).replace(/ /g, '-'), seriesType: 'standard', originalLanguage: EN, runtime: 30, firstAired: `${year}-01-15T00:00:00Z`, images: [], seasons: Array.from({ length: n }, (_, i) => ({ seasonNumber: i + 1, monitored: true })) }));
+const MOVIE_CATALOG = [
+  ['Amélie', 2001, 194, 'Le Fabuleux Destin d’Amélie Poulain', { id: 2, name: 'French' }, 'UGC'],
+  ['The Whale', 2022, 785084, 'The Whale', EN, 'A24'],
+  ['Juno', 2007, 7326, 'Juno', EN, 'Fox Searchlight'],
+  ['Sicario: Day of the Soldado', 2018, 400535, 'Sicario: Day of the Soldado', EN, 'Columbia'],
+  ['Gladiator', 2000, 98, 'Gladiator', EN, 'DreamWorks'],
+  ['Gladiator II', 2024, 558449, 'Gladiator II', EN, 'Paramount'],
+  ['Dune: Part Two', 2024, 693134, 'Dune: Part Two', EN, 'Legendary'],
+].map(([title, year, tmdbId, originalTitle, originalLanguage, studio]) => ({ title, originalTitle, year, tmdbId, originalLanguage, studio, status: 'released', titleSlug: `${cleanT(title).replace(/ /g, '-')}-${tmdbId}`, overview: '', runtime: 110, images: [] }));
+function searchCatalog(catalog, term, library, idField) {
+  let q = cleanT(term); let year = null;
+  const y = /\s((?:19|20)\d\d)$/.exec(q); if (y) { year = Number(y[1]); q = q.slice(0, y.index).trim(); }
+  if (!q) return [];
+  const hits = catalog.map((c) => ({ c, t: cleanT(c.title), o: cleanT(c.originalTitle || '') }))
+    .filter(({ t, o }) => t.includes(q) || q.includes(t) || (o && (o.includes(q) || q.includes(o))))
+    .sort((a, b) => ((b.t === q || b.o === q) - (a.t === q || a.o === q)) || ((year && b.c.year === year) - (year && a.c.year === year)) || a.t.length - b.t.length);
+  return hits.map(({ c }) => library().find((x) => x[idField] === c[idField]) || { ...c });
+}
+// The videos below a folder, with paths.
+const videosBelow = (fs, dir) => { const out = []; const walk = (d) => { for (const c of (fs && fs.children(d)) || []) { if (c.type === 'file') { if (/\.(mkv|mp4|avi|m4v|ts)$/i.test(c.name)) out.push(c); } else walk(c.path); } }; walk(dir); return out; };
+const firstVideo = (fs, dir) => { const walk = (d) => { for (const c of (fs && fs.children(d)) || []) { if (c.type === 'file') { if (/\.(mkv|mp4|avi|m4v|ts)$/i.test(c.name)) return c; } else { const f = walk(c.path); if (f) return f; } } return null; }; return walk(dir); };
+const samePath = (a, b) => String(a || '').replace(/[\\/]+$/, '').toLowerCase() === String(b || '').replace(/[\\/]+$/, '').toLowerCase();
+
 function makeSonarr(opts = {}) {
   const app = express();
   app.use(express.json());
@@ -436,6 +478,7 @@ function makeSonarr(opts = {}) {
   ];
   if (opts.series) series = opts.series.map((s) => ({ ...s }));
   else series = fillSonarrLibrary(series, opts.librarySize);
+  for (const x of series) if (!x.originalLanguage) x.originalLanguage = EN;
   let queue = [
     { id: 101, title: 'Severance S02E10', seriesId: 1, downloadId: 'SABnzbd_nzo_sev0210', status: 'downloading', trackedDownloadStatus: 'ok', trackedDownloadState: 'downloading', size: 2147483648, sizeleft: 536870912, timeleft: '00:04:12', estimatedCompletionTime: new Date(Date.now() + 252000).toISOString(), downloadClient: 'SABnzbd', indexer: 'NZBgeek' },
     { id: 102, title: 'The.Bear.S03E05.Children.1080p.WEB.h264-ETHEL', seriesId: 2, downloadId: 'SABnzbd_nzo_bear0305', status: 'completed', trackedDownloadStatus: 'warning', trackedDownloadState: 'importBlocked', size: 1610612736, sizeleft: 0, downloadClient: 'SABnzbd', indexer: 'NZBgeek', statusMessages: [{ title: 'The.Bear.S03E05.Children.1080p.WEB.h264-ETHEL', messages: ['Found matching series via grab history, but release was matched to series by ID. Automatic import is not possible.'] }] },
@@ -474,13 +517,42 @@ function makeSonarr(opts = {}) {
   app.get('/api/v3/series/lookup', (req, res) => {
     const term = (req.query.term || '').toString();
     const tvdb = /^tvdb:(\d+)$/.exec(term);
+    const known = tvdb && series.find((x) => x.tvdbId === Number(tvdb[1]));
+    if (known) return res.json([known]);
+    const hits = tvdb ? [] : searchCatalog(SERIES_CATALOG, term, () => series, 'tvdbId');
+    if (hits.length) return res.json(hits);
     if (tvdb) return res.json([{ title: 'Arcane', year: 2021, tvdbId: Number(tvdb[1]), status: 'ended', overview: 'The origins of two iconic League champions.', network: 'Netflix', images: [], seasons: [{ seasonNumber: 1, monitored: true }, { seasonNumber: 2, monitored: true }] }]);
     res.json([
       { title: `${term || 'Andor'}`, year: 2022, tvdbId: 371980, status: 'continuing', overview: 'A drama set in the Star Wars universe.', network: 'Disney+', images: [], seasons: [] },
       { title: `${term || 'Andor'} (Documentary)`, year: 2023, tvdbId: 999001, status: 'ended', overview: 'Behind the scenes.', network: 'Disney+', images: [], seasons: [] },
     ]);
   });
-  app.post('/api/v3/series', (req, res) => { const s = { id: series.length + 1, ...req.body, statistics: { episodeFileCount: 0, episodeCount: 0, percentOfEpisodes: 0, sizeOnDisk: 0 } }; series.push(s); res.status(201).json(s); });
+  // Like Sonarr: one entry per show and per folder; the folder's files count
+  // as episode files once it's added (Sonarr scans the folder).
+  let addedFileId = 8000;
+  app.post('/api/v3/series', (req, res) => {
+    const b = req.body || {};
+    if (b.tvdbId && series.some((x) => x.tvdbId === b.tvdbId)) return res.status(400).json([{ propertyName: 'TvdbId', errorMessage: 'This series has already been added', attemptedValue: b.tvdbId, severity: 'error' }]);
+    const path = b.path || `${String(b.rootFolderPath || '/tv').replace(/[\\/]+$/, '')}/${b.title}`;
+    if (series.some((x) => samePath(x.path, path))) return res.status(400).json([{ propertyName: 'Path', errorMessage: 'Path is already configured for an existing series', attemptedValue: path, severity: 'error' }]);
+    const { addOptions } = b;
+    const id = Math.max(0, ...series.map((x) => x.id)) + 1;
+    // Like Sonarr's scan: files with episode numbers (S01E03, 1x03, or "03 -"
+    // inside a season folder) become episode files; others aren't read.
+    let read = 0;
+    for (const v of videosBelow(fs, path)) {
+      const rel = String(v.path).slice(path.length + 1);
+      const m = /S(\d{1,2})E(\d{1,3})/i.exec(v.name) || /(\d{1,2})x(\d{2,3})/i.exec(v.name);
+      const inSeason = /^Season (\d+)\//i.exec(rel); const lead = /^(\d{1,3})\s*-\s/.exec(v.name);
+      const sn = m ? Number(m[1]) : inSeason && lead ? Number(inSeason[1]) : null; const en = m ? Number(m[2]) : lead ? Number(lead[1]) : null;
+      if (sn == null || en == null) continue;
+      read += 1;
+      episodeFiles.push({ id: (addedFileId += 1), seriesId: id, seasonNumber: sn, relativePath: rel, path: v.path, quality: { quality: qualityFromName(v.name), revision: { version: 1, real: 0, isRepack: false } }, size: 1.5e9, episodeIds: [5000 + sn * 100 + en], mediaInfo: { videoCodec: 'h264', audioCodec: 'AAC', audioChannels: 2, audioStreamCount: 1, audioLanguages: 'eng', subtitles: '', resolution: '1920x1080', runTime: '0:22:00' } });
+    }
+    const s = { ...b, id, path, monitored: b.monitored !== false && !(addOptions && addOptions.monitor === 'none'), added: new Date().toISOString(), statistics: { episodeFileCount: read, episodeCount: read, percentOfEpisodes: read ? 100 : 0, sizeOnDisk: read * 1.5e9 } };
+    series.push(s);
+    res.status(201).json(s);
+  });
   const importsSince = (req, res) => {
     const d = (h) => new Date(Date.now() - h * 3600000).toISOString();
     const since = Date.parse(req.query.date || 0) || 0;
@@ -558,7 +630,7 @@ function makeSonarr(opts = {}) {
   ]));
   app.put('/api/v3/episode/monitor', (req, res) => res.json({ updated: ((req.body && req.body.episodeIds) || []).length, monitored: !!(req.body && req.body.monitored) }));
   // Episode files (Severance S01E01-04 at 1080p in the demo) and a recycle bin.
-  const episodeFiles = opts.series ? [] : [1, 2, 3, 4].map((e) => ({ id: 700 + e, seriesId: 1, seasonNumber: 1, relativePath: `Season 1/Severance.S01E0${e}.1080p.WEB-DL.mkv`, path: `/Volumes/Media/TV/Severance/Season 1/Severance.S01E0${e}.1080p.WEB-DL.mkv`, quality: { quality: { id: 3, name: 'WEBDL-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 4e9, episodeIds: [5100 + e], mediaInfo: e === 3 ? null : { videoCodec: 'h264', audioCodec: 'EAC3', audioChannels: 5.1, audioStreamCount: 1, resolution: '1920x1080', runTime: '0:55:10' } }));
+  const episodeFiles = opts.series ? [] : [1, 2, 3, 4].map((e) => ({ id: 700 + e, seriesId: 1, seasonNumber: 1, relativePath: `Season 1/Severance.S01E0${e}.1080p.WEB-DL.mkv`, path: `/Volumes/Media/TV/Severance/Season 1/Severance.S01E0${e}.1080p.WEB-DL.mkv`, quality: { quality: { id: 3, name: 'WEBDL-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 4e9, episodeIds: [5100 + e], mediaInfo: e === 3 ? null : { videoCodec: 'h264', audioCodec: 'EAC3', audioChannels: 5.1, audioStreamCount: e === 4 ? 2 : 1, audioLanguages: { 1: 'eng', 2: 'ita', 4: 'ita/eng' }[e], subtitles: e === 1 ? 'eng' : '', resolution: '1920x1080', runTime: '0:55:10' } }));
   const recycledTv = [];
   app.locals.recycled = recycledTv;
   app.locals.fs = fs;
@@ -766,7 +838,7 @@ function makeRadarr(opts = {}) {
       indexers: [RI.nzbgeek(1), RI.drunkenslug(2)],
     });
   let movies = [
-    { id: 1, title: 'Dune: Part Two', year: 2024, tmdbId: 693134, status: 'released', monitored: true, hasFile: true, runtime: 166, overview: 'Paul Atreides unites with the Fremen to wage war against House Harkonnen.', path: 'C:\\Media\\Movies\\Dune Part Two (2024)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 32212254720, studio: 'Legendary', images: [], movieFile: { id: 101, movieId: 1, relativePath: 'Dune.Part.Two.mkv', quality: { quality: { id: 7, name: 'Bluray-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 32212254720, mediaInfo: { videoCodec: 'x264', audioCodec: 'DTS-HD MA', audioChannels: 7.1, audioStreamCount: 2, resolution: '1920x804', runTime: '2:46:12', videoBitrate: 24000000 } } },
+    { id: 1, title: 'Dune: Part Two', year: 2024, tmdbId: 693134, status: 'released', monitored: true, hasFile: true, runtime: 166, overview: 'Paul Atreides unites with the Fremen to wage war against House Harkonnen.', path: 'C:\\Media\\Movies\\Dune Part Two (2024)', rootFolderPath: 'C:\\Media\\Movies', sizeOnDisk: 32212254720, studio: 'Legendary', images: [], movieFile: { id: 101, movieId: 1, relativePath: 'Dune.Part.Two.mkv', quality: { quality: { id: 7, name: 'Bluray-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 32212254720, mediaInfo: { videoCodec: 'x264', audioCodec: 'DTS-HD MA', audioChannels: 7.1, audioStreamCount: 2, audioLanguages: 'ita/eng', subtitles: 'ita/eng', resolution: '1920x804', runTime: '2:46:12', videoBitrate: 24000000 } } },
     { id: 2, title: 'Oppenheimer', year: 2023, tmdbId: 872585, status: 'released', monitored: true, hasFile: true, runtime: 180, overview: 'The story of J. Robert Oppenheimer and the atomic bomb.', path: 'C:\\Media\\Movies2\\Oppenheimer (2023)', rootFolderPath: 'C:\\Media\\Movies2', sizeOnDisk: 27917287424, studio: 'Universal', images: [], movieFile: { id: 102, movieId: 2, relativePath: 'Oppenheimer.2023.1080p.mkv', quality: { quality: { id: 7, name: 'Bluray-1080p', resolution: 1080 }, revision: { version: 1, real: 0, isRepack: false } }, size: 27917287424, mediaInfo: { videoCodec: 'x265', audioCodec: '', audioChannels: 0, audioStreamCount: 0, resolution: '1920x1080', runTime: '3:00:21' } } },
     { id: 3, title: 'Furiosa', year: 2024, tmdbId: 786892, status: 'released', monitored: true, hasFile: false, runtime: 148, overview: 'The origin story of Furiosa before Mad Max: Fury Road.', path: 'C:\\Media\\Movies3\\Furiosa (2024)', rootFolderPath: 'C:\\Media\\Movies3', sizeOnDisk: 0, studio: 'Warner Bros', images: [] },
     { id: 4, title: 'Dune: Part Two', year: 2024, tmdbId: 693134, status: 'released', monitored: false, hasFile: false, runtime: 166, overview: 'Duplicate entry added on another drive.', path: 'C:\\Media\\Movies2\\Dune Part Two (2024)', rootFolderPath: 'C:\\Media\\Movies2', sizeOnDisk: 0, studio: 'Legendary', images: [] },
@@ -774,6 +846,7 @@ function makeRadarr(opts = {}) {
   ];
   if (opts.movies) movies = opts.movies.map((m) => ({ ...m }));
   else movies = fillRadarrLibrary(movies, opts.librarySize);
+  for (const m of movies) if (!m.originalLanguage) m.originalLanguage = EN;
   let queue = [
     { id: 201, title: 'Furiosa 2024 2160p', movieId: 3, downloadId: 'SABnzbd_nzo_furiosa', status: 'downloading', trackedDownloadStatus: 'ok', trackedDownloadState: 'downloading', size: 21474836480, sizeleft: 6442450944, timeleft: '00:11:38', downloadClient: 'SABnzbd', indexer: 'DrunkenSlug' },
     // Imported, still seeding, with a warning — finished, not a problem.
@@ -858,13 +931,31 @@ function makeRadarr(opts = {}) {
   app.get('/api/v3/movie/lookup', (req, res) => {
     const term = (req.query.term || '').toString();
     const tmdb = /^tmdb:(\d+)$/.exec(term);
+    const hits = tmdb ? [] : searchCatalog(MOVIE_CATALOG, term, () => movies, 'tmdbId');
+    if (hits.length) return res.json(hits);
     if (tmdb) { const known = COLLECTIONS.flatMap((c) => c.movies).find((m) => m.tmdbId === Number(tmdb[1])); return res.json([known ? { ...known, titleSlug: String(known.tmdbId), overview: '' } : { title: 'The Wild Robot', year: 2024, tmdbId: Number(tmdb[1]), status: 'released', overview: 'A robot learns to survive in the wilderness.', studio: 'DreamWorks', images: [] }]); }
     res.json([
       { title: `${term || 'Gladiator II'}`, year: 2024, tmdbId: 558449, status: 'released', overview: 'Years after Maximus, Lucius must fight for Rome.', studio: 'Paramount', images: [] },
       { title: `${term || 'Gladiator'}`, year: 2000, tmdbId: 98, status: 'released', overview: 'A betrayed Roman general seeks revenge.', studio: 'DreamWorks', images: [] },
     ]);
   });
-  app.post('/api/v3/movie', (req, res) => { const m = { id: movies.length + 1, ...req.body, hasFile: false, sizeOnDisk: 0 }; movies.push(m); res.status(201).json(m); });
+  // Like Radarr: one entry per movie and per folder; a video in the folder
+  // becomes its file once it's added (Radarr scans the folder).
+  app.post('/api/v3/movie', (req, res) => {
+    const b = req.body || {};
+    if (b.tmdbId && movies.some((x) => x.tmdbId === b.tmdbId)) return res.status(400).json([{ propertyName: 'TmdbId', errorMessage: 'This movie has already been added', attemptedValue: b.tmdbId, severity: 'error' }]);
+    const path = b.path || `${String(b.rootFolderPath || '/movies').replace(/[\\/]+$/, '')}/${b.title} (${b.year})`;
+    if (movies.some((x) => samePath(x.path, path))) return res.status(400).json([{ propertyName: 'Path', errorMessage: 'Path is already configured for an existing movie', attemptedValue: path, severity: 'error' }]);
+    const id = Math.max(0, ...movies.map((x) => x.id)) + 1;
+    // Like Radarr's scan: a file is read only when the folder or file name has a year.
+    const found = firstVideo(fs, path);
+    const v = found && /(?:^|[^0-9])(?:19|20)\d\d(?:[^0-9]|$)/.test(`${String(path).split('/').pop()} ${found.name}`.replace(/\b(?:2160|1080|720|480)p\b/gi, '')) ? found : null;
+    const { addOptions } = b;
+    const movieFile = v ? { id: 1000 + id, movieId: id, relativePath: v.name, quality: { quality: qualityFromName(v.name), revision: { version: 1, real: 0, isRepack: false } }, size: 8e9, mediaInfo: { videoCodec: 'x264', audioCodec: 'AC3', audioChannels: 5.1, audioStreamCount: 1, audioLanguages: b.originalLanguage && b.originalLanguage.name === 'French' ? 'fre' : 'eng', subtitles: '', resolution: '1920x1080', runTime: '1:50:00' } } : undefined;
+    const m = { ...b, id, path, monitored: b.monitored !== false && !(addOptions && addOptions.monitor === 'none'), hasFile: !!v, sizeOnDisk: v ? 8e9 : 0, movieFile, added: new Date().toISOString() };
+    movies.push(m);
+    res.status(201).json(m);
+  });
   app.get('/api/v3/release', (req, res) => res.json(mockReleases('Furiosa')));
   app.post('/api/v3/release', (req, res) => res.status(201).json({ guid: req.body.guid, approved: true }));
   app.get('/api/v3/health', (req, res) => res.json(missingRootsHealth(rootFolders, fs, 'radarr')));

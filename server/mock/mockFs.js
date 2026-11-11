@@ -78,6 +78,11 @@ export function createMockFs(tree, { disks = [] } = {}) {
       return { ...r, accessible, freeSpace: accessible ? r.freeSpace || (disk ? disk.freeSpace : 1099511627776) : 0, unmappedFolders: unmapped };
     };
     app.get(`${prefix}/rootfolder`, (req, res) => res.json(rootFolders().map(rootView)));
+    // ?timeout=false is the full list (the list above stops after 5 s in the real apps).
+    app.get(`${prefix}/rootfolder/:id`, (req, res) => {
+      const r = rootFolders().find((x) => x.id === Number(req.params.id));
+      return r ? res.json(rootView(r)) : res.status(404).json({ message: 'NotFound' });
+    });
     app.post(`${prefix}/rootfolder`, (req, res) => {
       const path = String((req.body && req.body.path) || '');
       if (!exists(path)) return res.status(400).json([{ propertyName: 'Path', errorMessage: "Folder '" + path + "' does not exist" }]);
@@ -109,7 +114,23 @@ export function sonarrDemoFs() {
       Media: { TV: { Severance: { 'Season 1': Object.fromEntries([1, 2, 3, 4].map((e) => [`Severance.S01E0${e}.1080p.WEB-DL.mkv`, { __file: true }])) }, 'The Bear': {}, 'Shogun (2024)': {} } },
       Archive: { TV: { Foundation: {} }, TV2: { Severance: { 'Season 1': Object.fromEntries([1, 2, 3].map((e) => [`Severance.S01E0${e}.2160p.UHD.BluRay.mkv`, { __file: true }])), 'Season 2': { 'Severance.S02E10.2160p.WEB.mkv': { __file: true } } } } },
     },
-    config: { logs: {} }, proc: {}, data: { tv: {}, usenet: { tv: {} } },
+    config: { logs: {} }, proc: {},
+    // Folders Sonarr doesn't manage yet ("Add existing folders"): shows to
+    // add, one already in Sonarr under another folder, and downloads that
+    // aren't shows.
+    data: { tv: {
+      Friends: { 'Season 01': { 'Friends.S01E01.The.One.Where.Monica.Gets.a.Roommate.1080p.WEB-DL.mkv': { __file: true }, 'Friends.S01E02.The.One.with.the.Sonogram.at.the.End.1080p.WEB-DL.mkv': { __file: true }, 'The One with the Thumb.mkv': { __file: true } } },
+      'That 70s Show': { 'Season 1': { 'That.70s.Show.S01E01.1080p.WEB-DL.mkv': { __file: true } } },
+      Ghosts: { 'Season 1': { 'Ghosts.S01E01.1080p.WEB.mkv': { __file: true } } },
+      'Medium (2005)': { 'Season 1': { 'Medium.S01E01.Pilot.1080p.WEB-DL.mkv': { __file: true } } },
+      "It's always Sunny": { 'Season 1': { 'Its.Always.Sunny.in.Philadelphia.S01E01.1080p.mkv': { __file: true } } },
+      'Californication Season S01-S02 1080p BluRay x264-MIXED': { 'Season 1': { 'Californication.S01E01.1080p.BluRay.x264.mkv': { __file: true } }, 'Season 2': { 'Californication.S02E01.1080p.BluRay.x264.mkv': { __file: true } } },
+      'Severance 4K': { 'Season 1': { 'Severance.S01E01.2160p.WEB-DL.mkv': { __file: true } } },
+      'Severance.S01E05.1080p.WEB-DL-GRP': { 'Severance.S01E05.1080p.WEB-DL-GRP.mkv': { __file: true } },
+      'Bluey.S02.1080p.WEB-DL-GRP': { 'Bluey.S02E01.1080p.WEB-DL-GRP.mkv': { __file: true } },
+      '_FAILED_Some.Show.S01E01.1080p.WEB': {},
+      'Old Recordings': {},
+    }, usenet: { tv: {} } },
   }, { disks: [
     { path: '/', label: 'Macintosh HD', freeSpace: 312e9, totalSpace: 994e9 },
     { path: '/Volumes/Media', label: 'Media', freeSpace: 1.2e12, totalSpace: 8e12 },
@@ -133,7 +154,17 @@ export function radarrDemoFs() {
       Movies2: { 'Oppenheimer (2023)': {}, 'Dune Part Two (2024)': { 'Dune.Part.Two.2024.2160p.UHD.BluRay.mkv': { __file: true } } },
       Movies3: { 'Furiosa.A.Mad.Max.Saga.2024.2160p.UHD.BluRay': { 'Furiosa.2024.2160p.mkv': { __file: true } }, 'Furiosa (2024) extras': { 'notes.txt': { __file: true } }, downloads: { movies: {} } },
     },
-    config: {}, data: { movies: {}, usenet: { movies: {} } },
+    config: {},
+    // Folders Radarr doesn't manage yet ("Add existing folders").
+    data: { movies: {
+      'Amelie (2001)': { 'Amelie.2001.1080p.BluRay.x264.mkv': { __file: true } },
+      'The.Whale.2022.1080p.BluRay.x264-SPHD': { 'The.Whale.2022.1080p.BluRay.x264-SPHD.mkv': { __file: true }, 'The.Whale.2022.1080p.BluRay.x264-SPHD.nfo': { __file: true } },
+      Juno: { 'Juno.mkv': { __file: true } },
+      Gladiator: { 'Gladiator.mkv': { __file: true } },
+      'Sicario-Day.of.the.Soldado.[2018].[1080p.BluRay.x265-DarQ]': { 'Sicario-Day.of.the.Soldado.2018.mkv': { __file: true } },
+      'James.Bond.PACK.1080p.BluRay.x264-HDSpace': { 'Dr.No.1962.1080p.BluRay.mkv': { __file: true }, 'Goldfinger.1964.1080p.BluRay.mkv': { __file: true } },
+      'Home Videos': {},
+    }, usenet: { movies: {} } },
   }, { disks: [
     { path: '/', label: 'Macintosh HD', freeSpace: 312e9, totalSpace: 994e9 },
     { path: '/Volumes/Movies', label: 'Movies', freeSpace: 0.8e12, totalSpace: 6e12 },
