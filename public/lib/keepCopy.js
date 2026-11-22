@@ -61,6 +61,8 @@ async function candidatePaths(arr, { folder, files, inUse, season = null }) {
 
 // POST manualimport for each file, for this series or movie. With no episodes
 // given, Sonarr matches the file to episodes itself, as its Manual Import does.
+// Also used by the untracked-files tool.
+export async function evaluateFiles(arr, kind, item, paths, onProgress = () => {}) { return evaluate(arr, kind, item, paths, onProgress); }
 async function evaluate(arr, kind, item, paths, onProgress = () => {}) {
   // Sonarr 4 returns the release group it was sent (Sonarr 5 and Radarr fill
   // it in), so read it the way Sonarr parses the file first.

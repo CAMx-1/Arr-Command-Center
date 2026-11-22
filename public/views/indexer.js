@@ -180,6 +180,7 @@ function resultRow(it, ctx) {
       h('div', { class: 'meta-line', style: { marginTop: '4px' } },
         h('span', { class: 'pill muted' }, catLabel(it.cat)),
         h('span', {}, fmtBytes(it.size)),
+        it.files > 0 ? h('span', { title: 'Number of files in this download' }, `${it.files.toLocaleString()} ${it.files === 1 ? 'file' : 'files'}`) : null,
         h('span', {}, `${it.grabs} grab${it.grabs === 1 ? '' : 's'}`),
         it.pubDate ? h('span', {}, fmtRelative(it.pubDate)) : null,
       ),

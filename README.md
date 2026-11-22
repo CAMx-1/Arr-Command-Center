@@ -361,6 +361,16 @@ explicit legacy fallback, but new book-manager setups should use Bindery.
 See Bindery's [official migration guide](https://github.com/vavallee/bindery/blob/main/docs/Migrating-From-Readarr-Wiki.md)
 for two-instance ebook/audiobook migrations and library-scan details.
 
+### Chaptarr and other Readarr-compatible apps
+
+Chaptarr speaks Readarr's v1 API, so add it as a `readarr` service. The "Legacy Readarr"
+notice only shows when the app reports itself as Readarr, and `"icon": "chaptarr"` gives it
+its own icon:
+
+```json
+"chaptarr": { "label": "Chaptarr", "type": "readarr", "baseUrl": "http://192.168.1.10:8789", "apiKey": "…", "icon": "chaptarr" }
+```
+
 ### Environment variable overrides
 
 Any secret can be supplied via environment variables instead of `config.json` (handy for
@@ -868,6 +878,46 @@ confirm, if not). A better copy already in the show's own folder is imported whe
 episode's old file is then deleted through Sonarr (same Recycle Bin rules) unless another episode
 still uses it, and the new file is renamed if Rename Episodes is on. Arr Command Center never
 needs write access to your drives.
+
+**Untracked files** (Sonarr, Radarr → System tab) — two tabs. **In show folders** (Radarr: **In
+movie folders**) lists videos inside a show's or movie's own folder that the app doesn't track. It
+lists each folder (a show whose video count already matches Sonarr's file count is skipped), and
+flags a "Rescan Series Folder after Refresh" (Radarr: Movie Folder) setting other than Always, with
+a fix for admins. **Rescan** has the app rescan those folders, so it records the files it can read
+where they are; nothing is moved, renamed or downloaded. Each file still left gets the app's own
+reason: can be added, another copy, better than the file in use, not recognised (no episode number,
+or a name that doesn't match), or won't import. Copies are left to Find duplicates, which the tab
+links to. Files that can be added are imported in place with Sonarr's Manual Import, or linked to
+the movie in Radarr (Radarr can't name a file with no year). Blu-ray and DVD folder structures are
+counted, not imported. Adding asks twice and needs delete rights, as other Manual Imports do. CSV
+export.
+
+**Leftover downloads** lists downloads left in a root folder next to the shows or movies: release
+folders, episode and season downloads, failed downloads and loose videos, from the app's own list of
+folders it doesn't manage. Each one goes through the app's Manual Import, the same check it runs on
+a finished download, and is sorted as missing from the library, better than the copy in use,
+redundant (the app already has the same or a better file), not in the library, episode not
+recognised, or won't import (with the app's reason). Missing ones are preselected. Importing moves
+each file into its show's or movie's folder and renames it, as with a download; a better copy
+replaces the old file, which goes to the Recycle Bin (you must confirm if none is set). **Redundant
+downloads are only listed and exported, with a button to copy their paths: nothing here deletes
+files.** Download folders with no videos left (usually the .nfo and .nzb after an import, or a
+second copy SABnzbd saved as ".1") are listed too. The app reads each file's media info, so a couple
+of thousand downloads take a while; the check shows the time left, and you can stop and carry on.
+Importing needs delete rights. CSV export.
+
+**Repeat downloads** (Sonarr, Radarr → System tab) — what was downloaded more than once in the last
+30, 90 or 180 days, from the app's own history, and why: after a failed download, after one you
+ignored, an upgrade, before the first one was imported, or again after it was imported. Repeats of
+the very same release are marked, and downloads that were never imported are listed. Above that are
+the settings behind repeats: downloads saved inside a library folder and other download problems
+from the app's health check, Completed Download Handling off, Remove Completed or Remove Failed off
+for a Usenet client, and, when SABnzbd is added in Settings → Services, its duplicate detection
+(identical downloads not stopped, or smart duplicate detection blocking upgrades). Admins get a
+two-click fix where one setting solves it: Completed Download Handling, Remove Completed, Remove
+Failed, and SABnzbd's two duplicate settings (Fail job, and smart detection off). Only that setting
+changes; a download client's other fields stay as they are. The download folder has to be moved by
+hand, and the finding says how. Reading the download settings needs an admin. CSV export.
 
 **Problem notifications** — besides downloads and requests, the poller reports unhealthy Portainer
 containers, unreachable Docker environments, degraded TrueNAS pools, Unraid disk problems or a

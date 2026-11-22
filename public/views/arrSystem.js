@@ -15,6 +15,8 @@ import { isLocalMode } from '../lib/connections.js';
 import { openPathFix } from '../lib/pathFix.js';
 import { openDuplicates } from '../lib/duplicates.js';
 import { openExistingFolders } from '../lib/existingFoldersUI.js';
+import { openUntracked } from '../lib/untrackedUI.js';
+import { openRepeatDownloads } from '../lib/repeatDownloadsUI.js';
 
 const HEALTH_CLS = { error: 'down', warning: 'warn', notice: 'info' };
 // Health checks that Fix paths can resolve: missing root folders and items
@@ -24,7 +26,7 @@ export function isPathHealth(check) {
     || /root folder|missing root|does not exist|is missing/i.test((check && check.message) || '');
 }
 
-// ?tool=fixpaths | duplicates | addfolders | checkfiles opens a tool (used by the command palette).
+// ?tool=fixpaths | duplicates | addfolders | checkfiles | untracked | leftovers | repeats opens a tool (used by the command palette).
 function openRequestedTool(arr, ctx, kind) {
   const tool = ctx.params && ctx.params.tool;
   if (!tool) return;
@@ -33,6 +35,8 @@ function openRequestedTool(arr, ctx, kind) {
   else if (tool === 'duplicates') openDuplicates(arr, ctx, kind);
   else if (tool === 'addfolders') openExistingFolders(arr, ctx, kind);
   else if (tool === 'checkfiles') openFileHealth(arr, ctx, kind);
+  else if (tool === 'untracked' || tool === 'leftovers') openUntracked(arr, ctx, kind, { tab: tool === 'leftovers' ? 'leftovers' : 'folders' });
+  else if (tool === 'repeats') openRepeatDownloads(arr, ctx, kind);
 }
 
 export async function tabSystem(root, arr, ctx, kind) {
@@ -72,6 +76,8 @@ export async function tabSystem(root, arr, ctx, kind) {
         h('button', { class: 'btn sm', title: 'Find duplicate entries and choose which to delete', onclick: () => openDuplicates(arr, ctx, kind) }, '🔍 Find duplicates'),
         h('button', { class: 'btn sm', title: 'Find files that look broken, mislabelled or in the wrong language', onclick: () => openFileHealth(arr, ctx, kind) }, '🩺 Check files'),
         h('button', { class: 'btn sm', title: `Add folders in your root folders that ${ctx.service.label} doesn’t manage yet`, onclick: () => openExistingFolders(arr, ctx, kind) }, '📂 Add existing folders'),
+        h('button', { class: 'btn sm', title: `Videos ${ctx.service.label} doesn’t track: in ${kind === 'series' ? 'show' : 'movie'} folders, and leftover downloads in root folders`, onclick: () => openUntracked(arr, ctx, kind) }, '🧩 Untracked files'),
+        h('button', { class: 'btn sm', title: 'What was downloaded more than once, why, and the settings behind it', onclick: () => openRepeatDownloads(arr, ctx, kind) }, '🔁 Repeat downloads'),
         h('button', { class: 'btn sm', title: 'Where the space goes, largest titles and growth', onclick: () => openInsights(arr, ctx, kind) }, '📊 Insights'),
         h('button', { class: 'btn sm', title: 'Entries that waste searches or clutter the library, with bulk fixes', onclick: () => openTidyUp(arr, ctx, kind) }, 'Tidy up'),
         kind === 'movie' ? h('button', { class: 'btn sm', title: 'Trilogies and franchises you’ve started but not finished', onclick: () => openCollections(arr, ctx) }, 'Collections') : null,

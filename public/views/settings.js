@@ -12,7 +12,7 @@ import { compatCard, lastCompatSummary } from '../lib/compatUI.js';
 import { clearPersistedCache } from '../lib/cache.js';
 import { h, mount, clear, spinner, svcIcon, confirmModal, openModal, closeModal, toast, tabs, fmtBytes } from '../lib/ui.js';
 import { api as apiClient } from '../lib/api.js';
-import { SERVICE_META, calendarIcon } from '../app.js';
+import { SERVICE_META, serviceMeta, calendarIcon } from '../app.js';
 import { getTheme, getAccent, applyTheme, applyAccent, ACCENTS, ACCENT_NAMES } from '../lib/theme.js';
 import { globalMode, setGlobalMode } from '../lib/viewMode.js';
 import { getDensity, setDensity, DENSITIES } from '../lib/density.js';
@@ -99,7 +99,7 @@ export async function renderSettings(root, ctx) {
     ctx.reload();
   };
   const serviceCards = ordered.map((svc) => {
-    const meta = SERVICE_META[svc.type] || {};
+    const meta = serviceMeta(svc);
     const st = status[svc.key];
     const online = st && st.ok;
     const hidden = isHidden(svc.key);
@@ -261,7 +261,7 @@ function favoriteNavigationCard(ctx) {
     : ctx.state.services.find((s) => s.key === key))).filter(Boolean);
   const preview = entries.length
     ? h('div', { class: 'favorite-preview', 'aria-label': 'Mobile bottom bar favorite order' }, ...entries.map((svc, index) => {
-        const meta = SERVICE_META[svc.type] || {};
+        const meta = serviceMeta(svc);
         return h('div', { class: 'favorite-preview-item' },
           h('span', { class: 'favorite-preview-icon' }, svc.isCalendar ? calendarIcon() : svcIcon(meta.logo, meta.emoji || '', 28)),
           h('span', { class: 'favorite-preview-label' }, svc.label),

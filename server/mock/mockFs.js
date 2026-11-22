@@ -22,10 +22,11 @@ export function createMockFs(tree, { disks = [] } = {}) {
   };
   const isWinPath = (p) => /^[A-Za-z]:|\\/.test(String(p || ''));
   const exists = (path) => !isWinPath(path) && !!lookup(path);
+  const isFile = (path) => { if (isWinPath(path)) return false; const n = lookup(path); return !!(n && n.__file); };
   const children = (path) => {
     if (isWinPath(path)) return null;
     const node = lookup(path);
-    if (!node || typeof node !== 'object') return null;
+    if (!node || typeof node !== 'object' || node.__file) return null;
     const base = norm(path) === '/' ? '' : norm(path);
     return Object.keys(node).sort().map((name) => ({ type: node[name] && node[name].__file ? 'file' : 'folder', name, path: `${base}/${name}${node[name] && node[name].__file ? '' : '/'}` }));
   };
@@ -63,7 +64,9 @@ export function createMockFs(tree, { disks = [] } = {}) {
     // Video files anywhere below a folder (Sonarr/Radarr scan recursively).
     app.get(`${prefix}/filesystem/mediafiles`, (req, res) => {
       const out = [];
-      const walk = (dir) => { for (const c of children(dir) || []) { if (c.type === 'file') { if (/\.(mkv|mp4|avi|m4v|ts)$/i.test(c.name)) out.push({ path: c.path, relativePath: c.name, name: c.name }); } else walk(c.path); } };
+      // Like Sonarr/Radarr: relativePath is relative to the folder asked for.
+      const top = norm(String(req.query.path || ''));
+      const walk = (dir) => { for (const c of children(dir) || []) { if (c.type === 'file') { if (/\.(mkv|mp4|avi|m4v|ts)$/i.test(c.name)) out.push({ path: c.path, relativePath: norm(c.path).slice(top.length + 1), name: c.name }); } else walk(c.path); } };
       walk(String(req.query.path || ''));
       res.json(out);
     });
@@ -100,7 +103,7 @@ export function createMockFs(tree, { disks = [] } = {}) {
     });
   }
 
-  return { mount, exists, children, mkdirp, remove, addFile };
+  return { mount, exists, isFile, children, mkdirp, remove, addFile };
 }
 
 // Demo scenario: a library moved from a Windows PC (C:\Media\...) to a Mac

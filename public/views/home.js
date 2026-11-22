@@ -6,7 +6,7 @@ import { integrationStats } from '../lib/integrationStats.js';
 import { tautulliDecision } from '../lib/playbackDecision.js';
 import { h, mount, clear, spinner, empty, fmtBytes, fmtDate, fmtRelative, pct, svcIcon, toast, openModal, confirmModal } from '../lib/ui.js';
 import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
-import { SERVICE_META, attachLongPress, openServiceQuickActions, openInArr } from '../app.js';
+import { SERVICE_META, serviceMeta, attachLongPress, openServiceQuickActions, openInArr } from '../app.js';
 import { listFailed, removeFailed } from '../lib/failedRequests.js';
 import { visibleServices } from '../lib/servicePrefs.js';
 import { loadDashboards, activeDashboard, workspaceServices, widgetServices } from '../lib/dashboardPrefs.js';
@@ -368,7 +368,8 @@ function applySeerrDetail(el, entry, detail) {
 
 function operationRow(entry, ctx, actionable = false) {
   const navigate = () => entry.serviceKey && ctx.go(entry.serviceKey, entry.tab ? { tab: entry.tab } : {});
-  const meta = SERVICE_META[entry.serviceType] || {};
+  const entrySvc = (ctx.state?.services || []).find((s) => s.key === entry.serviceKey);
+  const meta = entrySvc ? serviceMeta(entrySvc) : (SERVICE_META[entry.serviceType] || {});
   const requestBadge = seerrRequestBadge(entry);
   let actions = null;
   let row = null;
@@ -611,7 +612,7 @@ export function upcomingInstanceChips(ctx, onChange = () => hydrateUpcoming(ctx)
     }
   };
   for (const svc of arrs) {
-    const meta = SERVICE_META[svc.type] || {};
+    const meta = serviceMeta(svc);
     bar.appendChild(h('button', {
       type: 'button', class: 'upcoming-chip', dataset: { key: svc.key }, title: `Show or hide ${svc.label}`,
       onclick: () => {
@@ -662,7 +663,7 @@ export function renderUpcomingCalendar(panel, items, { year, month, today }) {
     cells.push(h('div', attrs,
       h('div', { class: 'up-cal-daynum' }, String(day)),
       ...evs.slice(0, 3).map((it) => {
-        const meta = SERVICE_META[it.svc.type] || {};
+        const meta = serviceMeta(it.svc);
         return h('div', { class: 'up-cal-ev', title: `${it.title}${it.sub ? ` — ${it.sub}` : ''}` },
           h('span', { class: 'up-cal-ev-ico' }, svcIcon(meta.logo, meta.emoji || '', 14)),
           h('span', { class: 'up-cal-ev-t' }, it.title),
@@ -691,7 +692,7 @@ export function upcomingRowProps(it) {
 export function openUpcomingDayModal(date, evs) {
   const sorted = [...evs].sort((a, b) => new Date(a.when) - new Date(b.when));
   const rows = sorted.map((it) => {
-    const meta = SERVICE_META[it.svc.type] || {};
+    const meta = serviceMeta(it.svc);
     return h('div', upcomingRowProps(it),
       h('div', { class: 'poster dashboard-feed-icon' }, svcIcon(meta.logo, meta.emoji || '', 22)),
       h('div', { class: 'row-main' },
@@ -769,7 +770,7 @@ export function upcomingListBlocks(items) {
   for (const [day, list] of byDay) {
     blocks.push(h('div', { class: 'up-day dashboard-feed-day' }, fmtDate(day)));
     for (const it of list) {
-      const meta = SERVICE_META[it.svc.type] || {};
+      const meta = serviceMeta(it.svc);
       blocks.push(h('div', upcomingRowProps(it),
         h('div', { class: 'poster dashboard-feed-icon' }, svcIcon(meta.logo, meta.emoji || '', 22)),
         h('div', { class: 'row-main' },
@@ -1033,7 +1034,7 @@ function layoutHoneycomb(hiveEl, tileEls) {
 }
 
 function hexCell(svc, st, ctx) {
-  const meta = SERVICE_META[svc.type] || {};
+  const meta = serviceMeta(svc);
   const online = st && st.ok;
   const dotClass = online ? 'ok' : (st ? 'down' : '');
   const statsEl = h('div', { class: 'hex-stats', id: `stats-${svc.key}` });

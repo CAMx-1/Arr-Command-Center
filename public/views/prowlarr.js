@@ -381,6 +381,7 @@ function releaseRow(r, px, ctx) {
         r.indexer ? h('span', { class: 'pill info' }, r.indexer) : null,
         cat ? h('span', { class: 'pill muted' }, cat) : null,
         r.size ? h('span', {}, fmtBytes(r.size)) : null,
+        r.files > 0 ? h('span', { title: 'Number of files in this download' }, `${r.files.toLocaleString()} ${r.files === 1 ? 'file' : 'files'}`) : null,
         r.protocol === 'torrent' ? h('span', {}, `▲ ${r.seeders ?? 0}  ▼ ${r.leechers ?? 0}`) : h('span', {}, 'Usenet'),
         r.publishDate ? timeEl(r.publishDate, { class: 'dim' }) : null,
       ),

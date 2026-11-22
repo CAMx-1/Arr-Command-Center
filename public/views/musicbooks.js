@@ -55,8 +55,19 @@ function renderMB(root, ctx, type) {
     { id: 'calendar', label: 'Calendar', render: (c) => tabCalendar(c, client, cfg) },
     { id: 'history', label: 'History', render: (c) => tabHistory(c, client, cfg) },
   ], `tabs-${svc.key}`);
-  const notice = migrationNotice(ctx, type);
+  const notice = h('div', {});
   mount(root, notice, bar, body);
+  if (type === 'bindery') mount(notice, migrationNotice(ctx, type));
+  else if (type === 'readarr') showReadarrNotice(notice, ctx, svc);
+}
+
+// Readarr-compatible forks (Chaptarr and others) use the Readarr type but are
+// still maintained, so the archived-Readarr notice only shows for Readarr itself.
+async function showReadarrNotice(slot, ctx, svc) {
+  let appName = '';
+  try { appName = String((await ctx.api.arrV1(svc.key).get('system/status'))?.appName || ''); } catch { /* unknown: treat as Readarr */ }
+  if (appName && appName.toLowerCase() !== 'readarr') return;
+  if (slot.isConnected) mount(slot, migrationNotice(ctx, 'readarr'));
 }
 
 function migrationNotice(ctx, type) {

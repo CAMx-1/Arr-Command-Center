@@ -235,7 +235,7 @@ export async function openExistingFolders(arr, ctx, kind) {
       results.unread.length ? h('div', {},
         h('div', { class: 'addf-skip-title' }, `${files} ${files === 1 ? 'file' : 'files'} in ${results.unread.length} ${results.unread.length === 1 ? 'folder' : 'folders'} ${app} didn’t read`),
         h('p', { class: 'dim addf-note' }, series
-          ? `${app} needs episode numbers in the name (S01E03, 1x03 or “03 - …” in a season folder). Use Wanted → Manual Import in ${app} to match ${files === 1 ? 'it' : 'them'} to episodes.`
+          ? `${app} needs episode numbers in the name (S01E03, 1x03 or “03 - …” in a season folder). Use Manual Import in ${app} (Wanted → Missing → Manual Import) to match ${files === 1 ? 'it' : 'them'} to episodes.`
           : results.unread.some((u) => u.reason === 'role')
             ? `${app} couldn’t tell which movie ${files === 1 ? 'this file is' : 'these files are'} from the name (it needs a year), and your role can’t link files. An admin can, or use Manual Import in ${app}.`
             : `The file name doesn’t match the movie (for example a sequel in the same folder). Use Manual Import in ${app} to choose the movie for ${files === 1 ? 'it' : 'each'}.`),

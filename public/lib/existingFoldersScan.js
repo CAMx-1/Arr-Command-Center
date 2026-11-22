@@ -116,6 +116,7 @@ export async function addRows(arr, rows, { kind, settingsFor, onProgress = () =>
 // Manual Import, where the file is (nothing moved or renamed); episode files
 // are only counted, since matching them needs a person.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+export async function waitForCommand(arr, cmd, opts) { return waitFor(arr, cmd, opts); }
 async function waitFor(arr, cmd, { wait = 1000, timeoutMs = 60000 } = {}) {
   let state = cmd; const start = Date.now();
   while (commandOutcome(state) === 'pending' && Date.now() - start < timeoutMs) { await sleep(wait); state = await arr.get(`command/${cmd.id}`); }
@@ -189,18 +190,29 @@ export async function linkAddedFiles(arr, added, { kind, wait = 1000, settle = 4
     toLink.push({ row, id, pick, quality: movieQualityFor(name, defs) });
   }
   if (!toLink.length) return out;
-  // One Manual Import for all of them. A file inside the movie's own folder is
-  // recorded where it is: not moved, not renamed.
-  try {
-    const cmd = await arr.post('command', { name: 'ManualImport', importMode: 'auto', files: toLink.map((x) => ({ path: x.pick.path, folderName: x.row.folder.name, movieId: x.id, quality: { quality: x.quality, revision: { version: 1, real: 0, isRepack: false } }, languages: [(x.row.match.pick.originalLanguage) || { id: 1, name: 'English' }], releaseGroup: '', indexerFlags: 0 })) });
-    await waitFor(arr, cmd, { wait, timeoutMs: 300000 });
-  } catch { /* checked below */ }
-  await pool(toLink, 4, async (x) => {
-    const now = list(await arr.get(`moviefile?movieId=${encodeURIComponent(x.id)}`).catch(() => []));
-    if (now.length) out.linked.push({ row: x.row, file: x.pick.path, quality: x.quality.name });
+  const done2 = await linkMovieFiles(arr, toLink.map((x) => ({ movieId: x.id, path: x.pick.path, folderName: x.row.folder.name, quality: x.quality, language: x.row.match.pick.originalLanguage })), { wait });
+  for (const x of toLink) {
+    if (done2.has(x.id)) out.linked.push({ row: x.row, file: x.pick.path, quality: x.quality.name });
     else out.unread.push({ row: x.row, files: [x.pick.path] });
-  });
+  }
   return out;
+}
+
+// Links each movie to a file in its own folder with one Radarr Manual Import:
+// recorded where it is, not moved or renamed. links: [{ movieId, path,
+// folderName, quality, language }]. Returns the movie ids that now have a file.
+export async function linkMovieFiles(arr, links, { wait = 1000, timeoutMs = 300000 } = {}) {
+  const ok = new Set();
+  if (!links.length) return ok;
+  try {
+    const cmd = await arr.post('command', { name: 'ManualImport', importMode: 'auto', files: links.map((x) => ({ path: x.path, folderName: x.folderName, movieId: x.movieId, quality: { quality: x.quality, revision: { version: 1, real: 0, isRepack: false } }, languages: [x.language || { id: 1, name: 'English' }], releaseGroup: '', indexerFlags: 0 })) });
+    await waitFor(arr, cmd, { wait, timeoutMs });
+  } catch { /* checked below */ }
+  await pool(links, 4, async (x) => {
+    const now = list(await arr.get(`moviefile?movieId=${encodeURIComponent(x.movieId)}`).catch(() => []));
+    if (now.length) ok.add(x.movieId);
+  });
+  return ok;
 }
 
 export const FOLDER_CSV_HEADERS = ['Root folder', 'Folder', 'Videos', 'Status', 'Match', 'Year', 'Confidence', 'Note'];

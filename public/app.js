@@ -95,6 +95,16 @@ export const SERVICE_META = {
   whisparr: { logo: '/icons/whisparr.svg', emoji: '', renderer: renderSonarr },
 };
 
+// Icons shipped for apps that reuse another type's API (config "icon": "<name>").
+const ICON_OVERRIDES = { chaptarr: '/icons/chaptarr.svg' };
+
+// The type's metadata, with the service's own icon when it sets one.
+export function serviceMeta(svc) {
+  const meta = (svc && SERVICE_META[svc.type]) || {};
+  const logo = svc && ICON_OVERRIDES[svc.icon];
+  return logo ? { ...meta, logo, emoji: '' } : meta;
+}
+
 const state = {
   config: null,
   status: {},
@@ -325,7 +335,7 @@ function buildHive() {
       if (!isMobile) cells.push({ kind: 'placeholder', title: `${svc.label} is hidden — show it in Settings`, glyph: '+', onClick: () => toast(`${svc.label} is hidden. Enable it in Settings → Services.`, 'info', 2800) });
       continue;
     }
-    const meta = SERVICE_META[svc.type] || {};
+    const meta = serviceMeta(svc);
     const st = state.status[svc.key];
     cells.push({
       kind: 'service', active: route === svc.key, title: svc.label,
@@ -628,7 +638,7 @@ function buildBottomNav() {
       return h('button', { class: `bn-hex bn-calendar ${route === 'calendar' ? 'active' : ''}`, title: 'Calendar', 'aria-label': 'Calendar', onclick: () => { haptic(); location.hash = '#/calendar'; } },
         h('span', { class: 'hive-icon' }, calendarIcon()));
     }
-    const meta = SERVICE_META[svc.type] || {};
+    const meta = serviceMeta(svc);
     const st = state.status[svc.key];
     const btn = h('button', { class: `bn-hex ${route === svc.key ? 'active' : ''}`, title: `${svc.label} · press and hold for shortcuts`, 'aria-label': svc.label, 'aria-description': 'Press and hold for service shortcuts', dataset: { svcKey: svc.key }, onclick: () => { haptic(); location.hash = `#/${svc.key}`; } },
       st ? h('span', { class: `hive-dot ${st.ok ? 'ok' : 'down'}` }) : null,
@@ -747,7 +757,7 @@ function renderAllServicesGrid() {
     // all-services overlay (consuming its history entry + releasing the scroll
     // lock) before opening the shared Search modal.
     item('Search', false, h('span', { class: 'allsvc-search-ic', html: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' }), () => openSearch()),
-    ...nav.map((svc) => { const meta = SERVICE_META[svc.type] || {}; const st = state.status[svc.key]; return item(svc.label, route === svc.key, svcIcon(meta.logo, meta.emoji || '', 24), () => { location.hash = `#/${svc.key}`; }, st ? (st.ok ? 'ok' : 'down') : '', svc); }),
+    ...nav.map((svc) => { const meta = serviceMeta(svc); const st = state.status[svc.key]; return item(svc.label, route === svc.key, svcIcon(meta.logo, meta.emoji || '', 24), () => { location.hash = `#/${svc.key}`; }, st ? (st.ok ? 'ok' : 'down') : '', svc); }),
     item('Calendar', route === 'calendar', calendarIcon(), () => { location.hash = '#/calendar'; }),
     item('Cleanup', route === 'cleanup', h('span', { class: 'cal-nav-ic', html: '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/></svg>' }), () => { location.hash = '#/cleanup'; }),
     item('Settings', route === 'settings', hiveImg('/icons/command-center.svg'), () => { location.hash = '#/settings'; }),

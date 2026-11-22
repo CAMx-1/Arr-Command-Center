@@ -480,6 +480,8 @@ export function publicConfig(cfg) {
       key,
       label: svc.label || key,
       type: svc.type,
+      // Optional icon override for apps that reuse another type's API (e.g. Chaptarr as readarr).
+      ...(typeof svc.icon === 'string' && /^[a-z0-9-]{1,40}$/.test(svc.icon) ? { icon: svc.icon } : {}),
       hasCloudflareAccess: !!(svc.cloudflareAccess && svc.cloudflareAccess.clientId),
       hasCustomHeaders: hasCustomHeaders(svc.customHeaders),
       hasWebUrl: !!svc.webUrl,

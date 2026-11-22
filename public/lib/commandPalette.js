@@ -22,6 +22,9 @@ function commandSet({ services, go, openSearch, openShortcuts }) {
       commands.push({ label: `${service.label}: Find duplicates`, hint: 'Tool', run: () => go(service.key, { tab: 'system', tool: 'duplicates' }) });
       commands.push({ label: `${service.label}: Add existing folders`, hint: 'Tool', run: () => go(service.key, { tab: 'system', tool: 'addfolders' }) });
       commands.push({ label: `${service.label}: Check files`, hint: 'Tool', run: () => go(service.key, { tab: 'system', tool: 'checkfiles' }) });
+      commands.push({ label: `${service.label}: Untracked files`, hint: 'Tool', run: () => go(service.key, { tab: 'system', tool: 'untracked' }) });
+      commands.push({ label: `${service.label}: Leftover downloads`, hint: 'Tool', run: () => go(service.key, { tab: 'system', tool: 'leftovers' }) });
+      commands.push({ label: `${service.label}: Repeat downloads`, hint: 'Tool', run: () => go(service.key, { tab: 'system', tool: 'repeats' }) });
       for (const view of loadSavedViews(service.key)) commands.push({ label: `${service.label}: ${view.name}`, hint: 'Saved view', run: () => go(service.key, view.params) });
     }
   }
