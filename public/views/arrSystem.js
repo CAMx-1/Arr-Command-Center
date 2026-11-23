@@ -205,8 +205,8 @@ function infoRow(label, value) {
 }
 
 // Blocklist: newest first, 20 at a time with "Load more", per-item remove
-// and "Clear all" (bulk delete of every entry).
-function blocklistSection(first, arr, reload) {
+// and "Clear all" (bulk delete of every entry). Also used by the book page.
+export function blocklistSection(first, arr, reload) {
   const wrap = h('div', {});
   let records = [...((first && first.records) || [])];
   let total = (first && first.totalRecords) || records.length;

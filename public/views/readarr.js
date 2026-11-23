@@ -1,9 +1,11 @@
 // Readarr-compatible book managers (Chaptarr, legacy Readarr), laid out like
 // the Sonarr and Radarr pages: authors with their pictures as a honeycomb,
 // list or table; an author page with every book (monitor, automatic and
-// interactive search, files); add, edit and remove authors; and Wanted, Queue,
-// Calendar and History with book covers. Chaptarr keeps audiobook and ebook
-// settings side by side; lib/readarrLibrary.js handles both shapes.
+// interactive search, files, rename and retag previews, books listed twice);
+// add, edit and remove authors; Wanted, Queue (with manual import), Calendar
+// and History with book covers; and System (health, tasks, blocklist,
+// unmapped files). Chaptarr keeps audiobook and ebook settings side by side;
+// lib/readarrLibrary.js handles both shapes.
 import { h, mount, tabs, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, openModal, closeModal, confirmModal, rootFolderLabel, swipeToAction } from '../lib/ui.js';
 import { posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
@@ -12,8 +14,9 @@ import { libraryFilter } from '../lib/libraryFilter.js';
 import { compactTable } from '../lib/tableView.js';
 import { actionGroup } from '../lib/actions.js';
 import { openLookupModal } from '../lib/lookupSearch.js';
-import { tagEditor, loadTags, queueStatePill, queueStuckReason } from '../lib/arrActions.js';
-import { removeWithUndo, openRemoveQueueDialog } from '../lib/queueActions.js';
+import { tagEditor, loadTags } from '../lib/arrActions.js';
+import { removeWithUndo, openRemoveQueueDialog, removeQueueQuery } from '../lib/queueActions.js';
+import { queueStateLabel } from '../lib/manualImport.js';
 import { liveRefresh } from '../lib/live.js';
 import { getAddDefaults, setAddDefaults } from '../lib/addDefaults.js';
 import { roleAllows } from '../lib/roleUi.js';
@@ -21,6 +24,13 @@ import { openTidyUp } from '../lib/tidyUpUI.js';
 import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
 import { openReleaseSearch } from './releaseSearch.js';
 import { showReadarrNotice } from './musicbooks.js';
+import { blocklistSection } from './arrSystem.js';
+import { openBookImport, openUnmappedFiles, watchCommand } from '../lib/bookImportUI.js';
+import { openBookRename, openBookRetag, openDuplicateBooks } from '../lib/bookToolsUI.js';
+import {
+  bookQueueActions, bookQueueReasons, bookQueueMessages, queueProblemKind, isUnknownAuthor, needsAttention, queueCounts, QUEUE_FILTERS,
+  inLibraryFolder, duplicateBooks, unmappedUnits, bookSource,
+} from '../lib/bookImport.js';
 import {
   FORMATS, MONITOR_OPTIONS, NEW_ITEM_OPTIONS, BOOK_FILTERS,
   authorImage, bookCover, initials, nameGradient, isFormatAware, authorFormats, compareAuthors, authorSortKey,
@@ -85,6 +95,7 @@ export async function renderReadarr(root, ctx) {
     { id: 'queue', label: 'Queue', render: (c) => tabQueue(c, arr, ctx) },
     { id: 'calendar', label: 'Calendar', render: (c) => tabCalendar(c, arr, ctx) },
     { id: 'history', label: 'History', render: (c) => tabHistory(c, arr, ctx) },
+    { id: 'system', label: 'System', render: (c) => tabSystem(c, arr, ctx) },
   ], `tabs-${svc.key}`, {
     activeId: ctx.params.tab,
     onChange: (id) => ctx.setParams({ tab: id === 'library' ? '' : id }),
@@ -155,10 +166,26 @@ async function tabAuthors(root, arr, ctx) {
         onStateChange: ({ term, status }) => ctx.setParams({ q: term, status: status === 'all' ? '' : status }),
       }),
     );
-    mount(root, head, listWrap);
+    mount(root, unmappedNotice(arr, ctx), head, listWrap);
   } catch (err) {
     mount(root, empty('', 'Failed to load authors', err.message, { label: 'Retry', onClick: () => tabAuthors(root, arr, ctx) }));
   }
+}
+
+// "N files aren't linked to a book" above the library, filled in once the
+// app answers (nothing shows when every file is linked or the call fails).
+function unmappedNotice(arr, ctx) {
+  const el = h('div', {});
+  cachedGet(`arr:${ctx.service.key}:unmapped`, () => arr.get('bookfile?unmapped=true'), 300000).then((files) => {
+    const units = unmappedUnits(Array.isArray(files) ? files : []);
+    if (!units.length || !el.isConnected) return;
+    const n = units.reduce((s, u) => s + u.count, 0);
+    mount(el, h('div', { class: 'attention-banner notice-banner' },
+      h('span', { class: 'pill warn' }, `${plural(n, 'file')} not linked`),
+      h('span', { class: 'dim' }, `${ctx.service.label} found ${plural(n, 'file')} in ${plural(units.length, 'folder')} it couldn’t link to a book.`),
+      h('button', { class: 'btn sm', type: 'button', onclick: () => openUnmappedFiles(arr, ctx, { onChanged: () => invalidate(`arr:${ctx.service.key}:unmapped`) }) }, 'Review')));
+  }).catch(() => {});
+  return el;
 }
 
 function authorActions(a, arr, ctx) {
@@ -313,11 +340,26 @@ async function renderAuthorPage(root, ctx, arr, authorId) {
           h('div', { class: 'author-actions' },
             h('button', { class: 'btn primary', 'data-needs': 'write', title: 'Search for the missing monitored books', onclick: () => searchBooks(arr, { name: 'AuthorSearch', authorId: author.id }, bookCounts(books).missing, `${author.authorName}’s missing books`) }, 'Search monitored'),
             h('button', { class: 'btn', 'data-needs': 'write', title: 'Refresh the author from the metadata source and rescan the folder', onclick: () => run(arr, { name: 'RefreshAuthor', authorId: author.id }, `Refreshing ${author.authorName}`) }, 'Refresh & scan'),
+            h('button', { class: 'btn', 'data-needs': 'write', title: 'Preview renaming the files to the app’s naming settings', onclick: () => openBookRename(arr, { author, mediaType: state.format, label: svc.label }) }, 'Rename…'),
+            h('button', { class: 'btn', 'data-needs': 'write', title: 'Preview writing the author, title and narrator into the files’ tags', onclick: () => openBookRetag(arr, { author, books, files, mediaType: state.format, label: svc.label }) }, 'Write tags…'),
             h('button', { class: 'btn', 'data-needs': 'write', title: 'Edit / remove', onclick: () => openEditAuthor(arr, ctx, author, { onRemoved: () => ctx.go(svc.key, libraryParams) }) }, 'Edit'),
           ),
         ),
       ),
     ));
+    renderDupes();
+  };
+
+  // Books listed twice (several metadata sources) with more than one copy
+  // monitored: each copy is searched for, so the book can download twice.
+  const dupeSlot = h('div', {});
+  const renderDupes = () => {
+    const groups = duplicateBooks(books.filter(inFormat)).filter((g) => g.redundant.length);
+    if (!groups.length) { mount(dupeSlot); return; }
+    mount(dupeSlot, h('div', { class: 'attention-banner notice-banner' },
+      h('span', { class: 'pill warn' }, `${plural(groups.length, 'book')} listed twice`),
+      h('span', { class: 'dim' }, `${groups.slice(0, 3).map((g) => g.title).join(', ')}${groups.length > 3 ? '…' : ''}: more than one copy is monitored, so ${svc.label} can download ${groups.length === 1 ? 'it' : 'them'} twice.`),
+      h('button', { class: 'btn sm', type: 'button', onclick: () => openDuplicateBooks(arr, ctx, { books: books.filter(inFormat), title: `Books listed twice · ${author.authorName}`, onChanged: () => { renderHero(); renderBooks(); } }) }, 'Review')));
   };
 
   const overviewText = String(author.overview || '').trim();
@@ -443,7 +485,7 @@ async function renderAuthorPage(root, ctx, arr, authorId) {
     mount(listSlot, ...groups.map((g) => seriesBlock(g, groups.length === 1, isCollapsed(g.name), () => toggle(g.name))));
   };
 
-  mount(pageEl, heroSlot, overviewEl, toolbar, listSlot);
+  mount(pageEl, heroSlot, dupeSlot, overviewEl, toolbar, listSlot);
   renderHero();
   renderBooks();
 }
@@ -829,50 +871,195 @@ function wantedRow(r, arr, ctx) {
   );
 }
 
+// Like Chaptarr's own queue: downloads it didn't grab (unknown author) are
+// listed too, problems first in a summary that filters the list, and each
+// row offers what Chaptarr offers: manual import, retry import, grab a
+// delayed release, remove (optionally blocklisting) or ignore.
+const PROBLEM_TEXT = {
+  path: (n, app) => `${n} in a folder ${app} can’t reach`,
+  notGrabbed: (n, app) => `${n} not grabbed by ${app}`,
+  otherBook: (n) => `${n} matched another book`,
+  noFiles: (n) => `${n} with no book files`,
+  stuck: (n) => `${n} waiting for a manual import`,
+  failed: (n) => `${n} failed`,
+  other: (n) => `${n} with warnings`,
+};
+const problemOf = (r) => queueProblemKind(r) || (String(r.status).toLowerCase() === 'failed' ? 'failed' : 'other');
+
 async function tabQueue(root, arr, ctx) {
+  const app = ctx.service.label;
   const wrap = h('div', {});
   mount(root, wrap);
-  const load = async (silent) => {
+  const PAGE = 250;
+  let list = [];
+  let total = 0;
+  let roots = [];
+  cachedGet(`arr:${ctx.service.key}:rootfolder`, () => arr.get('rootfolder'), 600000).then((r) => { roots = Array.isArray(r) ? r : []; if (list.length) paint(); }).catch(() => {});
+  let filter = ctx.params.queue || 'all';
+  const setFilter = (f) => { filter = f; ctx.setParams({ queue: f === 'all' ? '' : f }); paint(); };
+  const reload = () => load(true);
+  const test = (r) => {
+    if (filter.startsWith('kind:')) return needsAttention(r) && problemOf(r) === filter.slice(5);
+    const def = QUEUE_FILTERS.find((f) => f.id === filter) || QUEUE_FILTERS[0];
+    return def.test(r);
+  };
+
+  function paint() {
+    if (!list.length) { mount(wrap, empty('📥', 'Queue is empty', 'Nothing downloading right now')); return; }
+    const counts = queueCounts(list);
+    const kinds = new Map();
+    for (const r of list.filter(needsAttention)) { const k = problemOf(r); kinds.set(k, (kinds.get(k) || 0) + 1); }
+    const shown = list.filter(test);
+    const problemsOnly = filter === 'attention' || filter.startsWith('kind:');
+    const seg = (id, text) => h('button', { class: `view-seg ${filter === id ? 'active' : ''}`, type: 'button', onclick: () => setFilter(id) }, text);
+    const head = h('div', { class: 'lib-head queue-head' },
+      h('div', { class: 'view-toggle', role: 'group', 'aria-label': 'Which downloads' },
+        seg('all', `All ${counts.all}`), seg('attention', `Needs attention ${counts.attention}`), seg('active', `Downloading ${counts.active}`)),
+      h('span', { class: 'dim', style: { marginRight: 'auto' } }, counts.unknown ? `${plural(counts.unknown, 'download')} with an unknown author` : ''),
+      problemsOnly && shown.length > 1 ? h('button', {
+        class: 'btn sm danger', type: 'button', 'data-needs': 'delete',
+        title: 'Remove every download shown here from the queue',
+        onclick: () => openBulkRemove(arr, shown, { app, roots, onDone: reload }),
+      }, `Remove ${shown.length}…`) : null,
+    );
+    const banner = kinds.size ? h('div', { class: 'attention-banner queue-summary' },
+      h('span', { class: 'pill down' }, `${counts.attention} need${counts.attention === 1 ? 's' : ''} attention`),
+      h('div', { class: 'queue-kinds' }, ...[...kinds].sort((a, b) => b[1] - a[1]).map(([k, n]) => h('button', {
+        class: `queue-kind ${filter === `kind:${k}` ? 'active' : ''}`, type: 'button', title: 'Show only these',
+        onclick: () => setFilter(filter === `kind:${k}` ? 'attention' : `kind:${k}`),
+      }, (PROBLEM_TEXT[k] || PROBLEM_TEXT.other)(n, app))))) : null;
+    const hint = filter === 'kind:path' ? h('p', { class: 'dim queue-hint' },
+      `${app} runs somewhere that can’t see these download folders. Add a remote path mapping in ${app} (Settings → Download Clients) from the download client’s folder to the same folder as ${app} sees it, or mount that folder into ${app}’s container. Then use Retry import or Fix import.`)
+      : filter === 'kind:notGrabbed' ? h('p', { class: 'dim queue-hint' },
+        `These are in the download client’s category for ${app}, but ${app} didn’t grab them, so it won’t import them by itself. Use Fix import to choose the book, or remove them from the queue (Ignore keeps them in the download client).`)
+        : filter === 'kind:otherBook' ? h('p', { class: 'dim queue-hint' },
+          `These books are listed twice: ${app} grabbed the download for one copy and matched the files to the other, so it won’t finish them by itself. Fix import says what to do with each. Books listed twice (System tab) stops monitoring the extra copies, so ${app} doesn’t grab the same book again.`)
+          : null;
+    mount(wrap, banner, head, hint,
+      shown.length ? h('div', { class: 'list' }, ...shown.map((r) => queueRow(r, arr, ctx, reload, roots))) : empty('', 'Nothing here', 'No download matches this filter.'),
+      total > list.length ? h('p', { class: 'dim', style: { textAlign: 'center' } }, `Showing the first ${list.length} of ${total} downloads.`) : null);
+  }
+
+  async function load(silent) {
     if (!silent) mount(wrap, skeletonList());
     try {
-      const list = records(await arr.get('queue?page=1&pageSize=50&includeAuthor=true&includeBook=true'));
-      if (!list.length) { mount(wrap, empty('📥', 'Queue is empty', 'Nothing downloading right now')); return; }
-      mount(wrap, h('div', { class: 'list' }, ...list.map((r) => queueRow(r, arr, ctx))));
+      const data = await arr.get(`queue?page=1&pageSize=${PAGE}&includeUnknownAuthorItems=true&includeAuthor=true&includeBook=true`);
+      list = records(data);
+      total = Number(data && data.totalRecords) || list.length;
+      paint();
     } catch (err) {
-      if (!silent) mount(wrap, empty('', 'Failed to load queue', err.message));
+      if (!silent) mount(wrap, empty('', 'Failed to load queue', err.message, { label: 'Retry', onClick: () => load(false) }));
     }
-  };
+  }
   await load(false);
   liveRefresh(wrap, ctx.service, 5000, () => load(true));
 }
 
-function queueRow(r, arr, ctx) {
+function queueRow(r, arr, ctx, reload, roots = []) {
+  const app = ctx.service.label;
   const size = Number(r.size) || 0;
   const left = Number(r.sizeleft) || 0;
   const prog = size ? ((size - left) / size) * 100 : 0;
   const book = r.book || {};
-  const remove = () => removeWithUndo(arr, r, { removeFromClient: true }, { onDone: () => ctx.reload(), rowEl: row });
+  const can = bookQueueActions(r);
+  const reasons = bookQueueReasons(r);
+  const kind = queueProblemKind(r);
+  const attention = needsAttention(r);
+  const downloading = String(r.trackedDownloadState || r.status || '').toLowerCase() === 'downloading' && String(r.status).toLowerCase() !== 'failed';
   const quality = r.quality && r.quality.quality && r.quality.quality.name;
-  const row = h('div', { class: 'row book-row' },
+  const onDone = () => (reload ? reload() : ctx.reload());
+  // A download that sits in the library folder: removing it from the client
+  // can delete files the library uses, so removing only ignores it by default.
+  const libraryRoot = inLibraryFolder(r.outputPath, roots);
+  const libraryWarning = libraryRoot ? `This download’s folder looks like it’s inside ${app}’s library (${libraryRoot}). Removing it from the download client can delete those files, including any ${app} already lists as books. Leave the switch off to only ignore it here.` : '';
+  const remove = () => removeWithUndo(arr, r, { removeFromClient: !libraryRoot }, { onDone, rowEl: row });
+  const pathHint = kind === 'path' ? `${app} can’t reach ${r.outputPath || 'this download’s folder'}. Add a remote path mapping in ${app} (Settings → Download Clients), or mount the folder into its container.` : '';
+  // Grabbed for one copy of a book listed twice, matched to the other copy:
+  // the download only counts as imported when the files go to the copy it was grabbed for.
+  const grabbedFor = [book.title, bookSource(book)].filter(Boolean).join(' · ');
+  const otherHint = kind === 'otherBook' ? `The book is listed twice: ${app} grabbed this for one copy and matched the files to the other. If the other copy already has these files, remove this download. To import it anyway, use Change book… and pick the copy it was grabbed for${grabbedFor ? ` (${grabbedFor})` : ''}, so ${app} counts the download as done.` : '';
+  const actions = [
+    can.importFiles ? {
+      label: can.stuck ? '\u21E9 Fix import' : '\u21E9 Import', variant: can.stuck ? 'primary' : undefined, primary: can.stuck,
+      title: can.stuck ? 'This download finished but wasn’t imported: choose the book and import it' : 'Import the downloaded files by hand',
+      onClick: () => openBookImport(arr, { downloadId: r.downloadId, title: book.title || r.title, messages: reasons, hint: pathHint || otherHint, label: app, onImported: onDone }),
+    } : null,
+    can.retry ? {
+      label: 'Retry import', title: `Ask ${app} to try importing this download again`,
+      onClick: async () => {
+        try {
+          const cmd = await arr.post('command', { name: 'RetryFailedImport', downloadId: r.downloadId });
+          toast(`Retrying the import of ${book.title || r.title}`, 'success');
+          watchCommand(arr, cmd, { failed: 'The retry failed', onEnd: onDone });
+        } catch (e) { toast(e.message, 'error'); }
+      },
+    } : null,
+    can.grab ? {
+      label: 'Grab now', primary: !can.stuck, title: 'Send this delayed release to the download client now',
+      onClick: async () => {
+        try { await arr.post(`queue/grab/${r.id}`, {}); toast(`Grabbing ${r.title}`, 'success'); onDone(); } catch (e) { toast(e.message, 'error'); }
+      },
+    } : null,
+    { label: 'Remove…', title: 'Remove from the queue, optionally blocklisting the release', variant: 'danger', primary: !can.stuck && !can.grab, onClick: () => openRemoveQueueDialog(arr, r, { onDone, rowEl: row, removeFromClient: !libraryRoot, warning: libraryWarning }) },
+    r.bookId || book.id ? { label: 'Blocklist & search', needs: 'delete', title: 'Blocklist this release and search for another', onClick: () => removeWithUndo(arr, r, { removeFromClient: !libraryRoot, blocklist: true, search: true }, { onDone, rowEl: row }) } : null,
+    r.authorId ? { label: 'Author', needs: 'read', title: 'Open the author', onClick: () => openAuthor(ctx, { id: r.authorId }) } : null,
+  ];
+  const stateCls = attention ? (kind === 'notGrabbed' ? 'warn' : 'down') : 'info';
+  const row = h('div', { class: `row book-row${attention ? ' queue-attention' : ''}` },
     bookCoverEl({ ...book, title: book.title || r.title }),
     h('div', { class: 'row-main' },
       h('div', { class: 'row-title' }, book.title || r.title || `#${r.id}`),
       h('div', { class: 'row-sub' }, [r.author && r.author.authorName, book.title ? r.title : null].filter(Boolean).join(' · ')),
       h('div', { class: 'meta-line', style: { marginTop: '4px' } },
-        queueStatePill(r),
-        quality ? h('span', { class: 'pill info' }, quality) : null,
-        h('span', {}, `${fmtBytes(left)} left`),
-        r.timeleft ? h('span', {}, `ETA ${r.timeleft}`) : null,
+        h('span', { class: `pill ${stateCls}` }, String(r.status).toLowerCase() === 'failed' ? 'Failed' : queueStateLabel(r)),
+        isUnknownAuthor(r) ? h('span', { class: 'pill muted', title: `${app} didn’t grab this download, or can’t tell which book it is` }, 'Unknown author') : null,
+        quality && !/^unknown$/i.test(quality) ? h('span', { class: 'pill info' }, quality) : null,
+        downloading ? h('span', {}, `${fmtBytes(left)} left`) : size ? h('span', {}, fmtBytes(size)) : null,
+        downloading && r.timeleft ? h('span', {}, `ETA ${r.timeleft}`) : null,
         r.downloadClient ? h('span', {}, r.downloadClient) : null,
+        r.indexer ? h('span', { class: 'dim' }, r.indexer) : null,
       ),
-      queueStuckReason(r),
-      h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })),
+      attention && reasons.length ? h('div', { class: `queue-reason ${kind === 'notGrabbed' ? 'soft' : ''}`, title: bookQueueMessages(r).join('\n') },
+        reasons[0] + (reasons.length > 1 ? ` (+${reasons.length - 1} more)` : '')) : null,
+      attention && r.outputPath ? h('div', { class: 'mono book-file-path dim' }, r.outputPath) : null,
+      downloading ? h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })) : null,
     ),
-    actionGroup([
-      { label: 'Remove…', title: 'Remove from the queue', variant: 'danger', primary: true, onClick: () => openRemoveQueueDialog(arr, r, { onDone: () => ctx.reload(), rowEl: row }) },
-    ], { sheetTitle: r.title }),
+    actionGroup(actions, { sheetTitle: book.title || r.title }),
   );
   return swipeToAction(row, remove);
+}
+
+// Remove many downloads at once (Chaptarr's DELETE queue/bulk). Ignoring is
+// the default: the downloads stay in the download client and the app stops
+// tracking them; nothing is deleted unless "Remove from the download client"
+// is ticked.
+function openBulkRemove(arr, list, { app, roots = [], onDone }) {
+  const opt = (label, hint, checked) => {
+    const input = h('input', { type: 'checkbox', role: 'switch', checked: checked ? 'checked' : null });
+    return { input, row: h('label', { class: 'queue-remove-opt' }, input, h('span', {}, h('strong', {}, label), h('span', { class: 'dim' }, hint))) };
+  };
+  const fromClient = opt('Remove from the download client', 'Deletes the downloads and their files from the client. Off: the downloads are only ignored here.', false);
+  const blocklist = opt('Blocklist these releases', `${app} won’t grab them again`, false);
+  const withBook = list.filter((r) => r.bookId || (r.book && r.book.id)).length;
+  const inLibrary = list.filter((r) => inLibraryFolder(r.outputPath, roots)).length;
+  const go = async () => {
+    closeModal();
+    const opts = { removeFromClient: fromClient.input.checked, blocklist: blocklist.input.checked, search: false };
+    try {
+      await arr.del(`queue/bulk?${removeQueueQuery(opts)}`, { ids: list.map((r) => r.id) });
+      toast(`${opts.removeFromClient ? 'Removed' : 'Ignored'} ${plural(list.length, 'download')}`, 'success');
+    } catch (e) { if (!e.cancelled) toast(e.message, 'error', 7000); }
+    onDone();
+  };
+  openModal({
+    title: `Remove ${plural(list.length, 'download')} from the queue`,
+    body: h('div', { class: 'queue-remove' },
+      h('p', { class: 'queue-remove-title' }, list.slice(0, 4).map((r) => (r.book && r.book.title) || r.title).join(' · ') + (list.length > 4 ? ` and ${list.length - 4} more` : '')),
+      inLibrary ? h('p', { class: 'queue-remove-warning' }, `${plural(inLibrary, 'download')} ${inLibrary === 1 ? 'looks' : 'look'} like ${inLibrary === 1 ? 'it’s' : 'they’re'} inside ${app}’s library folder. Removing them from the download client can delete files the library uses.`) : null,
+      fromClient.row, blocklist.row,
+      withBook < list.length ? h('p', { class: 'dim', style: { fontSize: '12px' } }, `${app} can only blocklist downloads it knows the book of (${withBook} of ${list.length}).`) : null),
+    footer: h('div', { class: 'modal-actions' }, h('button', { class: 'btn', type: 'button', onclick: closeModal }, 'Cancel'), h('button', { class: 'btn danger', type: 'button', onclick: go }, 'Remove')),
+  });
 }
 
 async function tabCalendar(root, arr, ctx) {
@@ -910,29 +1097,98 @@ function bookEventInfo(type) {
   const t = String(type || '');
   if (/incomplete/i.test(t)) return { label: 'Import incomplete', cls: 'warn' };
   if (/grabbed/i.test(t)) return { label: 'Grabbed', cls: 'info' };
+  if (/conversionfailed/i.test(t)) return { label: 'Conversion failed', cls: 'down' };
   if (/imported/i.test(t)) return { label: 'Imported', cls: 'ok' };
   if (/failed/i.test(t)) return { label: 'Failed', cls: 'down' };
   if (/deleted/i.test(t)) return { label: 'Deleted', cls: 'muted' };
-  if (/renamed|retagged/i.test(t)) return { label: 'Renamed', cls: 'muted' };
+  if (/retagged/i.test(t)) return { label: 'Tags written', cls: 'muted' };
+  if (/renamed/i.test(t)) return { label: 'Renamed', cls: 'muted' };
+  if (/converted/i.test(t)) return { label: 'Converted', cls: 'muted' };
   if (/ignored/i.test(t)) return { label: 'Ignored', cls: 'muted' };
+  if (/split/i.test(t)) return { label: 'Author split', cls: 'muted' };
+  if (/merged/i.test(t)) return { label: 'Authors merged', cls: 'muted' };
   return { label: t || 'Event', cls: 'muted' };
 }
 
-async function tabHistory(root, arr, ctx) {
-  mount(root, skeletonList());
-  try {
-    const list = records(await arr.get('history?page=1&pageSize=40&sortKey=date&sortDirection=descending&includeAuthor=true&includeBook=true'));
-    if (!list.length) return mount(root, empty('🕓', 'No history yet'));
-    mount(root, h('div', { class: 'list' }, ...list.map((r) => historyRow(r, ctx))));
-  } catch (err) {
-    mount(root, empty('', 'Failed to load history', err.message, { label: 'Retry', onClick: () => tabHistory(root, arr, ctx) }));
+// History event types (EntityHistoryEventType in Readarr and Chaptarr).
+const HISTORY_FILTERS = [
+  { id: 'all', label: 'All', types: [] },
+  { id: 'grabbed', label: 'Grabbed', types: [1] },
+  { id: 'imported', label: 'Imported', types: [3, 8] },
+  { id: 'failed', label: 'Failed', types: [4, 7, 12] },
+  { id: 'files', label: 'Files changed', types: [5, 6, 9, 11] },
+];
+
+// The one line worth reading from an event's data.
+function historyDetail(r) {
+  const d = r.data || {};
+  if (d.message) return d.message;
+  if (d.statusMessages) {
+    try {
+      const fake = { statusMessages: JSON.parse(d.statusMessages) };
+      const reasons = bookQueueReasons(fake);
+      if (reasons.length) return reasons[0];
+    } catch { /* not JSON */ }
   }
+  if (d.details) return d.details;
+  if (d.importedPath) return `→ ${String(d.importedPath).split('/').slice(-3).join('/')}`;
+  if (/grabbed/i.test(r.eventType) && (d.indexer || d.downloadClientName || d.downloadClient)) return [d.indexer, d.downloadClientName || d.downloadClient].filter(Boolean).join(' → ');
+  return '';
+}
+
+async function tabHistory(root, arr, ctx) {
+  const pageSize = 40;
+  let filter = HISTORY_FILTERS.some((f) => f.id === ctx.params.events) ? ctx.params.events : 'all';
+  const wrap = h('div', {});
+  const seg = (f) => h('button', { class: `view-seg ${filter === f.id ? 'active' : ''}`, type: 'button', onclick: (e) => {
+    if (filter === f.id) return;
+    filter = f.id;
+    for (const b of e.currentTarget.parentElement.children) b.classList.toggle('active', b === e.currentTarget);
+    ctx.setParams({ events: f.id === 'all' ? '' : f.id });
+    load();
+  } }, f.label);
+  const head = h('div', { class: 'lib-head', style: { justifyContent: 'flex-start' } }, h('div', { class: 'view-toggle', role: 'group', 'aria-label': 'Which events' }, ...HISTORY_FILTERS.map(seg)));
+  mount(root, head, wrap);
+  const url = (page) => {
+    const types = (HISTORY_FILTERS.find((f) => f.id === filter) || HISTORY_FILTERS[0]).types;
+    return `history?page=${page}&pageSize=${pageSize}&sortKey=date&sortDirection=descending&includeAuthor=true&includeBook=true${types.map((t) => `&eventType=${t}`).join('')}`;
+  };
+  async function load() {
+    mount(wrap, skeletonList());
+    try {
+      const data = await arr.get(url(1));
+      let shown = records(data);
+      const total = Number(data && data.totalRecords) || shown.length;
+      if (!shown.length) return mount(wrap, empty('🕓', filter === 'all' ? 'No history yet' : 'Nothing here', filter === 'all' ? '' : 'No event of this kind yet.'));
+      const list = h('div', { class: 'list' }, ...shown.map((r) => historyRow(r, ctx)));
+      let page = 1;
+      const more = h('button', { class: 'btn' }, `Show more (${total - shown.length} more)`);
+      const moreWrap = h('div', { class: 'load-more' }, more);
+      more.onclick = async () => {
+        more.disabled = true;
+        try {
+          const next = records(await arr.get(url(page + 1)));
+          page++;
+          shown = shown.concat(next);
+          for (const r of next) list.appendChild(historyRow(r, ctx));
+          more.textContent = `Show more (${Math.max(0, total - shown.length)} more)`;
+          more.disabled = false;
+          if (!next.length || shown.length >= total) moreWrap.remove();
+        } catch (e) { toast(e.message, 'error'); more.disabled = false; }
+      };
+      mount(wrap, list, shown.length < total ? moreWrap : null);
+    } catch (err) {
+      mount(wrap, empty('', 'Failed to load history', err.message, { label: 'Retry', onClick: load }));
+    }
+  }
+  await load();
 }
 
 function historyRow(r, ctx) {
   const info = bookEventInfo(r.eventType);
   const book = r.book || {};
   const quality = r.quality && r.quality.quality && r.quality.quality.name;
+  const detail = historyDetail(r);
   return h('div', { class: `row book-row${r.authorId ? ' clickable' : ''}`, onclick: r.authorId ? () => openAuthor(ctx, { id: r.authorId }) : null },
     bookCoverEl({ ...book, title: book.title || r.sourceTitle }),
     h('div', { class: 'row-main' },
@@ -943,6 +1199,140 @@ function historyRow(r, ctx) {
         quality ? h('span', {}, quality) : null,
         r.date ? timeEl(r.date) : null,
       ),
+      detail ? h('div', { class: `history-detail ${info.cls === 'down' || info.cls === 'warn' ? 'bad' : ''}` }, detail) : null,
     ),
   );
+}
+
+// ---- System ----------------------------------------------------------------
+
+const HEALTH_CLS = { error: 'down', warning: 'warn', notice: 'info' };
+// Commands the server lets only admins run (server/roles.js ADMIN_COMMANDS).
+const ADMIN_COMMAND = /delete|backup|update|restart|shutdown|clear|reset|cleanup/i;
+function everyLabel(mins) {
+  const m = Number(mins) || 0;
+  if (!m) return '';
+  if (m % 10080 === 0) return m === 10080 ? 'Every week' : `Every ${m / 10080} weeks`;
+  if (m % 1440 === 0) return m === 1440 ? 'Every day' : `Every ${m / 1440} days`;
+  if (m % 60 === 0) return m === 60 ? 'Every hour' : `Every ${m / 60} hours`;
+  return m === 1 ? 'Every minute' : `Every ${m} minutes`;
+}
+const isPathCheck = (c) => /RemotePathMapping|RootFolder|MountCheck|DownloadClientRootFolder|ImportMechanism/i.test((c && c.source) || '')
+  || /not accessible|does not exist|remote path|docker/i.test((c && c.message) || '');
+// "00:01:52.7210000" -> "1m 52s"; under a second -> '' (not worth showing).
+function durationLabel(span) {
+  const m = String(span || '').match(/^(?:(\d+)\.)?(\d+):(\d+):(\d+)(?:\.\d+)?$/);
+  if (!m) return '';
+  const secs = (Number(m[1] || 0) * 86400) + (Number(m[2]) * 3600) + (Number(m[3]) * 60) + Number(m[4]);
+  if (secs < 1) return '';
+  const hh = Math.floor(secs / 3600); const mm = Math.floor((secs % 3600) / 60); const ss = secs % 60;
+  return [hh ? `${hh}h` : '', mm ? `${mm}m` : '', !hh && ss ? `${ss}s` : ''].filter(Boolean).join(' ');
+}
+
+async function tabSystem(root, arr, ctx) {
+  const app = ctx.service.label;
+  mount(root, skeletonList());
+  try {
+    const [health, disks, status, tasks, blocklist] = await Promise.all([
+      arr.get('health').catch(() => []),
+      arr.get('diskspace').catch(() => []),
+      arr.get('system/status').catch(() => ({})),
+      arr.get('system/task').catch(() => []),
+      arr.get('blocklist?page=1&pageSize=20&sortKey=date&sortDirection=descending').catch(() => ({ records: [] })),
+    ]);
+    const reload = () => tabSystem(root, arr, ctx);
+    const command = (name, label, title, extra = {}) => {
+      const btn = h('button', { class: 'btn sm', type: 'button', title, 'data-needs': ADMIN_COMMAND.test(name) ? 'admin' : 'write' }, label);
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          const cmd = await arr.post('command', { name, ...extra });
+          toast(`${label}: started`, 'success');
+          watchCommand(arr, cmd, { done: `${label}: done`, failed: `${label} failed`, onEnd: () => { btn.disabled = false; } });
+        } catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+      };
+      return btn;
+    };
+    const searchMissing = h('button', { class: 'btn sm', type: 'button', 'data-needs': 'write', title: 'Search for every missing monitored book' }, 'Search missing');
+    searchMissing.onclick = async () => {
+      let total = 0;
+      try { total = Number((await arr.get('wanted/missing?page=1&pageSize=1')).totalRecords) || 0; } catch { /* unknown */ }
+      if (!total) { toast('No monitored book is missing', 'info'); return; }
+      searchBooks(arr, { name: 'MissingBookSearch' }, total, 'every missing book');
+    };
+    const dupes = h('button', { class: 'btn sm', type: 'button', title: 'Books listed more than once, which can be downloaded twice' }, 'Books listed twice');
+    dupes.onclick = async () => {
+      dupes.disabled = true;
+      try {
+        const [books, authors] = await Promise.all([arr.get('book'), cachedList(authorsKey(ctx), () => arr.get('author'), 300000)]);
+        openDuplicateBooks(arr, ctx, { books: Array.isArray(books) ? books : [], authors, title: `Books listed twice · ${app}` });
+      } catch (e) { toast(e.message, 'error'); }
+      dupes.disabled = false;
+    };
+    const taskRow = (t) => h('div', { class: 'row task-row' },
+      h('div', { class: 'row-main' },
+        h('div', { class: 'row-title', style: { fontSize: '14px' } }, t.name || t.taskName),
+        h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+          t.interval ? h('span', { class: 'dim' }, everyLabel(t.interval)) : null,
+          t.lastExecution ? h('span', {}, 'Last ', timeEl(t.lastExecution)) : null,
+          t.nextExecution ? h('span', { class: 'dim' }, `Next ${fmtRelative(t.nextExecution)}`) : null,
+          durationLabel(t.lastDuration) ? h('span', { class: 'dim' }, `took ${durationLabel(t.lastDuration)}`) : null)),
+      h('div', { class: 'row-actions' }, command(t.taskName || t.name, 'Run now', `Run ${t.name || t.taskName} now`)));
+    const pathChecks = (health || []).filter(isPathCheck).length;
+    mount(root,
+      h('div', { class: 'section-title' }, 'Maintenance'),
+      h('div', { class: 'meta-line system-actions' },
+        command('RssSync', 'RSS sync', 'Check the indexers’ RSS feeds for new releases now'),
+        command('RefreshMonitoredDownloads', 'Check downloads', 'Ask the download clients for finished downloads now'),
+        command('RefreshAuthor', 'Refresh all authors', 'Refresh every author from the metadata source and rescan their folders'),
+        command('RescanFolders', 'Rescan folders', 'Scan the root folders for new, changed and removed files'),
+        searchMissing,
+        command('CheckHealth', 'Check health', 'Run the health checks again'),
+        command('Backup', 'Back up', `Make a ${app} backup now`),
+        h('button', { class: 'btn sm', type: 'button', title: 'Files in the root folders that aren’t linked to a book', onclick: () => openUnmappedFiles(arr, ctx, { onChanged: () => invalidate(`arr:${ctx.service.key}:unmapped`) }) }, 'Unmapped files'),
+        dupes,
+        h('button', { class: 'btn sm', type: 'button', title: 'Entries that waste searches or clutter the library, with bulk fixes', onclick: () => openTidyUp(arr, ctx, 'author') }, 'Tidy up'),
+        roleAllows('admin') ? h('button', { class: 'btn sm', type: 'button', title: 'Read-only checks: folders, download clients, remote path mappings, Prowlarr sync', onclick: () => import('../lib/setupDoctorUI.js').then((m) => m.openSetupDoctor(ctx, { service: ctx.service.key })) }, 'Setup doctor') : null),
+      h('div', { class: 'section-title' }, 'Health'),
+      (health && health.length)
+        ? h('div', { class: 'list' }, ...health.map((c) => h('div', { class: 'row' },
+          h('div', { class: 'row-main' },
+            h('div', { class: 'row-title', style: { fontSize: '14px', overflowWrap: 'anywhere' } }, c.message || c.source),
+            h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+              h('span', { class: `pill ${HEALTH_CLS[c.type] || 'muted'}` }, c.type || 'notice'),
+              c.source ? h('span', { class: 'dim' }, c.source) : null,
+              isPathCheck(c) ? h('button', { class: 'btn sm', type: 'button', title: 'Downloads waiting because of this', onclick: () => ctx.setParams({ tab: 'queue', queue: 'kind:path' }, { reload: true }) }, 'Show downloads') : null,
+              c.wikiUrl ? h('a', { class: 'btn sm', href: c.wikiUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Help') : null)))))
+        : h('div', { class: 'dim' }, 'No health issues.'),
+      pathChecks && roleAllows('admin') ? h('p', { class: 'dim', style: { fontSize: '12px' } }, `The Setup doctor above compares ${app}’s download clients, remote path mappings and folders and says what to change.`) : null,
+      h('div', { class: 'section-title' }, 'Disk space'),
+      (disks || []).length ? h('div', { class: 'list' }, ...disks.map((d) => {
+        const used = (d.totalSpace || 0) - (d.freeSpace || 0);
+        const p = d.totalSpace ? (used / d.totalSpace) * 100 : 0;
+        return h('div', { class: 'row' }, h('div', { class: 'row-main' },
+          h('div', { class: 'row-title', style: { fontSize: '14px' } }, d.path || d.label || 'Disk'),
+          h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+            h('span', {}, `${fmtBytes(d.freeSpace)} free of ${fmtBytes(d.totalSpace)}`),
+            h('span', { class: `pill ${p > 90 ? 'down' : p > 75 ? 'warn' : 'ok'}` }, `${Math.round(p)}% used`)),
+          h('div', { class: 'progress' }, h('span', { style: { width: pct(p) } }))));
+      })) : h('div', { class: 'dim' }, `${app} reported no disks.`),
+      (tasks || []).length ? h('div', { class: 'section-title' }, 'Scheduled tasks') : null,
+      (tasks || []).length ? h('div', { class: 'list' }, ...[...tasks].sort((a, b) => String(a.name).localeCompare(String(b.name))).map(taskRow)) : null,
+      h('div', { class: 'section-title' }, 'System'),
+      h('div', { class: 'card' },
+        ...[
+          ['App', [status.appName || app, status.instanceName && status.instanceName !== status.appName ? `(${status.instanceName})` : ''].filter(Boolean).join(' ')],
+          ['Version', [status.version, status.branch ? `· ${status.branch}` : ''].filter(Boolean).join(' ')],
+          ['OS', status.osName ? `${status.osName} ${status.osVersion || ''}`.trim() : ''],
+          ['Runtime', status.runtimeVersion ? `${status.runtimeName || '.NET'} ${status.runtimeVersion}` : ''],
+          ['Docker', status.isDocker === undefined ? '' : status.isDocker ? 'Yes' : 'No'],
+          ['Started', status.startTime ? fmtRelative(status.startTime) : ''],
+          ['Database', status.databaseType ? `${status.databaseType} ${status.databaseVersion || ''}`.trim() : ''],
+        ].filter(([, v]) => v).map(([k, v]) => h('div', { class: 'setting-row' }, h('span', { class: 'dim' }, k), h('span', { class: 'right' }, v)))),
+      h('div', { class: 'section-title' }, 'Blocklist'),
+      blocklistSection(blocklist, arr, reload),
+    );
+  } catch (err) {
+    mount(root, empty('', 'Failed to load system info', err.message, { label: 'Retry', onClick: () => tabSystem(root, arr, ctx) }));
+  }
 }

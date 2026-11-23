@@ -83,14 +83,15 @@ function successMessage({ blocklist, search }) {
 
 // Remove dialog mirroring Sonarr/Radarr's own: three clear choices, sensible
 // defaults (remove from client, no blocklist), one confirm button.
-export function openRemoveQueueDialog(client, record, { onDone, rowEl } = {}) {
+//   removeFromClient: the switch's starting state; warning: shown above it.
+export function openRemoveQueueDialog(client, record, { onDone, rowEl, removeFromClient = true, warning = '' } = {}) {
   const box = (label, hint, checked) => {
     const input = h('input', { type: 'checkbox', role: 'switch', checked: checked ? 'checked' : null });
     const row = h('label', { class: 'queue-remove-opt' }, input,
       h('span', {}, h('strong', {}, label), h('span', { class: 'dim' }, hint)));
     return { input, row };
   };
-  const fromClient = box('Remove from download client', 'Deletes the download and its files from the client', true);
+  const fromClient = box('Remove from download client', 'Deletes the download and its files from the client', removeFromClient);
   const blocklist = box('Blocklist this release', 'It will never be grabbed again', false);
   const search = box('Search for a replacement', 'Grab a different release right away', true);
   const sync = () => {
@@ -109,6 +110,7 @@ export function openRemoveQueueDialog(client, record, { onDone, rowEl } = {}) {
     title: 'Remove from queue',
     body: h('div', { class: 'queue-remove' },
       h('p', { class: 'queue-remove-title' }, record.title || 'Queued download'),
+      warning ? h('p', { class: 'queue-remove-warning' }, warning) : null,
       fromClient.row, blocklist.row, search.row),
     footer: h('div', { class: 'modal-actions' }, h('button', { class: 'btn', type: 'button', onclick: closeModal }, 'Cancel'), confirm),
   });

@@ -389,8 +389,28 @@ Readarr-type services get the same page as Sonarr and Radarr, with the differenc
   profile, "monitor new books" and tags (Chaptarr: for each format). Removing can also delete
   the author's files; Chaptarr first lists which folders and files would go and whether they
   land in its Recycle Bin.
-- **Wanted, Queue, Calendar, History** — with book covers. Wanted has Missing and Cutoff Unmet,
-  per-book automatic and interactive search, and Search all.
+- **Wanted, Calendar, History** — with book covers. Wanted has Missing and Cutoff Unmet,
+  per-book automatic and interactive search, and Search all. History filters by Grabbed,
+  Imported, Failed and Files changed, loads more on request, and shows why an import failed.
+- **Queue** — like Chaptarr's own queue, it also lists downloads the app didn't grab (unknown
+  author). Problems come first, in a summary that filters the list: a folder the app can't
+  reach, not grabbed by the app, matched another book, no book files, waiting for a manual
+  import, failed. Each download offers what the app offers: **Fix import** (manual import with
+  the files grouped by book; move files to another author or book, the app re-checks them, then
+  Import), Retry import, Grab now for a delayed release, Remove (optionally blocklisting) and
+  Blocklist & search. Removing many at once only ignores them unless you also remove them from
+  the download client, and a download inside the library folder warns before anything is
+  deleted.
+- **Author tools** — Rename… and Write tags… preview every change before anything is written;
+  books whose chapter titles would all become the book title start unticked. Books listed twice
+  (from more than one metadata source) with more than one copy monitored get a banner, and
+  Stop monitoring the extra copy keeps the book from downloading twice.
+- **Unmapped files** — the Library says how many files the app couldn't link to a book. Review
+  lists them by folder with Import… (manual import), Delete… and, on Chaptarr, Retry matching.
+- **System** — maintenance commands (RSS sync, check downloads, refresh all authors, rescan
+  folders, search missing, check health, back up), health checks with Show downloads for folder
+  problems, disk space, scheduled tasks with Run now, version details, the blocklist, Books
+  listed twice for the whole library, and the Setup doctor for admins.
 - A search that covers more than 10 books asks first, since indexers limit daily searches.
 
 Pictures come from the app's metadata sources (remoteUrl), so they also load in the iOS app.

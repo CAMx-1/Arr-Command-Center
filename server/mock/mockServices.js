@@ -2450,6 +2450,32 @@ function makeReadarr(opts = {}) {
   };
   for (const def of BOOK_LIBRARY) addCatalogAuthor(def, { id: def.id });
 
+  // Chaptarr mixes metadata sources, so some books are listed twice: a copy
+  // from Amazon next to the Hardcover one (both monitored, or one on disk).
+  const dupeOf = (title, authorId, fields = {}) => {
+    const src = books.find((b) => b.title === title && b.authorId === authorId && (!chaptarr || b.mediaType === 'audiobook'));
+    if (!src) return null;
+    const b = { ...src, id: nextBook++, foreignBookId: `az:B0${String(7000 + nextBook).padStart(8, '0')}`, seriesTitle: '', seriesLabels: [], ratings: { votes: 40, value: 4, popularity: 1 }, ...fields };
+    books.push(b);
+    return b;
+  };
+  const warbreakerCopy = chaptarr ? dupeOf('Warbreaker', 1, { monitored: true, audiobookMonitored: true }) : null;
+  if (chaptarr) dupeOf('Artemis', 2, { monitored: true, audiobookMonitored: true });
+
+  // Files in the root folders that Chaptarr couldn't link to a book, in
+  // import units (one book's folder each).
+  let unmapped = [];
+  if (chaptarr) {
+    const unit = (root, names, size, ext, mediaType) => names.forEach((n) => unmapped.push({
+      id: nextFile++, authorId: 0, bookId: 0, path: `${root}/${n}.${ext}`, size, dateAdded: iso(now - 2 * day), mediaType,
+      quality: { quality: { id: ext === 'epub' ? 3 : 10, name: ext.toUpperCase() }, revision: { version: 1, real: 0, isRepack: false } },
+      importUnitKey: `unit:${root.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, importUnitRoot: root,
+    }));
+    unit('/books/audiobooks/Brandon Sanderson - Edgedancer (2016)', ['Edgedancer - Part 01', 'Edgedancer - Part 02', 'Edgedancer - Part 03'], 61865984, 'mp3', 'audiobook');
+    unit('/books/audiobooks/Sanderson.Mistborn.Secret.History.2016', ['Secret History 1 of 2', 'Secret History 2 of 2'], 98566144, 'm4b', 'audiobook');
+    unit('/books/ebooks/Terry Pratchett/Pyramids', ['Pyramids - Terry Pratchett'], 1583104, 'epub', 'ebook');
+  }
+
   const bookHasFile = (b) => files.some((f) => f.bookId === b.id);
   const bookResource = (b) => {
     const fs = files.filter((f) => f.bookId === b.id);
@@ -2486,12 +2512,40 @@ function makeReadarr(opts = {}) {
   let queue = [
     { id: 601, title: 'Andy Weir - Project Hail Mary (2021) [M4B]', authorId: 2, bookId: hailMary && hailMary.id, status: 'downloading', trackedDownloadState: 'downloading', trackedDownloadStatus: 'ok', size: 724566016, sizeleft: 181141504, timeleft: '00:01:30', estimatedCompletionTime: iso(now + 90000), downloadClient: 'SABnzbd', indexer: 'NZBgeek', downloadId: 'rd-abc', protocol: 'usenet', quality: { quality: { id: 12, name: 'M4B' } } },
   ];
+  // Chaptarr's queue also lists downloads it didn't grab (no author) and the
+  // ones waiting on a person, as in a real library after a move.
+  const warbreaker = firstBook('Warbreaker');
+  if (chaptarr) {
+    const done = { status: 'completed', trackedDownloadStatus: 'warning', sizeleft: 0, timeleft: '00:00:00', downloadClient: 'SABnzbd', protocol: 'usenet', canRetryImport: false, awaitingImportConfirmation: false, downloadClientHasPostImportCategory: false, downloadForced: false };
+    const msg = (title, ...messages) => ({ title, messages });
+    queue.push(
+      { ...done, id: 603, title: 'Brandon Sanderson - Warbreaker [Unabridged] MP3', authorId: 1, bookId: warbreakerCopy && warbreakerCopy.id, trackedDownloadState: 'importBlocked', canRetryImport: true, size: 553648128, indexer: 'NZBgeek', downloadId: 'SABnzbd_nzo_warbreaker', outputPath: '/downloads/complete/audiobooks/Brandon Sanderson - Warbreaker', quality: { quality: { id: 10, name: 'MP3' } },
+        statusMessages: [msg('Brandon Sanderson - Warbreaker', 'Import completion could not be proven for the requested files and books'), msg('Warbreaker - Part 01.mp3', `Rejected: Completed download was grabbed for 'Warbreaker' (BookId ${warbreakerCopy && warbreakerCopy.id}), but import matched 'Warbreaker' (BookId ${warbreaker && warbreaker.id}, work hc:4009).`)],
+        errorMessage: 'Import completion could not be proven for the requested files and books' },
+      { ...done, id: 604, title: 'Andy.Weir-The.Martian.Unabridged.2014', trackedDownloadState: 'importPending', size: 412090368, downloadId: 'SABnzbd_nzo_martian', outputPath: '/Volumes/Media/audiobooks/Andy.Weir-The.Martian.Unabridged.2014', quality: { quality: { id: 0, name: 'Unknown' } },
+        statusMessages: [msg('Andy.Weir-The.Martian.Unabridged.2014', 'Source file has not been imported'), msg('Andy.Weir-The.Martian.Unabridged.2014', 'Download path is not accessible to Chaptarr: /Volumes/Media/audiobooks/Andy.Weir-The.Martian.Unabridged.2014. Check the download client path, remote path mapping, and container volume mappings.')],
+        errorMessage: 'Source file has not been imported' },
+      { ...done, id: 605, title: 'Agatha.Christie-And.Then.There.Were.None.Hugh.Fraser', status: 'failed', trackedDownloadState: 'downloading', size: 301989888, downloadId: 'SABnzbd_nzo_christie', outputPath: '/downloads/incomplete/Agatha.Christie-And.Then.There.Were.None.Hugh.Fraser', quality: { quality: { id: 0, name: 'Unknown' } },
+        statusMessages: [msg('Agatha.Christie-And.Then.There.Were.None.Hugh.Fraser', 'Download wasn\u2019t grabbed by Chaptarr, skipping')], errorMessage: 'Download wasn\u2019t grabbed by Chaptarr, skipping' },
+      { id: 606, title: 'Brandon Sanderson - Isles of the Emberdark [M4B]', authorId: 1, bookId: (firstBook('Isles of the Emberdark') || {}).id, status: 'delay', trackedDownloadState: 'downloading', trackedDownloadStatus: 'ok', size: 845000000, sizeleft: 845000000, timeleft: '05:30:00', estimatedCompletionTime: iso(now + 5.5 * 3600000), indexer: 'NZBgeek', protocol: 'usenet', quality: { quality: { id: 12, name: 'M4B' } }, statusMessages: [], canRetryImport: false },
+    );
+  }
+  let blocklist = chaptarr ? [
+    { id: 1, authorId: 2, bookIds: [hailMary && hailMary.id], sourceTitle: 'Andy Weir - Project Hail Mary (2021) [MP3] 32kbps', quality: { quality: { id: 10, name: 'MP3' } }, date: iso(now - 3 * day), protocol: 'usenet', indexer: 'DrunkenSlug', message: 'Aborted, cannot be completed - https://sabnzbd.org/not-complete' },
+    { id: 2, authorId: 1, bookIds: [], sourceTitle: 'Sanderson - Rhythm of War (2020) [Dramatized Adaptation]', quality: { quality: { id: 12, name: 'M4B' } }, date: iso(now - 9 * day), protocol: 'torrent', indexer: 'AudioBookBay', message: 'Manually blocklisted' },
+  ] : [];
   const history = () => {
     const imported = files.filter((f, i, all) => all.findIndex((x) => x.bookId === f.bookId) === i)
       .sort((x, y) => Date.parse(y.dateAdded) - Date.parse(x.dateAdded)).slice(0, 6)
       .map((f, i) => { const b = books.find((x) => x.id === f.bookId); return { id: 100 + i, eventType: 'bookFileImported', authorId: f.authorId, bookId: f.bookId, sourceTitle: `${authors.find((a) => a.id === f.authorId)?.authorName} - ${b?.title} [${f.quality.quality.name}]`, quality: f.quality, date: f.dateAdded }; });
-    const grabbed = queue.map((q, i) => ({ id: 200 + i, eventType: 'grabbed', authorId: q.authorId, bookId: q.bookId, sourceTitle: q.title, quality: q.quality, date: iso(now - 600000) }));
-    return [...grabbed, ...imported];
+    const grabbed = queue.map((q, i) => ({ id: 200 + i, eventType: 'grabbed', authorId: q.authorId, bookId: q.bookId, sourceTitle: q.title, quality: q.quality, date: iso(now - 600000), data: { indexer: q.indexer || 'NZBgeek', downloadClientName: q.downloadClient || 'SABnzbd' } }))
+      .filter((r) => r.authorId);
+    const problems = chaptarr ? [
+      { id: 300, eventType: 'bookImportIncomplete', authorId: 1, bookId: warbreakerCopy && warbreakerCopy.id, sourceTitle: 'Brandon Sanderson - Warbreaker [Unabridged] MP3', quality: { quality: { id: 10, name: 'MP3' } }, date: iso(now - 420000),
+        data: { statusMessages: JSON.stringify((queue.find((q) => q.id === 603) || {}).statusMessages || []) } },
+      { id: 301, eventType: 'downloadFailed', authorId: 2, bookId: hailMary && hailMary.id, sourceTitle: 'Andy Weir - Project Hail Mary (2021) [MP3] 32kbps', quality: { quality: { id: 10, name: 'MP3' } }, date: iso(now - 3 * day), data: { message: 'Aborted, cannot be completed - https://sabnzbd.org/not-complete', downloadClientName: 'SABnzbd' } },
+    ] : [];
+    return [...grabbed, ...problems, ...imported].sort((x, y) => Date.parse(y.date) - Date.parse(x.date));
   };
   const releasesFor = (b) => {
     const a = authors.find((x) => x.id === b.authorId) || { authorName: 'Unknown' };
@@ -2628,8 +2682,15 @@ function makeReadarr(opts = {}) {
     res.status(202).json(books.filter((x) => ids.has(x.id)).map(bookResource));
   });
   app.get('/api/v1/bookfile', (req, res) => {
+    if (req.query.unmapped === 'true') return res.json(chaptarr ? unmapped : []);
     const authorId = Number(req.query.authorId); const bookId = Number(req.query.bookId);
     res.json(files.filter((f) => (!authorId || f.authorId === authorId) && (!bookId || f.bookId === bookId)));
+  });
+  app.delete('/api/v1/bookfile/bulk', (req, res) => {
+    const ids = new Set(((req.body || {}).bookFileIds || []).map(Number));
+    unmapped = unmapped.filter((f) => !ids.has(f.id));
+    files = files.filter((f) => !ids.has(f.id));
+    res.json({});
   });
   app.get('/api/v1/release', (req, res) => {
     const b = books.find((x) => x.id === Number(req.query.bookId));
@@ -2647,22 +2708,178 @@ function makeReadarr(opts = {}) {
     res.json(r);
   });
 
-  app.get('/api/v1/queue', (req, res) => res.json(paged(queue.map((q) => withRefs(q, req)), req)));
+  // Chaptarr hides downloads it can't tie to an author unless asked.
+  app.get('/api/v1/queue', (req, res) => res.json(paged(queue.filter((q) => req.query.includeUnknownAuthorItems === 'true' || q.authorId).map((q) => withRefs(q, req)), req)));
+  app.delete('/api/v1/queue/bulk', (req, res) => { const ids = new Set(((req.body || {}).ids || []).map(Number)); queue = queue.filter((q) => !ids.has(q.id)); res.json({}); });
   app.delete('/api/v1/queue/:id', (req, res) => { queue = queue.filter((q) => q.id !== Number(req.params.id)); res.json({}); });
+  app.post('/api/v1/queue/grab/:id', (req, res) => {
+    const q = queue.find((x) => x.id === Number(req.params.id) && x.status === 'delay');
+    if (!q) return res.status(404).json({ message: 'Pending release not found' });
+    Object.assign(q, { status: 'downloading', downloadClient: 'SABnzbd', downloadId: `SABnzbd_nzo_${q.id}`, sizeleft: q.size * 0.98, timeleft: '00:12:00' });
+    res.json({});
+  });
   app.get('/api/v1/calendar', (req, res) => {
     const start = Date.parse(req.query.start) || now - day; const end = Date.parse(req.query.end) || now + 30 * day;
     res.json(books.filter((b) => { const t = Date.parse(b.releaseDate); return t >= start && t <= end; }).map((b) => withRefs(bookResource(b), req)));
   });
-  app.get('/api/v1/history', (req, res) => res.json(paged(history().map((r) => withRefs(r, req)), req)));
+  const EVENT_TYPES = { 1: 'grabbed', 3: 'bookFileImported', 4: 'downloadFailed', 5: 'bookFileDeleted', 6: 'bookFileRenamed', 7: 'bookImportIncomplete', 8: 'downloadImported', 9: 'bookFileRetagged', 11: 'bookFileConverted', 12: 'bookFileConversionFailed' };
+  app.get('/api/v1/history', (req, res) => {
+    const wanted = [].concat(req.query.eventType || []).map((t) => EVENT_TYPES[Number(t)]).filter(Boolean);
+    res.json(paged(history().filter((r) => !wanted.length || wanted.includes(r.eventType)).map((r) => withRefs(r, req)), req));
+  });
   app.get('/api/v1/wanted/missing', (req, res) => {
     const list = books.filter((b) => b.monitored && !bookHasFile(b) && Date.parse(b.releaseDate) <= Date.now())
       .sort((x, y) => Date.parse(y.releaseDate) - Date.parse(x.releaseDate));
     res.json(paged(list.map((b) => withRefs(bookResource(b), req)), req));
   });
   app.get('/api/v1/wanted/cutoff', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 0, records: [] }));
-  app.post('/api/v1/command', (req, res) => res.status(201).json({ id: Math.floor(Math.random() * 1000), name: (req.body && req.body.name) || 'Command', status: 'queued', body: req.body || {} }));
-  app.get('/api/v1/command/:id', (req, res) => res.json({ id: Number(req.params.id), status: 'completed', message: 'Completed' }));
-  app.get('/api/v1/health', (req, res) => res.json([]));
+
+  // ---- Manual import (Chaptarr's Interactive Import contract) ----
+  const editionOf = (b) => (b ? { id: 50000 + b.id, bookId: b.id, title: b.title, monitored: true, foreignEditionId: `${b.foreignBookId}:ed` } : null);
+  const candidate = (id, path, size, book, extra = {}) => {
+    const author = book ? authorRef(book.authorId) : undefined;
+    const ext = String(path).split('.').pop().toLowerCase();
+    return {
+      id, path, name: String(path).split('/').pop().replace(/\.[^.]+$/, ''), size,
+      ...(author ? { author } : {}), ...(book ? { book: bookResource(book), edition: editionOf(book), editionId: editionOf(book).id, foreignEditionId: editionOf(book).foreignEditionId } : {}),
+      quality: { quality: { id: ext === 'epub' ? 3 : ext === 'm4b' ? 12 : 10, name: ext.toUpperCase() }, revision: { version: 1, real: 0, isRepack: false } },
+      customFormats: [], isGraphicAudio: false, qualityWeight: 106, indexerFlags: 0, rejections: [], warnings: [], tags: {},
+      additionalFile: false, replaceExistingFiles: false, disableReleaseSwitching: false, ...extra,
+    };
+  };
+  const candidatesFor = (q) => {
+    const req = q || {};
+    if (req.downloadId === 'SABnzbd_nzo_warbreaker') {
+      // Matched to the Hardcover copy, though the grab was for the Amazon one.
+      return Array.from({ length: 6 }, (_, i) => candidate(9100 + i, `/downloads/complete/audiobooks/Brandon Sanderson - Warbreaker/Warbreaker - Part ${String(i + 1).padStart(2, '0')}.mp3`, 92274688, warbreaker, { downloadId: req.downloadId }));
+    }
+    if (req.downloadId) return []; // the folder isn't reachable, or nothing finished
+    const ids = new Set([].concat(req.bookFileIds || []).map(Number));
+    const picked = unmapped.filter((f) => (!ids.size || ids.has(f.id)) && (!req.folder || f.importUnitRoot === req.folder || f.path.startsWith(`${req.folder}/`)));
+    return picked.map((f) => {
+      if (/Edgedancer/.test(f.path)) return candidate(f.id, f.path, f.size, books.find((b) => b.title === 'Edgedancer' && b.mediaType === 'audiobook'));
+      if (/Secret.History/i.test(f.path)) {
+        return candidate(f.id, f.path, f.size, null, { author: authorRef(1), suggestedForeignAuthorId: 'hc:250001', suggestedAuthorName: 'Brandon Sanderson', suggestedForeignBookId: 'hc:376501', suggestedBookTitle: 'Mistborn: Secret History', suggestedForeignEditionId: 'hc:edition:376501', suggestedEditionTitle: 'Mistborn: Secret History', warnings: ['Not in the library yet: Chaptarr adds it from Hardcover'] });
+      }
+      return candidate(f.id, f.path, f.size, null, { rejections: [{ reason: 'Couldn\u2019t find a similar book in the library', type: 'permanent' }] });
+    });
+  };
+  if (chaptarr) {
+    app.get('/api/v1/manualimport', (req, res) => setTimeout(() => res.json(candidatesFor(req.query)), 300));
+    app.post('/api/v1/manualimport', (req, res) => {
+      const out = (Array.isArray(req.body) ? req.body : []).map((it) => {
+        const book = books.find((b) => b.id === Number(it.bookId));
+        const author = authorRef(Number(it.authorId) || (book && book.authorId));
+        const edition = book ? editionOf(book) : null;
+        const wrongAuthor = book && author && book.authorId !== author.id;
+        return {
+          id: it.id, path: it.path, ...(author ? { author } : {}), ...(book ? { book: bookResource(book), edition, editionId: Number(it.editionId) || edition.id } : {}),
+          quality: it.quality, releaseGroup: it.releaseGroup, indexerFlags: it.indexerFlags || 0, downloadId: it.downloadId,
+          rejections: wrongAuthor ? [{ reason: 'Book belongs to another author', type: 'permanent' }] : [], warnings: it.warnings || [],
+          suggestedForeignAuthorId: it.suggestedForeignAuthorId, suggestedAuthorName: it.suggestedAuthorName, suggestedForeignBookId: it.suggestedForeignBookId, suggestedBookTitle: it.suggestedBookTitle,
+          isGraphicAudio: false, additionalFile: false, replaceExistingFiles: false, disableReleaseSwitching: !!it.disableReleaseSwitching,
+        };
+      });
+      res.status(202).json(out);
+    });
+    app.get('/api/v1/edition', (req, res) => {
+      const ids = new Set([].concat(req.query.bookId || []).map(Number));
+      res.json(books.filter((b) => ids.has(b.id)).map(editionOf));
+    });
+    app.get('/api/v1/rename', (req, res) => {
+      const authorId = Number(req.query.authorId);
+      const a = authors.find((x) => x.id === authorId);
+      if (!a) return res.json([]);
+      const mt = req.query.mediaType;
+      const out = files.filter((f) => f.authorId === authorId && (!mt || f.mediaType === mt)).map((f) => {
+        const b = books.find((x) => x.id === f.bookId);
+        const base = String(f.path).split('/').pop();
+        const newPath = `${a[`${f.mediaType}Folder`] || a.path}/${b.title} (${new Date(b.releaseDate).getUTCFullYear()})/${base}`;
+        return { authorId, bookId: b.id, editionId: 50000 + b.id, bookFileId: f.id, id: f.id, existingPath: f.path, newPath, canOrganize: true };
+      }).filter((x) => x.existingPath !== x.newPath);
+      res.json(out);
+    });
+    app.get('/api/v1/retag', (req, res) => {
+      const authorId = Number(req.query.authorId);
+      const a = authors.find((x) => x.id === authorId);
+      if (!a) return res.json([]);
+      const def = BOOK_LIBRARY.find((d) => d.id === authorId) || {};
+      const narrator = (def.narrators || [])[0] || '';
+      const out = files.filter((f) => f.authorId === authorId && f.mediaType === 'audiobook').map((f) => {
+        const b = books.find((x) => x.id === f.bookId);
+        const parts = files.filter((x) => x.bookId === f.bookId).length;
+        const n = files.filter((x) => x.bookId === f.bookId).indexOf(f) + 1;
+        const changes = parts > 1
+          ? [{ field: 'TITLE', oldValue: `Chapter ${n}`, newValue: b.title }, { field: 'ARTIST', oldValue: narrator, newValue: a.authorName }, { field: 'NARRATOR', newValue: narrator }, { field: 'TRACKCOUNT', newValue: '0' }]
+          : [{ field: 'ALBUMARTIST', newValue: a.authorName }, { field: 'YEAR', newValue: String(new Date(b.releaseDate).getUTCFullYear()) }];
+        // Like Chaptarr, bookId is the file's edition.
+        return { authorId, bookId: editionOf(b).id, trackNumbers: [], bookFileId: f.id, id: f.id, path: f.path, changes };
+      });
+      res.json(out);
+    });
+    app.get('/api/v1/system/task', (req, res) => res.json([
+      ['Application Update Check', 'ApplicationUpdateCheck', 360], ['Backup', 'Backup', 10080], ['Check Health', 'CheckHealth', 360],
+      ['Housekeeping', 'Housekeeping', 1440], ['Import List Sync', 'ImportListSync', 5], ['Process Pending Imports', 'ProcessPendingImports', 1],
+      ['Refresh Author', 'RefreshAuthor', 1440], ['Refresh Monitored Downloads', 'RefreshMonitoredDownloads', 1], ['Rescan Folders', 'RescanFolders', 1440], ['Rss Sync', 'RssSync', 15],
+    ].map(([n, taskName, interval], i) => ({ id: i + 1, name: n, taskName, interval, lastExecution: iso(now - Math.min(interval, 600) * 30000), nextExecution: iso(now + Math.min(interval, 600) * 30000), lastDuration: i % 3 ? '00:00:00.4120000' : '00:01:52.7210000' }))));
+    app.get('/api/v1/blocklist', (req, res) => res.json(paged(blocklist, req)));
+    app.delete('/api/v1/blocklist/bulk', (req, res) => { const ids = new Set(((req.body || {}).ids || []).map(Number)); blocklist = blocklist.filter((b) => !ids.has(b.id)); res.json({}); });
+    app.delete('/api/v1/blocklist/:id', (req, res) => { blocklist = blocklist.filter((b) => b.id !== Number(req.params.id)); res.json({}); });
+    app.get('/api/v1/config/metadataprovider', (req, res) => res.json({ id: 1, writeAudioTags: 'no', scrubAudioTags: false, writeBookTags: 'newFiles', updateCovers: true, embedMetadata: false }));
+    app.get('/api/v1/config/mediamanagement', (req, res) => res.json({ id: 1, recycleBin: '/books/.recycle', recycleBinCleanupDays: 7, bookMatchingStrictness: 'balanced', usePathAsTagsFallback: true }));
+  }
+
+  // Commands finish on the second poll; a few change the library like the real app.
+  const commands = new Map();
+  let nextCmd = 900;
+  const runCommand = (body) => {
+    const name = String(body.name || '');
+    if (name === 'ManualImport') {
+      for (const f of body.files || []) {
+        const b = books.find((x) => x.id === Number(f.bookId));
+        const ext = String(f.path).split('.').pop().toLowerCase();
+        const was = unmapped.find((u) => u.path === f.path);
+        unmapped = unmapped.filter((u) => u.path !== f.path);
+        if (!b) continue;
+        const a = authors.find((x) => x.id === b.authorId);
+        files.push({ id: nextFile++, bookId: b.id, authorId: b.authorId, mediaType: b.mediaType, path: `${(a && a[`${b.mediaType}Folder`]) || '/books'}/${b.title}/${String(f.path).split('/').pop()}`, size: (was && was.size) || 92274688, quality: f.quality || { quality: { id: 10, name: ext.toUpperCase() } }, dateAdded: iso(Date.now()) });
+      }
+      // As in Chaptarr, a download only counts as imported when its files went
+      // to the book it was grabbed for; otherwise it stays in the queue.
+      const done = new Set((body.files || []).filter((f) => {
+        const q = f.downloadId && queue.find((x) => x.downloadId === f.downloadId);
+        return q && (!q.bookId || q.bookId === Number(f.bookId));
+      }).map((f) => f.downloadId));
+      queue = queue.filter((q) => !done.has(q.downloadId));
+    } else if (name === 'RenameFiles') {
+      for (const id of body.files || []) {
+        const f = files.find((x) => x.id === Number(id));
+        const b = f && books.find((x) => x.id === f.bookId);
+        const a = b && authors.find((x) => x.id === b.authorId);
+        if (f && b && a) f.path = `${a[`${f.mediaType}Folder`] || a.path}/${b.title} (${new Date(b.releaseDate).getUTCFullYear()})/${String(f.path).split('/').pop()}`;
+      }
+    } else if (name === 'RetryUnmappedMatch') {
+      const edge = books.find((b) => b.title === 'Edgedancer' && b.mediaType === 'audiobook');
+      for (const u of unmapped.filter((x) => /Edgedancer/.test(x.path))) files.push({ ...u, bookId: edge.id, authorId: edge.authorId, importUnitKey: undefined, importUnitRoot: undefined });
+      unmapped = unmapped.filter((x) => !/Edgedancer/.test(x.path));
+    }
+  };
+  app.post('/api/v1/command', (req, res) => {
+    const body = req.body || {};
+    const cmd = { id: nextCmd++, name: body.name || 'Command', status: 'queued', body, polls: 0, queued: iso(Date.now()) };
+    commands.set(cmd.id, cmd);
+    res.status(201).json(cmd);
+  });
+  app.get('/api/v1/command/:id', (req, res) => {
+    const cmd = commands.get(Number(req.params.id));
+    if (!cmd) return res.json({ id: Number(req.params.id), status: 'completed', message: 'Completed' });
+    cmd.polls++;
+    if (cmd.polls >= 2 && cmd.status !== 'completed') { runCommand(cmd.body); cmd.status = 'completed'; cmd.message = 'Completed'; } else if (cmd.status === 'queued') cmd.status = 'started';
+    res.json(cmd);
+  });
+  app.get('/api/v1/health', (req, res) => res.json(chaptarr && queue.some((q) => q.id === 604) ? [
+    { source: 'RemotePathMappingCheck', type: 'error', message: 'You are using docker; download client SABnzbd places downloads in /Volumes/Media/audiobooks/Andy.Weir-The.Martian.Unabridged.2014 but this directory does not appear to exist inside the container. Review your remote path mappings and container volume settings.', wikiUrl: 'https://wiki.servarr.com/readarr/system#remote-path-mapping' },
+  ] : []));
   return app;
 }
 
