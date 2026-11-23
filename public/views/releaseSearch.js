@@ -3,10 +3,14 @@ import { RESOLUTIONS, loadReleaseFilters, saveReleaseFilters, filterReleases, is
 import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
 
 // Shared interactive search: fetches releases from indexers and lets you grab one.
-// Works for both Sonarr and Radarr (identical /release endpoint + grab semantics).
-//   query examples: `episodeId=123`, `seriesId=1&seasonNumber=2`, `movieId=5`
-export async function openReleaseSearch(ctx, arrKey, query, title) {
-  const arr = ctx.api.arr(arrKey);
+// Works for Sonarr and Radarr (API v3) and for Readarr-compatible book apps
+// such as Chaptarr (API v1, opts.version = 'v1'): the same /release endpoint
+// and grab. Book searches (opts.media = 'book') have no resolution filter;
+// opts.grab adds fields to the grab request (e.g. { bookId }).
+//   query examples: `episodeId=123`, `seriesId=1&seasonNumber=2`, `movieId=5`, `bookId=7`
+export async function openReleaseSearch(ctx, arrKey, query, title, opts = {}) {
+  const arr = opts.version === 'v1' ? ctx.api.arrV1(arrKey) : ctx.api.arr(arrKey);
+  const appLabel = (ctx.service && ctx.service.key === arrKey && ctx.service.label) || (opts.version === 'v1' ? 'The app' : 'Sonarr');
   const body = h('div', {}, loadingBox());
   openModal({ title: `Interactive Search — ${title}`, body, wide: true });
 
@@ -17,24 +21,32 @@ export async function openReleaseSearch(ctx, arrKey, query, title) {
   let lastErr;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const releases = await arr.get(`release?${query}`);
-      return renderReleases(body, arr, releases, arrKey);
+      const releases = releaseList(await arr.get(`release?${query}`));
+      return renderReleases(body, arr, releases, arrKey, opts);
     } catch (e) {
       lastErr = e;
       const transient = e.status >= 500 || /readonly|locked|database|timed out|aborted/i.test(e.message || '');
       if (!transient || attempt === maxAttempts) break;
-      mount(body, loadingBox(`Sonarr was briefly busy — retrying (${attempt}/${maxAttempts - 1})…`));
+      mount(body, loadingBox(`${appLabel} was briefly busy — retrying (${attempt}/${maxAttempts - 1})…`));
       await new Promise((r) => setTimeout(r, 1200 * attempt));
     }
   }
-  reportError(body, lastErr);
+  reportError(body, lastErr, appLabel);
 }
 
-function reportError(body, e) {
+// Readarr answers interactive search with a list of releases; Chaptarr with
+// { releases, hiddenReleases, indexersQueried, ... }.
+export function releaseList(data) {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.releases)) return data.releases;
+  return [];
+}
+
+function reportError(body, e, appLabel = 'Sonarr') {
   let msg = (e && e.message) || 'Unknown error';
   if (/readonly database|readonly|unable to open database/i.test(msg)) {
-    msg = "Sonarr couldn't write to its database to cache the search results. This is usually transient — try again in a moment. " +
-      'If it persists, check the sonarr.db file/volume permissions and free disk space on the Sonarr host.';
+    msg = `${appLabel} couldn't write to its database to cache the search results. This is usually transient — try again in a moment. ` +
+      `If it persists, check the permissions of its database file and volume, and the free disk space on the ${appLabel} host.`;
   } else if (/timed out|aborted/i.test(msg)) {
     msg = 'The indexer search timed out. Try a more specific search (a single episode) or check your indexers.';
   }
@@ -48,13 +60,15 @@ function loadingBox(message = 'Searching indexers… this can take up to a minut
   );
 }
 
-function renderReleases(root, arr, releases, svcKey) {
+function renderReleases(root, arr, releases, svcKey, opts = {}) {
+  const books = opts.media === 'book';
   if (!Array.isArray(releases) || !releases.length) {
     return mount(root, empty('', 'No releases found', 'No indexer returned results for this search.'));
   }
   // Approved first, then largest (usually best quality) first.
   releases.sort((a, b) => (Number(b.approved) - Number(a.approved)) || ((b.size || 0) - (a.size || 0)));
   let filters = loadReleaseFilters(svcKey);
+  if (books) filters = { ...filters, resolutions: [] }; // no resolution chips for books
   const count = h('span', {});
   const list = h('div', { class: 'list' });
   const resetBtn = h('button', { class: 'btn sm', type: 'button', onclick: () => { filters = { ...DEFAULT_FILTERS }; sync(); apply(); } }, 'Reset');
@@ -77,7 +91,7 @@ function renderReleases(root, arr, releases, svcKey) {
   const hideRej = h('input', { type: 'checkbox', role: 'switch' });
   hideRej.addEventListener('change', () => { filters.hideRejected = hideRej.checked; apply(); });
   const bar = h('div', { class: 'rf-bar' },
-    h('div', { class: 'rf-group', role: 'group', 'aria-label': 'Resolution' }, ...resChips),
+    books ? null : h('div', { class: 'rf-group', role: 'group', 'aria-label': 'Resolution' }, ...resChips),
     h('div', { class: 'rf-group' }, protocol, minIn, h('span', { class: 'dim' }, '–'), maxIn, h('span', { class: 'dim' }, 'GB')),
     h('label', { class: 'rf-check' }, hideRej, 'Hide rejected'),
     resetBtn,
@@ -97,7 +111,7 @@ function renderReleases(root, arr, releases, svcKey) {
     resetBtn.disabled = isDefaultFilters(filters);
     mount(count, h('b', {}, String(shown.length)), shown.length === releases.length ? ' releases' : ` of ${releases.length} releases`);
     mount(list, ...(shown.length
-      ? shown.map((r) => releaseRow(r, arr))
+      ? shown.map((r) => releaseRow(r, arr, opts.grab))
       : [empty('', 'No releases match these filters', `${releases.length} hidden — adjust or reset the filters`, { label: 'Reset filters', onClick: () => resetBtn.click() })]));
   };
   const header = h('div', { class: 'meta-line', style: { margin: '10px 0 12px' } }, count, h('span', { class: 'dim' }, 'sorted by approved, then size'));
@@ -111,13 +125,14 @@ function fmtAge(hours) {
   return `${Math.round(hrs / 24)}d old`;
 }
 
-function releaseRow(rel, arr) {
+function releaseRow(rel, arr, grabExtra = null) {
   const isTorrent = rel.protocol === 'torrent';
-  const rejections = rel.rejections || [];
+  // Strings in Sonarr/Radarr/Readarr; some forks send { reason } objects.
+  const rejections = (rel.rejections || []).map((x) => (typeof x === 'string' ? x : (x && (x.reason || x.message)) || '')).filter(Boolean);
   const grabBtn = h('button', { class: 'btn sm primary hex-btn', onclick: async (ev) => {
     const btn = ev.currentTarget; btn.disabled = true; btn.textContent = '…';
     try {
-      await arr.post('release', { guid: rel.guid, indexerId: rel.indexerId });
+      await arr.post('release', { guid: rel.guid, indexerId: rel.indexerId, ...(grabExtra || {}) });
       btn.textContent = '✓ Grabbed'; toast('Sent to download client', 'success');
     } catch (e) { btn.disabled = false; btn.textContent = '⬇ Grab'; toast(e.message, 'error'); }
   } }, '⬇ Grab');

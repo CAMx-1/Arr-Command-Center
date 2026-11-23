@@ -14,6 +14,7 @@ export const MOCK_PORTS = {
   lidarr: 18686,
   readarr: 18787,
   bindery: 18788,
+  chaptarr: 18789,
   listenarr: 14545,
   overseerr: 15055,
   sabnzbd: 18080,
@@ -2284,49 +2285,382 @@ function makeLidarr(opts = {}) {
   return app;
 }
 
-// ---------------- Readarr (books, API v1) ----------------
+// ---------------- Readarr / Chaptarr (books, API v1) ----------------
+// One mock answers like legacy Readarr (default) or like Chaptarr
+// ({ flavor: 'chaptarr' }): audiobook and ebook settings side by side on an
+// author, a book entry per format, format-typed profiles and root folders,
+// interactive search answered as { releases }, and author/deletepreview.
+// Pictures are SVG data URIs in remoteUrl, as the real apps hand out CDN URLs.
+const svgUri = (svg) => `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+const svgText = (text) => String(text).replace(/[<>&"']/g, '');
+function wrapWords(text, width, max = 4) {
+  const lines = [];
+  let line = '';
+  for (const word of String(text).split(/\s+/)) {
+    if (line && `${line} ${word}`.length > width) { lines.push(line); line = word; } else line = line ? `${line} ${word}` : word;
+  }
+  if (line) lines.push(line);
+  return lines.slice(0, max);
+}
+function authorPortraitUri(name, hue) {
+  const parts = String(name).split(/[\s.]+/).filter(Boolean);
+  const ini = svgText(`${parts[0][0]}${parts.length > 1 ? parts[parts.length - 1][0] : ''}`.toUpperCase());
+  return svgUri(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="500" viewBox="0 0 400 500"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue} 55% 58%)"/><stop offset="1" stop-color="hsl(${(hue + 50) % 360} 50% 22%)"/></linearGradient></defs><rect width="400" height="500" fill="url(#g)"/><circle cx="200" cy="200" r="92" fill="rgba(255,255,255,0.2)"/><path d="M48 500c12-128 74-190 152-190s140 62 152 190z" fill="rgba(255,255,255,0.2)"/><text x="200" y="228" fill="#fff" font-family="Georgia, serif" font-size="80" font-weight="700" text-anchor="middle">${ini}</text></svg>`);
+}
+function bookCoverUri(title, author, hue, square = false) {
+  const H = square ? 300 : 450;
+  const lines = wrapWords(title, 13).map((l, i) => `<text x="150" y="${(square ? 92 : 140) + i * 40}" fill="#fff" font-family="Georgia, serif" font-size="31" font-weight="700" text-anchor="middle">${svgText(l)}</text>`).join('');
+  return svgUri(`<svg xmlns="http://www.w3.org/2000/svg" width="300" height="${H}" viewBox="0 0 300 ${H}"><defs><linearGradient id="c" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${hue} 50% 40%)"/><stop offset="1" stop-color="hsl(${(hue + 30) % 360} 55% 15%)"/></linearGradient></defs><rect width="300" height="${H}" fill="url(#c)"/><rect x="16" y="16" width="268" height="${H - 32}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="2"/>${lines}<text x="150" y="${H - 44}" fill="rgba(255,255,255,0.88)" font-family="Helvetica, Arial, sans-serif" font-size="17" letter-spacing="3" text-anchor="middle">${svgText(String(author).toUpperCase())}</text></svg>`);
+}
+
+// [title, series label, release date, state]; state is one value or one per
+// format: file (monitored, on disk), missing, upcoming, queued (missing, in
+// the queue), none (not monitored), old (on disk but not monitored).
+const BOOK_LIBRARY = [
+  { id: 1, name: 'Brandon Sanderson', lastFirst: 'Sanderson, Brandon', status: 'continuing', monitored: true, hue: 212, addedDays: 120, formats: ['audiobook', 'ebook'],
+    overview: 'American author of epic fantasy and science fiction, best known for the Cosmere: the Mistborn books and The Stormlight Archive. He also finished Robert Jordan’s The Wheel of Time.',
+    genres: ['Fantasy', 'Epic fantasy', 'Science fiction'], narrators: ['Michael Kramer', 'Kate Reading'],
+    books: [
+      ['The Way of Kings', 'The Stormlight Archive #1', '2010-08-31', 'file'], ['Words of Radiance', 'The Stormlight Archive #2', '2014-03-04', 'file'],
+      ['Oathbringer', 'The Stormlight Archive #3', '2017-11-14', 'file'], ['Rhythm of War', 'The Stormlight Archive #4', '2020-11-17', 'file'],
+      ['Wind and Truth', 'The Stormlight Archive #5', '2024-12-06', { audiobook: 'missing', ebook: 'file' }],
+      ['The Final Empire', 'Mistborn #1', '2006-07-17', 'file'], ['The Well of Ascension', 'Mistborn #2', '2007-08-21', 'file'], ['The Hero of Ages', 'Mistborn #3', '2008-10-14', 'file'],
+      ['Elantris', '', '2005-04-21', 'file'], ['Warbreaker', '', '2009-06-09', 'missing'], ['Tress of the Emerald Sea', '', '2023-01-01', 'file'],
+      ['Isles of the Emberdark', '', 4, 'upcoming'], ['Edgedancer', 'The Stormlight Archive #2.5', '2016-10-04', 'none'],
+    ] },
+  { id: 2, name: 'Andy Weir', lastFirst: 'Weir, Andy', status: 'continuing', monitored: true, hue: 18, addedDays: 45, formats: ['audiobook'],
+    overview: 'American novelist and former software engineer. His debut The Martian was self-published a chapter at a time before becoming a bestseller and a film.',
+    genres: ['Science fiction'], narrators: ['R. C. Bray', 'Ray Porter'],
+    books: [['The Martian', '', '2011-09-27', 'file'], ['Artemis', '', '2017-11-14', 'file'], ['Project Hail Mary', '', '2021-05-04', 'queued'], ['Randomize', 'Forward #6', '2019-09-17', 'old']] },
+  { id: 3, name: 'Terry Pratchett', lastFirst: 'Pratchett, Terry', status: 'ended', qualityProfileId: 1, monitored: true, hue: 285, addedDays: 400, formats: ['ebook'],
+    overview: 'English humorist and fantasy author of the 41 Discworld novels, a world carried through space on the backs of four elephants standing on a turtle.',
+    genres: ['Fantasy', 'Humor'],
+    books: [
+      ['The Colour of Magic', 'Discworld #1', '1983-11-24', 'file'], ['The Light Fantastic', 'Discworld #2', '1986-06-02', 'file'], ['Equal Rites', 'Discworld #3', '1987-01-01', 'file'],
+      ['Mort', 'Discworld #4', '1987-11-12', 'file'], ['Sourcery', 'Discworld #5', '1988-05-01', 'file'], ['Good Omens', '', '1990-05-01', 'file'],
+    ] },
+  { id: 4, name: 'Agatha Christie', lastFirst: 'Christie, Agatha', status: 'ended', qualityProfileId: 1, monitored: false, hue: 350, addedDays: 300, formats: ['audiobook'],
+    overview: 'English crime novelist, creator of Hercule Poirot and Miss Marple, and the best-selling fiction writer of all time.',
+    genres: ['Mystery', 'Crime'], narrators: ['Hugh Fraser'],
+    books: [['The Mysterious Affair at Styles', 'Hercule Poirot #1', '1920-10-01', 'none'], ['Murder on the Orient Express', 'Hercule Poirot #10', '1934-01-01', 'none'], ['And Then There Were None', '', '1939-11-06', 'none']] },
+];
+const BOOK_LOOKUP = [
+  { name: 'N. K. Jemisin', lastFirst: 'Jemisin, N. K.', hue: 330, status: 'continuing', overview: 'Three-time Hugo Award winner, author of The Broken Earth trilogy.', genres: ['Fantasy', 'Science fiction'],
+    books: [['The Fifth Season', 'The Broken Earth #1', '2015-08-04'], ['The Obelisk Gate', 'The Broken Earth #2', '2016-08-16'], ['The Stone Sky', 'The Broken Earth #3', '2017-08-15']] },
+  { name: 'Martha Wells', lastFirst: 'Wells, Martha', hue: 150, status: 'continuing', overview: 'American author of The Murderbot Diaries and The Books of the Raksura.', genres: ['Science fiction', 'Fantasy'],
+    books: [['All Systems Red', 'The Murderbot Diaries #1', '2017-05-02'], ['Artificial Condition', 'The Murderbot Diaries #2', '2018-05-08'], ['Rogue Protocol', 'The Murderbot Diaries #3', '2018-08-07']] },
+  { name: 'Becky Chambers', lastFirst: 'Chambers, Becky', hue: 40, status: 'continuing', overview: 'American author of the Wayfarers and Monk & Robot books.', genres: ['Science fiction'],
+    books: [['The Long Way to a Small, Angry Planet', 'Wayfarers #1', '2014-07-29'], ['A Psalm for the Wild-Built', 'Monk & Robot #1', '2021-07-13']] },
+  { name: 'Ursula K. Le Guin', lastFirst: 'Le Guin, Ursula K.', hue: 262, status: 'ended', overview: 'American author of the Earthsea books and the Hainish Cycle.', genres: ['Fantasy', 'Science fiction'],
+    books: [['A Wizard of Earthsea', 'Earthsea #1', '1968-11-01'], ['The Left Hand of Darkness', 'Hainish Cycle #4', '1969-03-01'], ['The Dispossessed', 'Hainish Cycle #1', '1974-05-01']] },
+  { name: 'Adrian Tchaikovsky', lastFirst: 'Tchaikovsky, Adrian', hue: 95, status: 'continuing', overview: 'British author of Children of Time and The Final Architecture.', genres: ['Science fiction'],
+    books: [['Children of Time', 'Children of Time #1', '2015-06-04'], ['Shards of Earth', 'The Final Architecture #1', '2021-05-27']] },
+];
+
 function makeReadarr(opts = {}) {
+  const chaptarr = opts.flavor === 'chaptarr';
+  const name = chaptarr ? 'chaptarr' : 'readarr';
   const app = express();
   app.use(express.json());
-  mountBackupMock(app, 'readarr', 'v1');
+  mountBackupMock(app, name, 'v1');
   mountDoctorMock(app, 'v1', { clients: [] });
   const now = Date.now();
-  let authors = [
-    { id: 1, authorName: 'Brandon Sanderson', foreignAuthorId: 'b1', monitored: true, overview: 'American fantasy author.', path: '/books/Brandon Sanderson', rootFolderPath: '/books', added: new Date(now - 120 * 86400000).toISOString(), statistics: { bookCount: 20, bookFileCount: 18, sizeOnDisk: 1073741824 }, images: [] },
-    { id: 2, authorName: 'Andy Weir', foreignAuthorId: 'b2', monitored: true, overview: 'American novelist.', path: '/books/Andy Weir', rootFolderPath: '/books', added: new Date(now - 45 * 86400000).toISOString(), statistics: { bookCount: 3, bookFileCount: 3, sizeOnDisk: 157286400 }, images: [] },
-    { id: 3, authorName: 'Terry Pratchett', foreignAuthorId: 'b3', status: 'ended', qualityProfileId: 1, monitored: true, overview: 'English humorist and fantasy author.', path: '/books/Terry Pratchett', rootFolderPath: '/books', added: new Date(now - 400 * 86400000).toISOString(), statistics: { bookCount: 41, bookFileCount: 41, sizeOnDisk: 524288000 }, images: [] },
-    { id: 4, authorName: 'Agatha Christie', foreignAuthorId: 'b4', status: 'ended', qualityProfileId: 1, monitored: false, overview: 'English crime novelist.', path: '/books/Agatha Christie', rootFolderPath: '/books', added: new Date(now - 300 * 86400000).toISOString(), statistics: { bookCount: 66, bookFileCount: 0, sizeOnDisk: 0 }, images: [] },
-  ];
+  const day = 86400000;
+  const iso = (t) => new Date(t).toISOString();
+  const roots = chaptarr
+    ? [
+      { id: 1, name: 'Audiobooks', path: '/books/audiobooks', folderType: 1, accessible: true, freeSpace: 404942340096, totalSpace: 12000119750656,
+        audiobook: { qualityProfileId: 2, metadataProfileId: 1, monitored: true, monitorExistingMode: 'all', monitorNewItems: 'all', tags: [] }, audiobookQualityProfileId: 2, audiobookMetadataProfileId: 1, audiobookMonitorNewItems: 'all' },
+      { id: 2, name: 'Ebooks', path: '/books/ebooks', folderType: 2, accessible: true, freeSpace: 404942340096, totalSpace: 12000119750656,
+        ebook: { qualityProfileId: 1, metadataProfileId: 2, monitored: true, monitorExistingMode: 'all', monitorNewItems: 'all', tags: [] }, ebookQualityProfileId: 1, ebookMetadataProfileId: 2, ebookMonitorNewItems: 'all' },
+    ]
+    : [{ id: 1, path: '/books', freeSpace: 120000000000, accessible: true, defaultQualityProfileId: 1, defaultMetadataProfileId: 1, defaultMonitorOption: 'all', defaultNewItemMonitorOption: 'all' }];
+  const rootFor = (format) => (chaptarr ? roots.find((r) => r.folderType === (format === 'ebook' ? 2 : 1)).path : '/books');
+  const profiles = chaptarr ? [{ id: 1, name: 'E-Book', profileType: 'ebook' }, { id: 2, name: 'Audiobook', profileType: 'audiobook' }] : [{ id: 1, name: 'eBook' }, { id: 2, name: 'Audiobook' }];
+  const metadataProfiles = chaptarr ? [{ id: 1, name: 'Audiobook Default', profileType: 'audiobook' }, { id: 2, name: 'Ebook Default', profileType: 'ebook' }] : [{ id: 1, name: 'Standard' }];
+  let tags = [{ id: 1, label: 'favourites' }];
+  let authors = [];
+  let books = [];
+  let files = [];
+  let nextBook = 1; let nextFile = 1; let nextQueue = 602;
+  const lookupIds = new Map(BOOK_LOOKUP.map((x, i) => [x.name, `${chaptarr ? 'hc:' : ''}${71000 + i}`]));
+
+  // One author (and books, files) from a catalog entry.
+  const addCatalogAuthor = (def, fields = {}) => {
+    const formats = chaptarr ? (fields.formats || def.formats || ['audiobook']) : [];
+    const id = fields.id || Math.max(0, ...authors.map((a) => a.id)) + 1;
+    const folder = (f) => `${rootFor(f)}/${def.name}`;
+    const a = {
+      id, authorName: def.name, sortName: def.name.toLowerCase(), sortNameLastFirst: (def.lastFirst || def.name).toLowerCase(), authorNameLastFirst: def.lastFirst || def.name,
+      foreignAuthorId: fields.foreignAuthorId || (chaptarr ? `hc:${250000 + id}` : `b${id}`), status: def.status, ended: def.status === 'ended',
+      monitored: fields.monitored ?? def.monitored ?? true, overview: def.overview, genres: def.genres || [], ratings: { votes: 1200 + id * 37, value: 4.1 + (id % 4) / 10, popularity: 1000 },
+      links: [{ url: `https://www.goodreads.com/search?q=${encodeURIComponent(def.name)}`, name: 'goodreads' }, { url: `https://hardcover.app/search?q=${encodeURIComponent(def.name)}`, name: 'hardcover' }],
+      images: [{ url: `/MediaCover/${id}/poster.jpg`, coverType: 'poster', extension: '.jpg', remoteUrl: authorPortraitUri(def.name, def.hue) }],
+      tags: fields.tags || [], added: iso(now - (def.addedDays || 0) * day), path: folder(formats[0] || 'audiobook'),
+    };
+    if (chaptarr) {
+      a.lastSelectedMediaType = formats[0];
+      for (const f of formats) {
+        Object.assign(a, {
+          [`${f}RootFolderPath`]: rootFor(f), [`${f}Folder`]: folder(f), [`${f}Monitored`]: a.monitored,
+          [`${f}QualityProfileId`]: f === 'ebook' ? 1 : 2, [`${f}MetadataProfileId`]: f === 'ebook' ? 2 : 1, [`${f}MonitorNewItems`]: 'all', [`${f}Tags`]: a.tags,
+        });
+      }
+    } else {
+      Object.assign(a, { rootFolderPath: '/books', qualityProfileId: def.qualityProfileId || 1, metadataProfileId: 1, monitorNewItems: 'all' });
+    }
+    if (fields.extra) Object.assign(a, fields.extra);
+    authors.push(a);
+    const entries = chaptarr ? formats : [null];
+    for (const [title, series, date, state = 'none'] of def.books || []) {
+      for (const format of entries) {
+        const st = typeof state === 'object' ? (state[format] || 'none') : state;
+        const releaseDate = typeof date === 'number' ? iso(now + date * day) : `${date}T00:00:00Z`;
+        const audio = format === 'audiobook';
+        const b = {
+          id: nextBook++, authorId: id, title, titleSlug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-'), foreignBookId: `${chaptarr ? 'hc:' : ''}${9000 + nextBook}`,
+          seriesTitle: series, ...(chaptarr ? { seriesLabels: series ? [series] : [] } : {}), releaseDate,
+          monitored: fields.monitorAll ?? ['file', 'missing', 'upcoming', 'queued'].includes(st), anyEditionOk: true,
+          pageCount: audio ? 0 : 250 + (title.length * 17) % 600, genres: def.genres || [],
+          ratings: { votes: 5000 + title.length * 311, value: Math.round((3.7 + (title.length % 12) / 10) * 100) / 100, popularity: 500 },
+          images: [{ url: `/MediaCover/Books/${nextBook - 1}/cover.jpg`, coverType: 'cover', extension: '.jpg', remoteUrl: bookCoverUri(title, def.name, (def.hue + (series ? series.length * 7 : 0)) % 360, audio) }],
+          added: a.added,
+        };
+        if (chaptarr) {
+          Object.assign(b, { mediaType: format, audiobookMonitored: audio && b.monitored, ebookMonitored: !audio && b.monitored,
+            narratorNames: audio ? (def.narrators || []).slice(0, 1) : [], narrators: [], baseBookId: `hc:${4000 + (def.books.findIndex((x) => x[0] === title))}${id}` });
+        }
+        books.push(b);
+        if (st === 'file' || st === 'old') {
+          const parts = audio && title === 'Elantris' ? 12 : 1;
+          for (let i = 0; i < parts; i++) {
+            const ext = audio ? (parts > 1 ? 'mp3' : 'm4b') : 'epub';
+            files.push({
+              id: nextFile++, bookId: b.id, authorId: id, mediaType: format || undefined,
+              path: `${folder(format || 'audiobook')}/${title}${parts > 1 ? `/${String(i + 1).padStart(2, '0')} - ${title}` : `/${title}`}.${ext}`,
+              size: audio ? (parts > 1 ? 46137344 : 420000000 + title.length * 9000000) : 2100000 + title.length * 61000,
+              quality: { quality: { id: audio ? 12 : 3, name: audio ? (parts > 1 ? 'MP3' : 'M4B') : 'EPUB' }, revision: { version: 1, real: 0, isRepack: false } },
+              dateAdded: iso(now - ((title.length * 5) % 90) * day), ...(audio ? { mediaInfo: { audioFormat: ext === 'mp3' ? 'MP3' : 'AAC', audioBitrate: '64 kbps', audioChannels: 2, audioSampleRate: '44.1 kHz' } } : {}),
+            });
+          }
+        }
+      }
+    }
+    return a;
+  };
+  for (const def of BOOK_LIBRARY) addCatalogAuthor(def, { id: def.id });
+
+  const bookHasFile = (b) => files.some((f) => f.bookId === b.id);
+  const bookResource = (b) => {
+    const fs = files.filter((f) => f.bookId === b.id);
+    return { ...b, ...(chaptarr ? { hasFiles: fs.length > 0 } : {}), statistics: { bookFileCount: fs.length, bookCount: b.monitored || fs.length ? 1 : 0, sizeOnDisk: fs.reduce((n, f) => n + f.size, 0) } };
+  };
+  const statsFor = (list) => {
+    const ids = new Set(list.map((b) => b.id));
+    const fs = files.filter((f) => ids.has(f.bookId));
+    const monitored = list.filter((b) => b.monitored);
+    const have = monitored.filter(bookHasFile).length;
+    return { bookFileCount: fs.length, bookCount: monitored.length, availableBookCount: have, totalBookCount: list.length, sizeOnDisk: fs.reduce((n, f) => n + f.size, 0), percentOfBooks: monitored.length ? Math.round((1000 * have) / monitored.length) / 10 : 0 };
+  };
+  const authorResource = (a) => {
+    const own = books.filter((b) => b.authorId === a.id);
+    const out = { ...a, statistics: statsFor(own) };
+    if (chaptarr) for (const f of ['audiobook', 'ebook']) out[`${f}Statistics`] = statsFor(own.filter((b) => b.mediaType === f));
+    return out;
+  };
+  const authorRef = (id) => { const a = authors.find((x) => x.id === id); return a ? authorResource(a) : undefined; };
+  const bookRef = (id) => { const b = books.find((x) => x.id === id); return b ? bookResource(b) : undefined; };
+  const withRefs = (rec, req) => ({
+    ...rec,
+    ...(req.query.includeAuthor === 'true' && rec.authorId ? { author: authorRef(rec.authorId) } : {}),
+    ...(req.query.includeBook === 'true' && rec.bookId ? { book: bookRef(rec.bookId) } : {}),
+  });
+  const paged = (list, req) => {
+    const pageSize = Number(req.query.pageSize) || 20;
+    const pageNo = Math.max(1, Number(req.query.page) || 1);
+    return { page: pageNo, pageSize, totalRecords: list.length, records: list.slice((pageNo - 1) * pageSize, pageNo * pageSize) };
+  };
+
+  const firstBook = (title) => books.find((b) => b.title === title && (!chaptarr || b.mediaType === 'audiobook'));
+  const hailMary = firstBook('Project Hail Mary');
   let queue = [
-    { id: 601, title: 'Andy Weir - Project Hail Mary [EPUB]', authorId: 2, status: 'downloading', trackedDownloadState: 'downloading', trackedDownloadStatus: 'ok', size: 4194304, sizeleft: 1048576, timeleft: '00:00:30', estimatedCompletionTime: new Date(now + 30000).toISOString(), downloadClient: 'SABnzbd', indexer: 'NZBgeek', downloadId: 'rd-abc', protocol: 'usenet' },
+    { id: 601, title: 'Andy Weir - Project Hail Mary (2021) [M4B]', authorId: 2, bookId: hailMary && hailMary.id, status: 'downloading', trackedDownloadState: 'downloading', trackedDownloadStatus: 'ok', size: 724566016, sizeleft: 181141504, timeleft: '00:01:30', estimatedCompletionTime: iso(now + 90000), downloadClient: 'SABnzbd', indexer: 'NZBgeek', downloadId: 'rd-abc', protocol: 'usenet', quality: { quality: { id: 12, name: 'M4B' } } },
   ];
-  app.use((req, res, next) => { recordCf('readarr', req); if (req.headers['x-api-key'] !== 'MOCK_API_KEY') return res.status(401).json({ error: 'Unauthorized' }); next(); });
-  app.get('/__debug', (req, res) => res.json({ cf: cfSeen.readarr || null }));
-  app.get('/api/v1/system/status', (req, res) => res.json({ version: '0.4.7.2718', appName: 'Readarr', instanceName: opts.instanceName || 'Readarr (mock)' }));
-  app.get('/api/v1/rootfolder', (req, res) => res.json([{ id: 1, path: '/books', freeSpace: 120000000000, accessible: true }]));
+  const history = () => {
+    const imported = files.filter((f, i, all) => all.findIndex((x) => x.bookId === f.bookId) === i)
+      .sort((x, y) => Date.parse(y.dateAdded) - Date.parse(x.dateAdded)).slice(0, 6)
+      .map((f, i) => { const b = books.find((x) => x.id === f.bookId); return { id: 100 + i, eventType: 'bookFileImported', authorId: f.authorId, bookId: f.bookId, sourceTitle: `${authors.find((a) => a.id === f.authorId)?.authorName} - ${b?.title} [${f.quality.quality.name}]`, quality: f.quality, date: f.dateAdded }; });
+    const grabbed = queue.map((q, i) => ({ id: 200 + i, eventType: 'grabbed', authorId: q.authorId, bookId: q.bookId, sourceTitle: q.title, quality: q.quality, date: iso(now - 600000) }));
+    return [...grabbed, ...imported];
+  };
+  const releasesFor = (b) => {
+    const a = authors.find((x) => x.id === b.authorId) || { authorName: 'Unknown' };
+    const audio = chaptarr ? b.mediaType === 'audiobook' : false;
+    const year = new Date(b.releaseDate).getUTCFullYear();
+    const kinds = audio
+      ? [['M4B', 724566016, 'NZBgeek', 'usenet'], ['MP3', 562036736, 'DrunkenSlug', 'usenet'], ['M4B', 1181116006, 'NZBgeek', 'usenet'], ['MP3', 398458880, 'AudioBookBay', 'torrent']]
+      : [['EPUB', 3355443, 'NZBgeek', 'usenet'], ['AZW3', 4299161, 'DrunkenSlug', 'usenet'], ['EPUB', 2516582, 'NZBgeek', 'usenet'], ['PDF', 18874368, 'MyAnonamouse', 'torrent']];
+    return kinds.map(([q, size, indexer, protocol], i) => ({
+      guid: `rel-${b.id}-${i}`, indexerId: indexer === 'NZBgeek' ? 1 : i + 1, indexer, protocol,
+      title: `${a.authorName} - ${b.title} (${year}) [${q}]${audio && i === 0 ? ' {Narrated}' : ''}`,
+      size, ageHours: 30 + i * 230, age: Math.floor((30 + i * 230) / 24), quality: { quality: { id: i + 1, name: q } },
+      approved: i !== 2, rejections: i === 2 ? ['Existing file on disk is of equal or higher preference'] : [],
+      ...(protocol === 'torrent' ? { seeders: 42, leechers: 3 } : {}), bookId: b.id, authorId: b.authorId, publishDate: iso(now - (30 + i * 230) * 3600000),
+    }));
+  };
+
+  app.use((req, res, next) => { recordCf(name, req); if (req.headers['x-api-key'] !== 'MOCK_API_KEY') return res.status(401).json({ error: 'Unauthorized' }); next(); });
+  app.get('/__debug', (req, res) => res.json({ cf: cfSeen[name] || null }));
+  app.get('/api/v1/system/status', (req, res) => res.json(chaptarr
+    ? { version: '0.9.1000.0', appName: 'Chaptarr', instanceName: opts.instanceName || 'Chaptarr (mock)', branch: 'develop' }
+    : { version: '0.4.7.2718', appName: 'Readarr', instanceName: opts.instanceName || 'Readarr (mock)' }));
+  app.get('/api/v1/rootfolder', (req, res) => res.json(roots));
   app.get('/api/v1/diskspace', (req, res) => res.json([{ path: '/', label: 'root', freeSpace: 120000000000, totalSpace: 500000000000 }]));
-  app.get('/api/v1/qualityprofile', (req, res) => res.json([{ id: 1, name: 'eBook' }, { id: 2, name: 'Audiobook' }]));
-  app.get('/api/v1/metadataprofile', (req, res) => res.json([{ id: 1, name: 'Standard' }]));
-  app.get('/api/v1/author', (req, res) => res.json(authors));
+  app.get('/api/v1/qualityprofile', (req, res) => res.json(profiles));
+  app.get('/api/v1/metadataprofile', (req, res) => res.json(metadataProfiles));
+  app.get('/api/v1/tag', (req, res) => res.json(tags));
+  app.post('/api/v1/tag', (req, res) => { const t = { id: Math.max(0, ...tags.map((x) => x.id)) + 1, label: String((req.body && req.body.label) || 'tag') }; tags.push(t); res.status(201).json(t); });
+
+  app.get('/api/v1/author', (req, res) => res.json(authors.map(authorResource)));
+  app.get('/api/v1/author/lookup', (req, res) => {
+    const term = String(req.query.term || '').trim().toLowerCase();
+    if (!term) return res.json([]);
+    const inLibrary = authors.filter((a) => a.authorName.toLowerCase().includes(term)).map(authorResource);
+    const found = BOOK_LOOKUP.filter((d) => d.name.toLowerCase().includes(term) && !authors.some((a) => a.authorName === d.name)).map((d) => ({
+      authorName: d.name, sortName: d.name.toLowerCase(), authorNameLastFirst: d.lastFirst, foreignAuthorId: lookupIds.get(d.name), status: d.status, ended: d.status === 'ended',
+      overview: d.overview, genres: d.genres, monitored: false, tags: [], ratings: { votes: 800, value: 4.2, popularity: 300 },
+      images: [{ url: '', coverType: 'poster', extension: '.jpg', remoteUrl: authorPortraitUri(d.name, d.hue) }],
+      links: [{ url: `https://www.goodreads.com/search?q=${encodeURIComponent(d.name)}`, name: 'goodreads' }],
+      statistics: { bookFileCount: 0, bookCount: 0, availableBookCount: 0, totalBookCount: 0, sizeOnDisk: 0, percentOfBooks: 0 },
+    }));
+    setTimeout(() => res.json([...inLibrary, ...found]), 250);
+  });
+  app.get('/api/v1/author/:id', (req, res) => { const a = authorRef(Number(req.params.id)); return a ? res.json(a) : res.status(404).json({ message: 'Author not found' }); });
+  app.post('/api/v1/author', (req, res) => {
+    const body = req.body || {};
+    if (authors.some((a) => a.foreignAuthorId === body.foreignAuthorId)) return res.status(400).json([{ propertyName: 'ForeignAuthorId', errorMessage: 'This author has already been added' }]);
+    const def = BOOK_LOOKUP.find((d) => lookupIds.get(d.name) === body.foreignAuthorId || d.name === body.authorName);
+    if (!def) return res.status(404).json({ message: 'Author not found on the metadata server' });
+    let formats = [];
+    if (chaptarr) {
+      formats = ['audiobook', 'ebook'].filter((f) => body[`${f}RootFolderPath`]);
+      if (!formats.length && body.rootFolderPath) { const r = roots.find((x) => x.path === body.rootFolderPath); if (r) formats = r.folderType === 2 ? ['ebook'] : r.folderType === 0 ? ['audiobook', 'ebook'] : ['audiobook']; }
+      if (!formats.length) return res.status(400).json([{ propertyName: 'RootFolderPath', errorMessage: 'Choose a root folder for audiobooks or ebooks' }]);
+    } else if (!body.rootFolderPath || !body.qualityProfileId || !body.metadataProfileId) {
+      return res.status(400).json([{ propertyName: 'RootFolderPath', errorMessage: 'Root folder, quality profile and metadata profile are required' }]);
+    }
+    const monitor = (body.addOptions && body.addOptions.monitor) || 'all';
+    const list = def.books.map(([t, s, d]) => [t, s, d, 'none']);
+    const pick = monitor === 'all' || monitor === 'missing' ? list.map(() => true)
+      : monitor === 'first' ? list.map((x, i) => i === 0) : monitor === 'latest' ? list.map((x, i) => i === list.length - 1) : list.map(() => false);
+    const a = addCatalogAuthor({ ...def, books: list.map((x, i) => [x[0], x[1], x[2], pick[i] ? 'missing' : 'none']) }, {
+      formats, monitored: body.monitored !== false, foreignAuthorId: body.foreignAuthorId, tags: body.tags || [],
+      extra: chaptarr
+        ? Object.fromEntries(formats.flatMap((f) => [[`${f}QualityProfileId`, Number(body[`${f}QualityProfileId`]) || (f === 'ebook' ? 1 : 2)], [`${f}MetadataProfileId`, Number(body[`${f}MetadataProfileId`]) || 1], [`${f}MonitorNewItems`, body[`${f}MonitorNewItems`] || 'all'], [`${f}Monitored`, body[`${f}Monitored`] !== false]]))
+        : { qualityProfileId: Number(body.qualityProfileId), metadataProfileId: Number(body.metadataProfileId), monitorNewItems: body.monitorNewItems || 'all' },
+    });
+    a.added = iso(Date.now());
+    res.status(201).json(authorResource(a));
+  });
   app.put('/api/v1/author/editor', (req, res) => {
     const b = req.body || {}; const ids = new Set((b.authorIds || []).map(Number));
     for (const a of authors.filter((x) => ids.has(x.id))) { if (typeof b.monitored === 'boolean') a.monitored = b.monitored; if (b.qualityProfileId) a.qualityProfileId = Number(b.qualityProfileId); }
-    res.status(202).json(authors.filter((x) => ids.has(x.id)));
+    res.status(202).json(authors.filter((x) => ids.has(x.id)).map(authorResource));
   });
-  app.delete('/api/v1/author/editor', (req, res) => { const ids = new Set(((req.body || {}).authorIds || []).map(Number)); authors = authors.filter((x) => !ids.has(x.id)); res.json({}); });
-  app.get('/api/v1/queue', (req, res) => res.json({ page: 1, pageSize: 20, totalRecords: queue.length, records: queue }));
+  const removeAuthors = (ids) => {
+    authors = authors.filter((x) => !ids.has(x.id));
+    const gone = new Set(books.filter((x) => ids.has(x.authorId)).map((x) => x.id));
+    books = books.filter((x) => !gone.has(x.id));
+    files = files.filter((x) => !gone.has(x.bookId));
+    queue = queue.filter((q) => !ids.has(q.authorId));
+  };
+  app.delete('/api/v1/author/editor', (req, res) => { removeAuthors(new Set(((req.body || {}).authorIds || []).map(Number))); res.json({}); });
+  app.put('/api/v1/author/:id', (req, res) => {
+    const a = authors.find((x) => x.id === Number(req.params.id));
+    if (!a) return res.status(404).json({ message: 'Author not found' });
+    const b = req.body || {};
+    if (Array.isArray(b.tags)) a.tags = b.tags.map(Number);
+    if (chaptarr) {
+      for (const f of ['audiobook', 'ebook']) {
+        if (!a[`${f}RootFolderPath`]) continue;
+        if (typeof b[`${f}Monitored`] === 'boolean') a[`${f}Monitored`] = b[`${f}Monitored`];
+        if (b[`${f}QualityProfileId`]) a[`${f}QualityProfileId`] = Number(b[`${f}QualityProfileId`]);
+        if (b[`${f}MonitorNewItems`]) a[`${f}MonitorNewItems`] = b[`${f}MonitorNewItems`];
+        if (Array.isArray(b[`${f}Tags`])) a[`${f}Tags`] = b[`${f}Tags`].map(Number);
+      }
+      a.monitored = ['audiobook', 'ebook'].some((f) => a[`${f}Monitored`] === true);
+      return res.status(202).json(a.id);
+    }
+    if (typeof b.monitored === 'boolean') a.monitored = b.monitored;
+    if (b.qualityProfileId) a.qualityProfileId = Number(b.qualityProfileId);
+    if (b.metadataProfileId) a.metadataProfileId = Number(b.metadataProfileId);
+    if (b.monitorNewItems) a.monitorNewItems = b.monitorNewItems;
+    res.status(202).json(authorResource(a));
+  });
+  app.delete('/api/v1/author/:id', (req, res) => {
+    const id = Number(req.params.id);
+    if (!authors.some((x) => x.id === id)) return res.status(404).json({ message: 'Author not found' });
+    removeAuthors(new Set([id]));
+    res.json({});
+  });
+  if (chaptarr) {
+    app.post('/api/v1/author/deletepreview', (req, res) => {
+      const ids = ((req.body || {}).authorIds || []).map(Number);
+      if (!ids.length) return res.status(400).json({ message: 'Select authors to preview their deletion.' });
+      const folders = authors.filter((a) => ids.includes(a.id)).flatMap((a) => ['audiobook', 'ebook'].filter((f) => a[`${f}Folder`]).map((f) => {
+        const fs = files.filter((x) => x.authorId === a.id && x.mediaType === f);
+        return { path: a[`${f}Folder`], deleteContents: true, reason: 'Author folder', bookFileCount: fs.length, size: fs.reduce((n, x) => n + x.size, 0), otherFiles: fs.length ? ['cover.jpg'] : [] };
+      }));
+      res.json({ recycleBin: '/books/.recycle', folders, files: [], otherAuthors: [], warnings: [] });
+    });
+  }
+
+  app.get('/api/v1/book', (req, res) => {
+    const authorId = Number(req.query.authorId);
+    res.json(books.filter((b) => !authorId || b.authorId === authorId).map(bookResource));
+  });
+  app.put('/api/v1/book/monitor', (req, res) => {
+    const b = req.body || {}; const ids = new Set((b.bookIds || []).map(Number));
+    for (const book of books.filter((x) => ids.has(x.id))) {
+      book.monitored = !!b.monitored;
+      if (chaptarr) { book.audiobookMonitored = book.mediaType === 'audiobook' && book.monitored; book.ebookMonitored = book.mediaType === 'ebook' && book.monitored; }
+    }
+    res.status(202).json(books.filter((x) => ids.has(x.id)).map(bookResource));
+  });
+  app.get('/api/v1/bookfile', (req, res) => {
+    const authorId = Number(req.query.authorId); const bookId = Number(req.query.bookId);
+    res.json(files.filter((f) => (!authorId || f.authorId === authorId) && (!bookId || f.bookId === bookId)));
+  });
+  app.get('/api/v1/release', (req, res) => {
+    const b = books.find((x) => x.id === Number(req.query.bookId));
+    if (!b) return res.status(400).json({ message: 'bookId is required' });
+    const releases = releasesFor(b);
+    setTimeout(() => res.json(chaptarr ? { releases, hiddenReleases: [], indexersQueried: 3, indexersFailed: 0 } : releases), 700);
+  });
+  app.post('/api/v1/release', (req, res) => {
+    const rel = req.body || {};
+    const [, bookId, i] = String(rel.guid || '').match(/^rel-(\d+)-(\d+)$/) || [];
+    const b = books.find((x) => x.id === Number(bookId));
+    if (!b) return res.status(404).json({ message: 'Couldn\u2019t find requested release in cache, try searching again' });
+    const r = releasesFor(b)[Number(i)];
+    queue.push({ id: nextQueue++, title: r.title, authorId: b.authorId, bookId: b.id, status: 'queued', trackedDownloadState: 'downloading', trackedDownloadStatus: 'ok', size: r.size, sizeleft: r.size, timeleft: '00:10:00', downloadClient: 'SABnzbd', indexer: r.indexer, downloadId: `rd-${nextQueue}`, protocol: r.protocol, quality: r.quality });
+    res.json(r);
+  });
+
+  app.get('/api/v1/queue', (req, res) => res.json(paged(queue.map((q) => withRefs(q, req)), req)));
   app.delete('/api/v1/queue/:id', (req, res) => { queue = queue.filter((q) => q.id !== Number(req.params.id)); res.json({}); });
-  app.get('/api/v1/calendar', (req, res) => res.json([
-    { id: 701, authorId: 1, title: 'Wind and Truth', releaseDate: new Date(now + 4 * 86400000).toISOString(), monitored: true, author: { authorName: 'Brandon Sanderson' } },
-  ]));
-  app.get('/api/v1/history', (req, res) => res.json({ page: 1, pageSize: 40, totalRecords: 1, records: [
-    { id: 1, eventType: 'bookFileImported', sourceTitle: 'Andy Weir - The Martian [EPUB]', date: new Date(now - 5400000).toISOString(), author: { authorName: 'Andy Weir' } },
-  ] }));
-  app.get('/api/v1/wanted/missing', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 1, records: [
-    { id: 801, title: 'Warbreaker', releaseDate: '2009-06-09', monitored: true, author: { authorName: 'Brandon Sanderson' } },
-  ] }));
+  app.get('/api/v1/calendar', (req, res) => {
+    const start = Date.parse(req.query.start) || now - day; const end = Date.parse(req.query.end) || now + 30 * day;
+    res.json(books.filter((b) => { const t = Date.parse(b.releaseDate); return t >= start && t <= end; }).map((b) => withRefs(bookResource(b), req)));
+  });
+  app.get('/api/v1/history', (req, res) => res.json(paged(history().map((r) => withRefs(r, req)), req)));
+  app.get('/api/v1/wanted/missing', (req, res) => {
+    const list = books.filter((b) => b.monitored && !bookHasFile(b) && Date.parse(b.releaseDate) <= Date.now())
+      .sort((x, y) => Date.parse(y.releaseDate) - Date.parse(x.releaseDate));
+    res.json(paged(list.map((b) => withRefs(bookResource(b), req)), req));
+  });
   app.get('/api/v1/wanted/cutoff', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 0, records: [] }));
-  app.post('/api/v1/command', (req, res) => res.status(201).json({ id: Math.floor(Math.random() * 1000), name: (req.body && req.body.name) || 'Command', status: 'queued' }));
+  app.post('/api/v1/command', (req, res) => res.status(201).json({ id: Math.floor(Math.random() * 1000), name: (req.body && req.body.name) || 'Command', status: 'queued', body: req.body || {} }));
   app.get('/api/v1/command/:id', (req, res) => res.json({ id: Number(req.params.id), status: 'completed', message: 'Completed' }));
   app.get('/api/v1/health', (req, res) => res.json([]));
   return app;
@@ -2446,6 +2780,7 @@ export function startMockServices() {
     ] }), MOCK_PORTS.radarr4k],
     ['lidarr', makeLidarr(), MOCK_PORTS.lidarr],
     ['readarr', makeReadarr(), MOCK_PORTS.readarr],
+    ['chaptarr', makeReadarr({ flavor: 'chaptarr' }), MOCK_PORTS.chaptarr],
     ['bindery', makeBindery(), MOCK_PORTS.bindery],
     ['listenarr', makeListenarr(), MOCK_PORTS.listenarr],
     ['overseerr', makeOverseerr(), MOCK_PORTS.overseerr],

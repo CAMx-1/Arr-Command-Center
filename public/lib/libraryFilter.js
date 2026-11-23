@@ -1,6 +1,6 @@
-// Reusable library filter control for Sonarr (series) and Radarr (movie)
-// libraries. Renders a title search box + a status dropdown and calls
-// onChange(filteredItems) whenever either changes.
+// Reusable library filter control for Sonarr (series), Radarr (movie) and
+// Readarr/Chaptarr (author) libraries. Renders a search box + a status
+// dropdown and calls onChange(filteredItems) whenever either changes.
 import { h } from './ui.js';
 import { dismissKeyboardOnEnter } from './nativeApp.js';
 
@@ -27,9 +27,21 @@ const FILTERS = {
     { id: 'downloaded', label: 'Downloaded', test: (m) => !!m.hasFile },
     { id: 'missing', label: 'Missing', test: (m) => !m.hasFile },
   ],
+  author: [
+    { id: 'all', label: 'All', test: () => true },
+    { id: 'monitored', label: 'Monitored', test: (a) => !!a.monitored },
+    { id: 'unmonitored', label: 'Unmonitored', test: (a) => !a.monitored },
+    { id: 'files', label: 'With files', test: (a) => ((a.statistics || {}).bookFileCount || 0) > 0 },
+    { id: 'nofiles', label: 'No files', test: (a) => !((a.statistics || {}).bookFileCount > 0) },
+    { id: 'continuing', label: 'Continuing', test: (a) => a.status === 'continuing' },
+    { id: 'ended', label: 'Ended', test: (a) => a.status === 'ended' },
+  ],
 };
+// What the search box matches, and its hint, per kind.
+const NAME_OF = { author: (a) => a.authorName };
+const PLACEHOLDER = { author: 'Filter by name…' };
 
-// Build the filter bar. `kind` is 'series' or 'movie'. `items` is the full list.
+// Build the filter bar. `kind` is 'series', 'movie' or 'author'. `items` is the full list.
 // `onChange` receives the filtered subset whenever the search text or status
 // selection changes. `opts.initialTerm` pre-fills the search box (used by the
 // global search "Open" deep-link, via the ?q= route param). Returns the control element for the lib-head.
@@ -41,11 +53,12 @@ export function libraryFilter(kind, items, onChange, { initialTerm = '', initial
   const apply = () => {
     const def = defs.find((d) => d.id === statusId) || defs[0];
     const t = term.trim().toLowerCase();
-    const filtered = items.filter((it) => def.test(it) && (!t || String(it.title || '').toLowerCase().includes(t)));
+    const nameOf = NAME_OF[kind] || ((it) => it.title);
+    const filtered = items.filter((it) => def.test(it) && (!t || String(nameOf(it) || '').toLowerCase().includes(t)));
     onChange(filtered);
   };
 
-  const search = h('input', { class: 'input lib-filter-search', type: 'search', enterkeyhint: 'search', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Filter by title…', value: term });
+  const search = h('input', { class: 'input lib-filter-search', type: 'search', enterkeyhint: 'search', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: PLACEHOLDER[kind] || 'Filter by title…', value: term });
   search.addEventListener('input', () => { term = search.value; apply(); if (onStateChange) onStateChange({ term, status: statusId }); });
   dismissKeyboardOnEnter(search); // results already filter live; Search/Return just closes the keyboard
 

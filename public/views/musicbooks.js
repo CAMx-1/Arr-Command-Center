@@ -4,8 +4,9 @@ import { openPathFix } from '../lib/pathFix.js';
 import { roleAllows } from '../lib/roleUi.js';
 import { openTidyUp } from '../lib/tidyUpUI.js';
 
-// Lidarr (music) & Readarr (books) share the *arr v1 API, so one renderer serves
-// both with type-specific labels/fields.
+// Lidarr (music) and Bindery (books) panels. Readarr and Readarr-compatible
+// apps such as Chaptarr have their own page (views/readarr.js), which uses the
+// Readarr notices below.
 const CFG = {
   lidarr: {
     libPath: 'artist', libLabel: 'Artists', nameKey: 'artistName', icon: '🎵',
@@ -14,13 +15,6 @@ const CFG = {
     calTitle: (r) => `${(r.artist && r.artist.artistName) || ''} — ${r.title}`,
     searchCmd: (id) => ({ name: 'AlbumSearch', albumIds: [id] }),
     histTitle: (r) => (r.artist && r.artist.artistName) || r.sourceTitle || 'Album',
-  },
-  readarr: {
-    libPath: 'author', libLabel: 'Authors', nameKey: 'authorName', icon: '📚',
-    stat: (s) => `${(s.statistics && s.statistics.bookCount) || 0} books · ${(s.statistics && s.statistics.bookFileCount) || 0} files · ${fmtBytes((s.statistics && s.statistics.sizeOnDisk) || 0)}`,
-    wantedTitle: (r) => `${(r.author && r.author.authorName) || ''} — ${r.title}`,
-    calTitle: (r) => `${(r.author && r.author.authorName) || ''} — ${r.title}`,
-    histTitle: (r) => (r.author && r.author.authorName) || r.sourceTitle || 'Book',
   },
   bindery: {
     libPath: 'author', libLabel: 'Authors', nameKey: 'authorName', icon: '📚',
@@ -32,15 +26,14 @@ const CFG = {
 };
 
 export function renderLidarr(root, ctx) { return renderMB(root, ctx, 'lidarr'); }
-export function renderReadarr(root, ctx) { return renderMB(root, ctx, 'readarr'); }
 export function renderBindery(root, ctx) { return renderMB(root, ctx, 'bindery'); }
 
 function renderMB(root, ctx, type) {
   const svc = ctx.service;
-  // Lidarr: re-point artists whose folders moved (same tool as Sonarr/Radarr).
-  // Lidarr and Readarr: Tidy up (same rules as Sonarr/Radarr).
-  const tidy = (type === 'lidarr' || type === 'readarr') && svc.configured
-    ? h('button', { class: 'btn sm', title: 'Entries that waste searches or clutter the library, with bulk fixes', onclick: () => openTidyUp(ctx.api.arrV1(svc.key), ctx, type === 'lidarr' ? 'artist' : 'author') }, 'Tidy up') : null;
+  // Lidarr: re-point artists whose folders moved (same tool as Sonarr/Radarr),
+  // and Tidy up (same rules as Sonarr/Radarr).
+  const tidy = type === 'lidarr' && svc.configured
+    ? h('button', { class: 'btn sm', title: 'Entries that waste searches or clutter the library, with bulk fixes', onclick: () => openTidyUp(ctx.api.arrV1(svc.key), ctx, 'artist') }, 'Tidy up') : null;
   const fix = type === 'lidarr' && svc.configured && roleAllows('admin')
     ? h('button', { class: 'btn sm primary', title: 'Find artist folders that moved and re-point them', onclick: () => openPathFix(ctx.api.arrV1(svc.key), ctx, 'artist') }, '🛠 Fix paths') : null;
   ctx.setActions(tidy || fix ? h('span', { style: { display: 'flex', gap: '8px' } }, tidy, fix) : null);
@@ -58,12 +51,11 @@ function renderMB(root, ctx, type) {
   const notice = h('div', {});
   mount(root, notice, bar, body);
   if (type === 'bindery') mount(notice, migrationNotice(ctx, type));
-  else if (type === 'readarr') showReadarrNotice(notice, ctx, svc);
 }
 
 // Readarr-compatible forks (Chaptarr and others) use the Readarr type but are
 // still maintained, so the archived-Readarr notice only shows for Readarr itself.
-async function showReadarrNotice(slot, ctx, svc) {
+export async function showReadarrNotice(slot, ctx, svc) {
   let appName = '';
   try { appName = String((await ctx.api.arrV1(svc.key).get('system/status'))?.appName || ''); } catch { /* unknown: treat as Readarr */ }
   if (appName && appName.toLowerCase() !== 'readarr') return;

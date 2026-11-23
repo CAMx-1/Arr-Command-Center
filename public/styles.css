@@ -2079,3 +2079,62 @@ html.recap-overlay-open { overflow: hidden; }
 .self-backup-svc { font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
 .self-backup-warn { font-size: 12px; margin-top: 6px; padding-left: 8px; border-left: 3px solid var(--amber); }
 .self-backup-list { margin: 0; padding-left: 20px; font-size: 13px; }
+
+/* ---------- Books: Readarr / Chaptarr authors and books ---------- */
+.lib-head > .lib-count { margin-right: auto; }
+.poster.author-initials, .author-portrait.author-initials { display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; letter-spacing: 0.02em; background-size: cover; }
+.row .poster.author-initials { font-size: 16px; }
+.book-row .poster { width: 42px; height: 63px; border-radius: 6px; }
+.book-cover-fallback { color: #fff; font-size: 18px; }
+.book-pos { color: var(--text-dim); font-weight: 700; margin-right: 6px; font-variant-numeric: tabular-nums; }
+.book-actions { flex-wrap: wrap; justify-content: flex-end; }
+.author-hero { position: relative; overflow: hidden; border-radius: var(--radius); margin-bottom: 14px; background: #14162a; color: #fff; }
+.author-hero-loading { height: 228px; }
+.author-hero-bg { position: absolute; inset: -40px; background-size: cover; background-position: center 30%; filter: blur(28px) saturate(1.2); opacity: 0.6; transform: scale(1.08); }
+.author-hero::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(14, 16, 30, 0.3), rgba(14, 16, 30, 0.88)); pointer-events: none; }
+.author-hero-inner { position: relative; z-index: 1; display: flex; gap: 22px; padding: 24px; align-items: flex-end; }
+.author-portrait { width: 136px; height: 176px; border-radius: 14px; object-fit: cover; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45); flex-shrink: 0; background-color: var(--surface-2); font-size: 44px; }
+.author-heading { min-width: 0; flex: 1; }
+.author-name { margin: 0; font-size: 28px; font-weight: 800; line-height: 1.1; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5); overflow-wrap: anywhere; }
+.author-badges { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.author-hero .pill { color: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3); }
+.author-hero .pill.ok { background: #10b981; }
+.author-hero .pill.info { background: #3b82f6; }
+.author-hero .pill.muted { background: rgba(255, 255, 255, 0.22); }
+.author-stats { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; opacity: 0.92; }
+.author-stats b { font-weight: 800; }
+.author-links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.author-link { color: #fff; background: rgba(255, 255, 255, 0.16); border-radius: 999px; padding: 3px 11px; font-size: 12px; font-weight: 600; text-decoration: none; }
+.author-link:hover { background: rgba(255, 255, 255, 0.28); }
+.author-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.author-overview-wrap { margin: 0 0 16px; }
+.author-overview { margin: 0 0 6px; line-height: 1.6; color: var(--text); }
+.author-overview.clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.book-toolbar { display: flex; gap: 10px 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin: 4px 0 14px; }
+.book-toolbar-title { display: flex; gap: 10px; align-items: baseline; }
+.book-toolbar-title .section-title { margin: 0; }
+.book-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.series-head { flex-wrap: wrap; }
+.series-head .season-title { overflow-wrap: anywhere; }
+.book-info-head { display: flex; gap: 18px; align-items: flex-start; margin-bottom: 14px; }
+.book-info-cover { width: 120px; border-radius: 10px; box-shadow: var(--shadow-sm); flex-shrink: 0; }
+.book-info-meta { min-width: 0; flex: 1; }
+.book-info-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 12px 0 0; font-size: 13px; }
+.book-info-facts dt { color: var(--text-dim); font-weight: 600; }
+.book-info-facts dd { margin: 0; overflow-wrap: anywhere; }
+.book-file-path { font-size: 12px; word-break: break-all; }
+.edit-format { display: grid; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.edit-format-title { font-weight: 800; }
+@media (max-width: 720px) {
+  .author-hero-inner { align-items: flex-start; gap: 14px; padding: 16px; }
+  .author-portrait { width: 78px; height: 100px; border-radius: 10px; font-size: 26px; }
+  .author-name { font-size: 21px; }
+  .author-stats { gap: 10px; font-size: 12px; }
+  .author-actions { margin-top: 12px; }
+  .book-tools { width: 100%; }
+  .book-tools .lib-filter { flex: 1 1 100%; }
+  .book-tools .lib-filter .lib-filter-search { flex: 1 1 auto; min-width: 0; max-width: none; }
+  /* Long book lists: keep the cover beside the title instead of above it. */
+  .row.book-row .row-main, .row.author-row .row-main { flex: 1 1 0; min-width: 0; }
+  .row .book-actions > .row-actions { flex-basis: auto; margin-top: 0; }
+}

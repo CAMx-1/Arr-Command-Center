@@ -16,7 +16,8 @@ import { cachedGet, configurePersistence, indexedDbBackend, revalidating, clearP
 import { renderHome, refreshHome } from './views/home.js';
 import { renderSonarr } from './views/sonarr.js';
 import { renderRadarr } from './views/radarr.js';
-import { renderLidarr, renderReadarr, renderBindery } from './views/musicbooks.js';
+import { renderLidarr, renderBindery } from './views/musicbooks.js';
+import { renderReadarr } from './views/readarr.js';
 import { renderOverseerr, openSeasonModal, openMovieRequestModal } from './views/overseerr.js';
 import { renderSabnzbd } from './views/sabnzbd.js';
 import { renderTautulli } from './views/tautulli.js';

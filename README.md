@@ -371,6 +371,30 @@ its own icon:
 "chaptarr": { "label": "Chaptarr", "type": "readarr", "baseUrl": "http://192.168.1.10:8789", "apiKey": "…", "icon": "chaptarr" }
 ```
 
+Readarr-type services get the same page as Sonarr and Radarr, with the differences of books:
+
+- **Library** — authors with their pictures as hexagons, a list or a sortable table, filtered by
+  name and status (monitored, with files, continuing, ended). Each shows its files, size on disk
+  and how many books are monitored.
+- **Author page** — the author's picture, biography, genres and links, and every book grouped by
+  series in reading order, with its cover. Each book shows whether it is on disk, missing or not
+  monitored, its format and size, and its narrator. Monitor or unmonitor a book or a whole
+  series, search automatically or pick a release yourself (interactive search), and open a
+  book's details and files. The list starts with the books that are monitored or on disk; long
+  lists start with each series folded. Chaptarr authors with both audiobooks and ebooks get a
+  switch between the two, as in Chaptarr.
+- **Add, edit and remove authors** — search for an author and add them with a root folder,
+  quality and metadata profile (Chaptarr: per format), which books to monitor and whether to
+  search right away; the root folder's own defaults are filled in. Edit monitoring, quality
+  profile, "monitor new books" and tags (Chaptarr: for each format). Removing can also delete
+  the author's files; Chaptarr first lists which folders and files would go and whether they
+  land in its Recycle Bin.
+- **Wanted, Queue, Calendar, History** — with book covers. Wanted has Missing and Cutoff Unmet,
+  per-book automatic and interactive search, and Search all.
+- A search that covers more than 10 books asks first, since indexers limit daily searches.
+
+Pictures come from the app's metadata sources (remoteUrl), so they also load in the iOS app.
+
 ### Environment variable overrides
 
 Any secret can be supplied via environment variables instead of `config.json` (handy for
@@ -948,7 +972,7 @@ any change for guests). The server still enforces every rule.
 - **Organizr-style Quick Links** — add your own custom links to the Overview and manage
   them in Settings.
 
-**Library management (Sonarr / Radarr / Lidarr / Bindery / legacy Readarr)**
+**Library management (Sonarr / Radarr / Lidarr / Bindery / Chaptarr and legacy Readarr)**
 - **Three view modes** — Hexagon, List, and a sortable **Table**, toggled per page and
   remembered.
 - **Filter & saved views** — instant title search + status dropdown; save filter/sort/view
@@ -956,7 +980,8 @@ any change for guests). The server still enforces every rule.
 - **Deep-linkable URLs** — the active view mode, filter, status, and sort all live in the
   URL hash so any state is bookmarkable and shareable.
 - **Add / edit / delete** titles, interactive + automatic search, and a season/episode
-  browser with monitor toggles.
+  browser with monitor toggles. Chaptarr and Readarr have an author page with every book by
+  series (see [Chaptarr and other Readarr-compatible apps](#chaptarr-and-other-readarr-compatible-apps)).
 - **Wanted** tab — Missing + Cutoff Unmet, with per-item search.
 - **System** tab — health checks, disk space, quality profiles, tags (view/create/delete),
   blocklist (view/remove), and commands.

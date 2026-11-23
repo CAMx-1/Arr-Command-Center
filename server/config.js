@@ -363,6 +363,8 @@ function buildMockConfig() {
       'radarr-4k': mk('radarr-4k', 'Radarr (4K)', 'radarr', MOCK_PORTS.radarr4k),
       lidarr: mk('lidarr', 'Lidarr', 'lidarr', MOCK_PORTS.lidarr),
       readarr: mk('readarr', 'Readarr (Legacy)', 'readarr', MOCK_PORTS.readarr),
+      // Chaptarr: a maintained Readarr fork (audiobooks and ebooks in one app), same API.
+      chaptarr: { ...mk('chaptarr', 'Chaptarr', 'readarr', MOCK_PORTS.chaptarr), icon: 'chaptarr' },
       bindery: mk('bindery', 'Bindery', 'bindery', MOCK_PORTS.bindery),
       listenarr: mk('listenarr', 'Listenarr', 'listenarr', MOCK_PORTS.listenarr),
       overseerr: mk('overseerr', 'Overseerr', 'overseerr', MOCK_PORTS.overseerr),
