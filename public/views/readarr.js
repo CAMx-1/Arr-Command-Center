@@ -828,19 +828,65 @@ async function tabWanted(root, arr, ctx, mode = 'missing') {
   try {
     const data = await arr.get(`${endpoint}?page=1&pageSize=${pageSize}&sortKey=releaseDate&sortDirection=descending&includeAuthor=true`);
     let shown = records(data);
-    const total = Number(data && data.totalRecords) || shown.length;
+    let total = Number(data && data.totalRecords) || shown.length;
     const seg = (m, label) => h('button', { class: `view-seg ${mode === m ? 'active' : ''}`, onclick: () => { if (mode !== m) tabWanted(root, arr, ctx, m); } }, label);
     const searchAll = h('button', {
       class: 'btn sm primary', 'data-needs': 'write', title: `Search for every ${mode === 'cutoff' ? 'book below its quality cutoff' : 'missing monitored book'}`,
       onclick: () => searchBooks(arr, { name: mode === 'cutoff' ? 'CutoffUnmetBookSearch' : 'MissingBookSearch' }, total, `every ${mode === 'cutoff' ? 'book below its quality cutoff' : 'missing book'}`),
     }, 'Search all');
+    // Select mode, as in Sonarr's and Radarr's Wanted: search for some books,
+    // or stop monitoring the ones not worth looking for.
+    let selecting = false;
+    const picked = new Set();
+    const totalEl = h('span', { class: 'dim', style: { marginRight: 'auto' } });
+    const barSlot = h('div', {});
+    const list = h('div', { class: 'list' });
+    const paintTotal = () => mount(totalEl, total ? plural(total, 'book') : '');
+    const rowFor = (r) => wantedRow(r, arr, ctx, selecting ? { checked: picked.has(r.id), onToggle: (on) => { if (on) picked.add(r.id); else picked.delete(r.id); paintBar(); } } : null);
+    const paintRows = () => mount(list, ...shown.map(rowFor));
+    const selectBtn = h('button', {
+      class: 'btn sm', type: 'button', 'data-needs': 'write', title: 'Select books to search for or stop monitoring',
+      onclick: () => { selecting = !selecting; picked.clear(); paintBar(); paintRows(); },
+    }, '☑ Select');
+    const unmonitor = async (btn) => {
+      const ids = [...picked];
+      btn.disabled = true;
+      try {
+        await arr.put('book/monitor', { bookIds: ids, monitored: false });
+        invalidate(authorsKey(ctx));
+        shown = shown.filter((r) => !picked.has(r.id));
+        total = Math.max(0, total - ids.length);
+        picked.clear();
+        toast(`Stopped monitoring ${plural(ids.length, 'book')}`, 'success');
+        paintTotal(); paintBar(); paintRows();
+      } catch (e) { toast(e.message, 'error'); btn.disabled = false; }
+    };
+    function paintBar() {
+      if (!selecting) { mount(barSlot); selectBtn.textContent = '☑ Select'; return; }
+      selectBtn.textContent = 'Done';
+      const all = h('input', { type: 'checkbox', 'aria-label': 'Select every book shown' });
+      all.checked = shown.length > 0 && shown.every((r) => picked.has(r.id));
+      all.indeterminate = picked.size > 0 && !all.checked;
+      all.addEventListener('change', () => { for (const r of shown) { if (all.checked) picked.add(r.id); else picked.delete(r.id); } paintBar(); paintRows(); });
+      const n = picked.size;
+      mount(barSlot, h('div', { class: 'bulk-bar' },
+        h('label', { class: 'bulk-all' }, all, 'All shown'),
+        h('span', { class: 'dim' }, `${n} selected`),
+        h('div', { class: 'bulk-actions' },
+          h('button', { class: 'btn sm hex-btn primary', type: 'button', disabled: n ? null : 'disabled', title: 'Search for the selected books',
+            onclick: () => searchBooks(arr, { name: 'BookSearch', bookIds: [...picked] }, n, plural(n, 'selected book')) }, 'Search'),
+          h('button', { class: 'btn sm hex-btn', type: 'button', disabled: n ? null : 'disabled', title: `Stop monitoring the selected books, so ${ctx.service.label} stops looking for them`,
+            onclick: (e) => unmonitor(e.currentTarget) }, 'Unmonitor'))));
+    }
     const head = h('div', { class: 'lib-head', style: { justifyContent: 'space-between' } },
       h('div', { class: 'view-toggle wanted-toggle', role: 'group', 'aria-label': 'Wanted list' }, seg('missing', 'Missing'), seg('cutoff', 'Cutoff Unmet')),
-      h('span', { class: 'dim', style: { marginRight: 'auto' } }, total ? plural(total, 'book') : ''),
+      totalEl,
+      selectBtn,
       searchAll,
     );
+    paintTotal();
     if (!shown.length) return mount(root, head, empty('✅', mode === 'cutoff' ? 'Nothing below cutoff' : 'Nothing missing', 'Every monitored book is on disk.'));
-    const list = h('div', { class: 'list' }, ...shown.map((r) => wantedRow(r, arr, ctx)));
+    paintRows();
     let page = 1;
     const more = h('button', { class: 'btn' }, `Show more (${total - shown.length} more)`);
     more.onclick = async () => {
@@ -848,23 +894,32 @@ async function tabWanted(root, arr, ctx, mode = 'missing') {
       try {
         const next = records(await arr.get(`${endpoint}?page=${page + 1}&pageSize=${pageSize}&sortKey=releaseDate&sortDirection=descending&includeAuthor=true`));
         page++;
-        shown = shown.concat(next);
-        for (const r of next) list.appendChild(wantedRow(r, arr, ctx));
+        shown = shown.concat(next.filter((r) => !shown.some((s) => s.id === r.id)));
+        paintRows();
+        if (selecting) paintBar();
         more.textContent = `Show more (${Math.max(0, total - shown.length)} more)`;
         more.disabled = false;
         if (!next.length || shown.length >= total) moreWrap.remove();
       } catch (e) { toast(e.message, 'error'); more.disabled = false; }
     };
     const moreWrap = h('div', { class: 'load-more' }, more);
-    mount(root, head, list, shown.length < total ? moreWrap : null);
+    mount(root, head, barSlot, list, shown.length < total ? moreWrap : null);
   } catch (err) {
     mount(root, empty('', 'Failed to load wanted books', err.message, { label: 'Retry', onClick: () => tabWanted(root, arr, ctx, mode) }));
   }
 }
 
-function wantedRow(r, arr, ctx) {
+function wantedRow(r, arr, ctx, sel = null) {
   const line = bookLine(r);
+  let check = null;
+  if (sel) {
+    const cb = h('input', { type: 'checkbox', 'aria-label': `Select ${r.title || 'book'}` });
+    cb.checked = !!sel.checked;
+    cb.addEventListener('change', () => sel.onToggle(cb.checked));
+    check = h('label', { class: 'bulk-check' }, cb);
+  }
   return h('div', { class: 'row book-row' },
+    check,
     bookCoverEl(r),
     h('div', { class: 'row-main' },
       h('div', { class: 'row-title' }, r.title || 'Untitled'),
@@ -872,6 +927,8 @@ function wantedRow(r, arr, ctx) {
       h('div', { class: 'meta-line', style: { marginTop: '4px' } },
         r.releaseDate ? h('span', {}, `Released ${bookDate(r.releaseDate)}`) : null,
         r.mediaType && FORMATS[r.mediaType] ? h('span', { class: 'pill muted' }, `${FORMATS[r.mediaType].icon} ${FORMATS[r.mediaType].one}`) : null,
+        // Tells apart the copies of a book listed twice (one per metadata source).
+        bookSource(r) ? h('span', { class: 'dim', title: 'Metadata source' }, bookSource(r)) : null,
       ),
     ),
     actionGroup([

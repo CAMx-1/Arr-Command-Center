@@ -393,7 +393,9 @@ Readarr-type services get the same page as Sonarr and Radarr, with the differenc
   the author's files; Chaptarr first lists which folders and files would go and whether they
   land in its Recycle Bin.
 - **Wanted, Calendar, History** — with book covers. Wanted has Missing and Cutoff Unmet,
-  per-book automatic and interactive search, and Search all. History filters by Grabbed,
+  per-book automatic and interactive search, Search all, and **☑ Select** to search for some
+  books or stop monitoring the ones not worth looking for; each book shows its metadata source,
+  so the copies of a book listed twice are told apart. History filters by Grabbed,
   Imported, Failed and Files changed, loads more on request, and shows why an import failed.
 - **Queue** — like Chaptarr's own queue, it also lists downloads the app didn't grab (unknown
   author). Problems come first, in a summary that filters the list: a folder the app can't
