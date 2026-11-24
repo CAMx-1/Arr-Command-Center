@@ -2528,6 +2528,9 @@ function makeReadarr(opts = {}) {
       { ...done, id: 605, title: 'Agatha.Christie-And.Then.There.Were.None.Hugh.Fraser', status: 'failed', trackedDownloadState: 'downloading', size: 301989888, downloadId: 'SABnzbd_nzo_christie', outputPath: '/downloads/incomplete/Agatha.Christie-And.Then.There.Were.None.Hugh.Fraser', quality: { quality: { id: 0, name: 'Unknown' } },
         statusMessages: [msg('Agatha.Christie-And.Then.There.Were.None.Hugh.Fraser', 'Download wasn\u2019t grabbed by Chaptarr, skipping')], errorMessage: 'Download wasn\u2019t grabbed by Chaptarr, skipping' },
       { id: 606, title: 'Brandon Sanderson - Isles of the Emberdark [M4B]', authorId: 1, bookId: (firstBook('Isles of the Emberdark') || {}).id, status: 'delay', trackedDownloadState: 'downloading', trackedDownloadStatus: 'ok', size: 845000000, sizeleft: 845000000, timeleft: '05:30:00', estimatedCompletionTime: iso(now + 5.5 * 3600000), indexer: 'NZBgeek', protocol: 'usenet', quality: { quality: { id: 12, name: 'M4B' } }, statusMessages: [], canRetryImport: false },
+      // Downloaded as MP3 parts, being converted to one M4B before the import.
+      { ...done, id: 608, title: 'Brandon Sanderson - Rhythm of War [MP3]', authorId: 1, bookId: (firstBook('Rhythm of War') || {}).id, trackedDownloadState: 'importPending', trackedDownloadStatus: 'ok', size: 1932735283, indexer: 'NZBgeek', downloadId: 'SABnzbd_nzo_rhythm', outputPath: '/downloads/complete/audiobooks/Brandon Sanderson - Rhythm of War', quality: { quality: { id: 10, name: 'MP3' } },
+        statusMessages: [], conversionStatus: 'converting', convertToQualityId: 12, convertToQuality: 'M4B', conversionProgress: 42.5, conversionMessage: 'Converting part 6 of 14', canCancelConversion: true },
     );
   }
   let blocklist = chaptarr ? [
@@ -2774,6 +2777,13 @@ function makeReadarr(opts = {}) {
     app.delete('/api/v1/ignored/:id', (req, res) => {
       if (!ignored.some((x) => x.id === Number(req.params.id))) return res.status(404).json({ message: 'Ignored download not found' });
       stopIgnoring(new Set([Number(req.params.id)]));
+      res.json({});
+    });
+    app.post('/api/v1/queue/cancelconversion/:id', (req, res) => {
+      const q = queue.find((x) => x.id === Number(req.params.id));
+      if (!q) return res.status(404).json({ message: 'NotFound' });
+      if (!q.canCancelConversion) return res.status(400).json({ message: 'No active conversion found for this queue item' });
+      Object.assign(q, { conversionStatus: 'cancelled', conversionProgress: null, conversionMessage: 'Cancelled by user', canCancelConversion: false });
       res.json({});
     });
   }

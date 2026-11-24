@@ -286,6 +286,25 @@ export const QUEUE_FILTERS = [
   { id: 'active', label: 'Downloading', test: (r) => !needsAttention(r) },
 ];
 
+// Chaptarr can convert an audiobook download (to M4B) before importing it;
+// the queue carries the conversion's state. null when there is none.
+const CONVERSION_LABELS = { converting: 'Converting', cancelling: 'Cancelling the conversion', queued: 'Waiting to convert', failed: 'Conversion failed', cancelled: 'Conversion cancelled', completed: 'Converted' };
+export function conversionState(r) {
+  const status = lc(r && r.conversionStatus);
+  if (!status || status === 'none') return null;
+  const to = r.convertToQuality && ['converting', 'queued', 'completed'].includes(status) ? ` to ${r.convertToQuality}` : '';
+  const raw = Number(r.conversionProgress);
+  const progress = r.conversionProgress !== null && r.conversionProgress !== undefined && Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : null;
+  const active = status === 'converting' || status === 'cancelling';
+  return {
+    status, active,
+    label: `${CONVERSION_LABELS[status] || `Conversion ${status}`}${to}`,
+    progress: active ? Math.max(1, progress || 0) : progress,
+    message: String(r.conversionMessage || '').trim(),
+    canCancel: !!r.canCancelConversion,
+  };
+}
+
 export function queueCounts(records) {
   const out = { all: 0, attention: 0, active: 0, unknown: 0 };
   for (const r of records || []) {

@@ -404,7 +404,8 @@ Readarr-type services get the same page as Sonarr and Radarr, with the differenc
   Blocklist & search. Removing many at once only ignores them unless you also remove them from
   the download client, and a download inside the library folder warns before anything is
   deleted. On Chaptarr, **Ignored** lists the downloads removed from the queue but left in the
-  download client; Stop ignoring puts the ones still there back in the queue.
+  download client; Stop ignoring puts the ones still there back in the queue. A download being
+  converted to M4B shows the conversion's progress, with Cancel conversion.
 - **Author tools** — Rename… and Write tags… preview every change before anything is written;
   books whose chapter titles would all become the book title start unticked. Books listed twice
   (from more than one metadata source) with more than one copy monitored get a banner, and

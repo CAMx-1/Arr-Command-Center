@@ -31,7 +31,7 @@ import { openBookRename, openBookRetag, openDuplicateBooks } from '../lib/bookTo
 import { bulkAuthors } from '../lib/authorBulkUI.js';
 import {
   bookQueueActions, bookQueueReasons, bookQueueMessages, queueProblemKind, isUnknownAuthor, needsAttention, queueCounts, QUEUE_FILTERS,
-  inLibraryFolder, duplicateBooks, unmappedUnits, bookSource,
+  inLibraryFolder, duplicateBooks, unmappedUnits, bookSource, conversionState,
 } from '../lib/bookImport.js';
 import {
   FORMATS, MONITOR_OPTIONS, NEW_ITEM_OPTIONS, BOOK_FILTERS,
@@ -995,6 +995,7 @@ function queueRow(r, arr, ctx, reload, roots = []) {
   const downloading = String(r.trackedDownloadState || r.status || '').toLowerCase() === 'downloading' && String(r.status).toLowerCase() !== 'failed';
   const quality = r.quality && r.quality.quality && r.quality.quality.name;
   const onDone = () => (reload ? reload() : ctx.reload());
+  const conv = conversionState(r);
   // A download that sits in the library folder: removing it from the client
   // can delete files the library uses, so removing only ignores it by default.
   const libraryRoot = inLibraryFolder(r.outputPath, roots);
@@ -1006,7 +1007,7 @@ function queueRow(r, arr, ctx, reload, roots = []) {
   const grabbedFor = [book.title, bookSource(book)].filter(Boolean).join(' · ');
   const otherHint = kind === 'otherBook' ? `The book is listed twice: ${app} grabbed this for one copy and matched the files to the other. If the other copy already has these files, remove this download. To import it anyway, use Change book… and pick the copy it was grabbed for${grabbedFor ? ` (${grabbedFor})` : ''}, so ${app} counts the download as done.` : '';
   const actions = [
-    can.importFiles ? {
+    can.importFiles && !(conv && conv.active) ? {
       label: can.stuck ? '\u21E9 Fix import' : '\u21E9 Import', variant: can.stuck ? 'primary' : undefined, primary: can.stuck,
       title: can.stuck ? 'This download finished but wasn’t imported: choose the book and import it' : 'Import the downloaded files by hand',
       onClick: () => openBookImport(arr, { downloadId: r.downloadId, title: book.title || r.title, messages: reasons, hint: pathHint || otherHint, label: app, onImported: onDone }),
@@ -1027,6 +1028,12 @@ function queueRow(r, arr, ctx, reload, roots = []) {
         try { await arr.post(`queue/grab/${r.id}`, {}); toast(`Grabbing ${r.title}`, 'success'); onDone(); } catch (e) { toast(e.message, 'error'); }
       },
     } : null,
+    conv && conv.canCancel ? {
+      label: 'Cancel conversion', title: `Stop converting this download; ${app} keeps the downloaded files`,
+      onClick: async () => {
+        try { await arr.post(`queue/cancelconversion/${r.id}`, {}); toast(`Cancelling the conversion of ${book.title || r.title}`, 'success'); onDone(); } catch (e) { toast(e.message, 'error'); }
+      },
+    } : null,
     { label: 'Remove…', title: 'Remove from the queue, optionally blocklisting the release', variant: 'danger', primary: !can.stuck && !can.grab, onClick: () => openRemoveQueueDialog(arr, r, { onDone, rowEl: row, removeFromClient: !libraryRoot, warning: libraryWarning }) },
     r.bookId || book.id ? { label: 'Blocklist & search', needs: 'delete', title: 'Blocklist this release and search for another', onClick: () => removeWithUndo(arr, r, { removeFromClient: !libraryRoot, blocklist: true, search: true }, { onDone, rowEl: row }) } : null,
     r.authorId ? { label: 'Author', needs: 'read', title: 'Open the author', onClick: () => openAuthor(ctx, { id: r.authorId }) } : null,
@@ -1040,6 +1047,7 @@ function queueRow(r, arr, ctx, reload, roots = []) {
       h('div', { class: 'meta-line', style: { marginTop: '4px' } },
         h('span', { class: `pill ${stateCls}` }, String(r.status).toLowerCase() === 'failed' ? 'Failed' : queueStateLabel(r)),
         isUnknownAuthor(r) ? h('span', { class: 'pill muted', title: `${app} didn’t grab this download, or can’t tell which book it is` }, 'Unknown author') : null,
+        conv ? h('span', { class: `pill ${conv.status === 'failed' ? 'down' : conv.active || conv.status === 'queued' ? 'info' : 'muted'}`, title: conv.message || null }, conv.active && conv.progress !== null ? `${conv.label} · ${Math.round(conv.progress)}%` : conv.label) : null,
         quality && !/^unknown$/i.test(quality) ? h('span', { class: 'pill info' }, quality) : null,
         downloading ? h('span', {}, `${fmtBytes(left)} left`) : size ? h('span', {}, fmtBytes(size)) : null,
         downloading && r.timeleft ? h('span', {}, `ETA ${r.timeleft}`) : null,
@@ -1050,6 +1058,8 @@ function queueRow(r, arr, ctx, reload, roots = []) {
         reasons[0] + (reasons.length > 1 ? ` (+${reasons.length - 1} more)` : '')) : null,
       attention && r.outputPath ? h('div', { class: 'mono book-file-path dim' }, r.outputPath) : null,
       downloading ? h('div', { class: 'progress' }, h('span', { style: { width: pct(prog) } })) : null,
+      conv && conv.active ? h('div', { class: 'progress', title: conv.message || conv.label }, h('span', { style: { width: pct(conv.progress) } })) : null,
+      conv && conv.message && (conv.active || conv.status === 'failed') ? h('div', { class: 'dim', style: { fontSize: '12px', marginTop: '4px' } }, conv.message) : null,
     ),
     actionGroup(actions, { sheetTitle: book.title || r.title }),
   );
