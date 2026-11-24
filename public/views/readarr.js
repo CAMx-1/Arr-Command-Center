@@ -2,7 +2,8 @@
 // the Sonarr and Radarr pages: authors with their pictures as a honeycomb,
 // list or table; an author page with every book (monitor, automatic and
 // interactive search, files, rename and retag previews, books listed twice);
-// add, edit and remove authors; Wanted, Queue (with manual import), Calendar
+// add, edit and remove authors, one or many at once (Select); Wanted, Queue
+// (with manual import and ignored downloads), Calendar
 // and History with book covers; and System (health, tasks, blocklist,
 // unmapped files). Chaptarr keeps audiobook and ebook settings side by side;
 // lib/readarrLibrary.js handles both shapes.
@@ -25,8 +26,9 @@ import { dismissKeyboardOnEnter } from '../lib/nativeApp.js';
 import { openReleaseSearch } from './releaseSearch.js';
 import { showReadarrNotice } from './musicbooks.js';
 import { blocklistSection } from './arrSystem.js';
-import { openBookImport, openUnmappedFiles, watchCommand } from '../lib/bookImportUI.js';
+import { openBookImport, openUnmappedFiles, openIgnoredDownloads, watchCommand } from '../lib/bookImportUI.js';
 import { openBookRename, openBookRetag, openDuplicateBooks } from '../lib/bookToolsUI.js';
+import { bulkAuthors } from '../lib/authorBulkUI.js';
 import {
   bookQueueActions, bookQueueReasons, bookQueueMessages, queueProblemKind, isUnknownAuthor, needsAttention, queueCounts, QUEUE_FILTERS,
   inLibraryFolder, duplicateBooks, unmappedUnits, bookSource,
@@ -165,6 +167,15 @@ async function tabAuthors(root, arr, ctx) {
         initialTerm: ctx.params.q || '', initialStatus: ctx.params.status || 'all',
         onStateChange: ({ term, status }) => ctx.setParams({ q: term, status: status === 'all' ? '' : status }),
       }),
+      h('button', {
+        class: 'btn sm', type: 'button', 'data-needs': 'write', title: 'Select authors to monitor, search, edit, tag or remove many at once',
+        onclick: () => bulkAuthors(root, {
+          authors, filtered, arr, ctx, mode, columns, sortKey, direction,
+          thumb: (a) => authorThumb(a),
+          describeDelete: async (ids) => previewText(deletePreviewSummary(await arr.post('author/deletepreview', { authorIds: ids, applyToBothFormats: true }))),
+          onExit: () => tabAuthors(root, arr, ctx),
+        }),
+      }, '☑ Select'),
     );
     mount(root, unmappedNotice(arr, ctx), head, listWrap);
   } catch (err) {
@@ -897,7 +908,17 @@ async function tabQueue(root, arr, ctx) {
   cachedGet(`arr:${ctx.service.key}:rootfolder`, () => arr.get('rootfolder'), 600000).then((r) => { roots = Array.isArray(r) ? r : []; if (list.length) paint(); }).catch(() => {});
   let filter = ctx.params.queue || 'all';
   const setFilter = (f) => { filter = f; ctx.setParams({ queue: f === 'all' ? '' : f }); paint(); };
-  const reload = () => load(true);
+  // Chaptarr lists the downloads removed from the queue but left in the
+  // download client (legacy Readarr has no such list: the count stays 0).
+  let ignored = 0;
+  const countIgnored = () => arr.get('ignored?page=1&pageSize=1')
+    .then((d) => { const n = Number(d && d.totalRecords) || 0; if (n !== ignored) { ignored = n; paint(); } })
+    .catch(() => {});
+  const ignoredBtn = () => (ignored ? h('button', {
+    class: 'btn sm', type: 'button', title: `Downloads removed from the queue but left in the download client, which ${app} no longer tracks`,
+    onclick: () => openIgnoredDownloads(arr, { label: app, onChanged: () => reload() }),
+  }, `Ignored ${ignored}`) : null);
+  const reload = () => { load(true); countIgnored(); };
   const test = (r) => {
     if (filter.startsWith('kind:')) return needsAttention(r) && problemOf(r) === filter.slice(5);
     const def = QUEUE_FILTERS.find((f) => f.id === filter) || QUEUE_FILTERS[0];
@@ -905,7 +926,11 @@ async function tabQueue(root, arr, ctx) {
   };
 
   function paint() {
-    if (!list.length) { mount(wrap, empty('📥', 'Queue is empty', 'Nothing downloading right now')); return; }
+    if (!list.length) {
+      const btn = ignoredBtn();
+      mount(wrap, empty('📥', 'Queue is empty', 'Nothing downloading right now'), btn ? h('div', { class: 'load-more' }, btn) : null);
+      return;
+    }
     const counts = queueCounts(list);
     const kinds = new Map();
     for (const r of list.filter(needsAttention)) { const k = problemOf(r); kinds.set(k, (kinds.get(k) || 0) + 1); }
@@ -916,6 +941,7 @@ async function tabQueue(root, arr, ctx) {
       h('div', { class: 'view-toggle', role: 'group', 'aria-label': 'Which downloads' },
         seg('all', `All ${counts.all}`), seg('attention', `Needs attention ${counts.attention}`), seg('active', `Downloading ${counts.active}`)),
       h('span', { class: 'dim', style: { marginRight: 'auto' } }, counts.unknown ? `${plural(counts.unknown, 'download')} with an unknown author` : ''),
+      ignoredBtn(),
       problemsOnly && shown.length > 1 ? h('button', {
         class: 'btn sm danger', type: 'button', 'data-needs': 'delete',
         title: 'Remove every download shown here from the queue',
@@ -952,6 +978,7 @@ async function tabQueue(root, arr, ctx) {
     }
   }
   await load(false);
+  countIgnored();
   liveRefresh(wrap, ctx.service, 5000, () => load(true));
 }
 

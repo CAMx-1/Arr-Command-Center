@@ -2534,6 +2534,16 @@ function makeReadarr(opts = {}) {
     { id: 1, authorId: 2, bookIds: [hailMary && hailMary.id], sourceTitle: 'Andy Weir - Project Hail Mary (2021) [MP3] 32kbps', quality: { quality: { id: 10, name: 'MP3' } }, date: iso(now - 3 * day), protocol: 'usenet', indexer: 'DrunkenSlug', message: 'Aborted, cannot be completed - https://sabnzbd.org/not-complete' },
     { id: 2, authorId: 1, bookIds: [], sourceTitle: 'Sanderson - Rhythm of War (2020) [Dramatized Adaptation]', quality: { quality: { id: 12, name: 'M4B' } }, date: iso(now - 9 * day), protocol: 'torrent', indexer: 'AudioBookBay', message: 'Manually blocklisted' },
   ] : [];
+  // Chaptarr's /ignored: downloads removed from the queue but left in the
+  // download client. Stopping ignoring one still there brings it back.
+  let nextIgnored = 3;
+  let ignored = chaptarr ? [
+    { id: 1, authorId: 0, bookId: 0, downloadId: 'SABnzbd_nzo_oldpyramids', sourceTitle: 'Terry.Pratchett-Pyramids.Unabridged.Nigel.Planer', date: iso(now - 6 * day), protocol: 'usenet', downloadClient: 'SABnzbd', downloadClientName: 'SABnzbd', isInClient: false },
+    { id: 2, authorId: 0, bookId: 0, downloadId: 'SABnzbd_nzo_guards', sourceTitle: 'Terry.Pratchett-Guards.Guards.Unabridged.Nigel.Planer', date: iso(now - 2 * day), protocol: 'usenet', downloadClient: 'SABnzbd', downloadClientName: 'SABnzbd', isInClient: true,
+      record: { id: 607, title: 'Terry.Pratchett-Guards.Guards.Unabridged.Nigel.Planer', status: 'completed', trackedDownloadStatus: 'warning', trackedDownloadState: 'importPending', size: 335544320, sizeleft: 0, timeleft: '00:00:00', downloadClient: 'SABnzbd', protocol: 'usenet', downloadId: 'SABnzbd_nzo_guards', canRetryImport: false,
+        outputPath: '/downloads/complete/audiobooks/Terry.Pratchett-Guards.Guards.Unabridged.Nigel.Planer', quality: { quality: { id: 0, name: 'Unknown' } },
+        statusMessages: [{ title: 'Terry.Pratchett-Guards.Guards.Unabridged.Nigel.Planer', messages: ['Download wasn\u2019t grabbed by Chaptarr, skipping'] }], errorMessage: 'Download wasn\u2019t grabbed by Chaptarr, skipping' } },
+  ] : [];
   const history = () => {
     const imported = files.filter((f, i, all) => all.findIndex((x) => x.bookId === f.bookId) === i)
       .sort((x, y) => Date.parse(y.dateAdded) - Date.parse(x.dateAdded)).slice(0, 6)
@@ -2618,7 +2628,39 @@ function makeReadarr(opts = {}) {
   });
   app.put('/api/v1/author/editor', (req, res) => {
     const b = req.body || {}; const ids = new Set((b.authorIds || []).map(Number));
-    for (const a of authors.filter((x) => ids.has(x.id))) { if (typeof b.monitored === 'boolean') a.monitored = b.monitored; if (b.qualityProfileId) a.qualityProfileId = Number(b.qualityProfileId); }
+    const tagged = (list) => {
+      const set = new Set((list || []).map(Number));
+      const add = (b.tags || []).map(Number);
+      if (b.applyTags === 'add') add.forEach((t) => set.add(t));
+      else if (b.applyTags === 'remove') add.forEach((t) => set.delete(t));
+      else if (b.applyTags === 'replace') { set.clear(); add.forEach((t) => set.add(t)); }
+      return [...set];
+    };
+    for (const a of authors.filter((x) => ids.has(x.id))) {
+      if (chaptarr) {
+        // As in Chaptarr: a side only changes on authors set up for that format.
+        for (const f of ['audiobook', 'ebook']) {
+          if (b[`${f}RootFolderPath`] && roots.some((r) => r.path === b[`${f}RootFolderPath`])) {
+            a[`${f}RootFolderPath`] = b[`${f}RootFolderPath`];
+            a[`${f}Folder`] = `${b[`${f}RootFolderPath`]}/${a.authorName}`;
+          }
+          if (!a[`${f}RootFolderPath`]) continue;
+          if (typeof b[`${f}Monitored`] === 'boolean') a[`${f}Monitored`] = b[`${f}Monitored`];
+          if (b[`${f}MonitorNewItems`]) a[`${f}MonitorNewItems`] = b[`${f}MonitorNewItems`];
+          if (b[`${f}QualityProfileId`]) a[`${f}QualityProfileId`] = Number(b[`${f}QualityProfileId`]);
+          if (b[`${f}MetadataProfileId`]) a[`${f}MetadataProfileId`] = Number(b[`${f}MetadataProfileId`]);
+          if (Array.isArray(b.tags)) a[`${f}Tags`] = tagged(a[`${f}Tags`]);
+        }
+        a.monitored = ['audiobook', 'ebook'].some((f) => a[`${f}Monitored`] === true);
+      } else {
+        if (typeof b.monitored === 'boolean') a.monitored = b.monitored;
+        if (b.qualityProfileId) a.qualityProfileId = Number(b.qualityProfileId);
+        if (b.metadataProfileId) a.metadataProfileId = Number(b.metadataProfileId);
+        if (b.monitorNewItems) a.monitorNewItems = b.monitorNewItems;
+        if (b.rootFolderPath) { a.rootFolderPath = b.rootFolderPath; a.path = `${b.rootFolderPath}/${a.authorName}`; }
+      }
+      if (Array.isArray(b.tags)) a.tags = tagged(a.tags);
+    }
     res.status(202).json(authors.filter((x) => ids.has(x.id)).map(authorResource));
   });
   const removeAuthors = (ids) => {
@@ -2710,8 +2752,31 @@ function makeReadarr(opts = {}) {
 
   // Chaptarr hides downloads it can't tie to an author unless asked.
   app.get('/api/v1/queue', (req, res) => res.json(paged(queue.filter((q) => req.query.includeUnknownAuthorItems === 'true' || q.authorId).map((q) => withRefs(q, req)), req)));
-  app.delete('/api/v1/queue/bulk', (req, res) => { const ids = new Set(((req.body || {}).ids || []).map(Number)); queue = queue.filter((q) => !ids.has(q.id)); res.json({}); });
-  app.delete('/api/v1/queue/:id', (req, res) => { queue = queue.filter((q) => q.id !== Number(req.params.id)); res.json({}); });
+  // Removing without removeFromClient only ignores the download (Chaptarr
+  // lists those under /ignored and can track them again).
+  const removeFromQueue = (ids, query) => {
+    const gone = queue.filter((q) => ids.has(q.id));
+    queue = queue.filter((q) => !ids.has(q.id));
+    if (chaptarr && String(query.removeFromClient) === 'false' && String(query.blocklist) !== 'true') {
+      for (const q of gone) ignored.push({ id: nextIgnored++, authorId: q.authorId || 0, bookId: q.bookId || 0, downloadId: q.downloadId, sourceTitle: q.title, date: iso(Date.now()), protocol: q.protocol || 'usenet', downloadClient: q.downloadClient, downloadClientName: q.downloadClient, isInClient: true, record: q });
+    }
+  };
+  app.delete('/api/v1/queue/bulk', (req, res) => { removeFromQueue(new Set(((req.body || {}).ids || []).map(Number)), req.query); res.json({}); });
+  app.delete('/api/v1/queue/:id', (req, res) => { removeFromQueue(new Set([Number(req.params.id)]), req.query); res.json({}); });
+  if (chaptarr) {
+    const view = ({ record, ...rest }) => rest;
+    const stopIgnoring = (ids) => {
+      for (const g of ignored.filter((x) => ids.has(x.id))) if (g.isInClient && g.record) queue.push(g.record);
+      ignored = ignored.filter((x) => !ids.has(x.id));
+    };
+    app.get('/api/v1/ignored', (req, res) => res.json(paged([...ignored].reverse().map(view), req)));
+    app.delete('/api/v1/ignored/bulk', (req, res) => { stopIgnoring(new Set(((req.body || {}).ids || []).map(Number))); res.json({}); });
+    app.delete('/api/v1/ignored/:id', (req, res) => {
+      if (!ignored.some((x) => x.id === Number(req.params.id))) return res.status(404).json({ message: 'Ignored download not found' });
+      stopIgnoring(new Set([Number(req.params.id)]));
+      res.json({});
+    });
+  }
   app.post('/api/v1/queue/grab/:id', (req, res) => {
     const q = queue.find((x) => x.id === Number(req.params.id) && x.status === 'delay');
     if (!q) return res.status(404).json({ message: 'Pending release not found' });

@@ -375,7 +375,10 @@ Readarr-type services get the same page as Sonarr and Radarr, with the differenc
 
 - **Library** — authors with their pictures as hexagons, a list or a sortable table, filtered by
   name and status (monitored, with files, continuing, ended). Each shows its files, size on disk
-  and how many books are monitored.
+  and how many books are monitored. **☑ Select** works like Sonarr's and Radarr's: pick authors
+  (or every one the filter shows) and monitor, unmonitor, search, refresh, tag or remove them at
+  once, or edit their monitoring, quality and metadata profile and root folder (Chaptarr: per
+  format, side by side). A search of many authors only asks about those with missing books.
 - **Author page** — the author's picture, biography, genres and links, and every book grouped by
   series in reading order, with its cover. Each book shows whether it is on disk, missing or not
   monitored, its format and size, and its narrator. Monitor or unmonitor a book or a whole
@@ -400,7 +403,8 @@ Readarr-type services get the same page as Sonarr and Radarr, with the differenc
   Import), Retry import, Grab now for a delayed release, Remove (optionally blocklisting) and
   Blocklist & search. Removing many at once only ignores them unless you also remove them from
   the download client, and a download inside the library folder warns before anything is
-  deleted.
+  deleted. On Chaptarr, **Ignored** lists the downloads removed from the queue but left in the
+  download client; Stop ignoring puts the ones still there back in the queue.
 - **Author tools** — Rename… and Write tags… preview every change before anything is written;
   books whose chapter titles would all become the book title start unticked. Books listed twice
   (from more than one metadata source) with more than one copy monitored get a banner, and

@@ -337,3 +337,44 @@ export async function openUnmappedFiles(arr, ctx, { onChanged } = {}) {
     listEl);
   paint();
 }
+
+// ---- Ignored downloads (Chaptarr) ---------------------------------------------
+
+// Downloads removed from the queue but left in the download client: the app
+// stopped tracking them. Stop ignoring makes it track them again, so those
+// still in the client come back to the queue (where Fix import can take them).
+export async function openIgnoredDownloads(arr, { label = 'The app', onChanged } = {}) {
+  const body = h('div', { class: 'ignored' }, h('div', { style: { padding: '20px' } }, spinner()));
+  openModal({ title: `Ignored downloads · ${label}`, body, wide: true });
+  let data;
+  try { data = await arr.get('ignored?page=1&pageSize=250&sortKey=date&sortDirection=descending'); }
+  catch (e) { mount(body, empty('⚠️', 'Couldn’t list ignored downloads', e.message)); return; }
+  const list = Array.isArray(data) ? data : (data && Array.isArray(data.records) ? data.records : []);
+  const total = Number(data && data.totalRecords) || list.length;
+  if (!list.length) { mount(body, empty('✅', 'Nothing ignored', `${label} is tracking every download it found.`)); return; }
+  const stop = async (ids, btn) => {
+    if (btn) btn.disabled = true;
+    try {
+      if (ids.length === 1) await arr.del(`ignored/${ids[0]}`); else await arr.del('ignored/bulk', { ids });
+      toast(`${label} is tracking ${plural(ids.length, 'download')} again`, 'success');
+      if (onChanged) onChanged();
+      openIgnoredDownloads(arr, { label, onChanged });
+    } catch (e) { if (!e.cancelled) toast(e.message, 'error', 7000); if (btn) btn.disabled = false; }
+  };
+  const inClient = list.filter((r) => r.isInClient);
+  const row = (r) => h('div', { class: 'row' },
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title', style: { fontSize: '14px', overflowWrap: 'anywhere' } }, r.sourceTitle || r.downloadId || `#${r.id}`),
+      h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+        r.isInClient ? h('span', { class: 'pill info' }, 'Still in the download client') : h('span', { class: 'pill muted', title: 'Stop ignoring only clears the entry' }, 'Gone from the download client'),
+        r.downloadClientName || r.downloadClient ? h('span', {}, r.downloadClientName || r.downloadClient) : null,
+        r.date ? h('span', { class: 'dim' }, `Ignored ${fmtRelative(r.date)}`) : null)),
+    h('div', { class: 'row-actions' },
+      h('button', { class: 'btn sm', type: 'button', 'data-needs': 'delete', title: `Track this download again${r.isInClient ? ' and put it back in the queue' : ''}`, onclick: (e) => stop([r.id], e.currentTarget) }, 'Stop ignoring')));
+  mount(body,
+    h('p', { class: 'dim', style: { marginTop: 0 } }, `These downloads were removed from ${label}’s queue but left in the download client, so ${label} stopped tracking them. Stop ignoring puts the ones still in the download client back in the queue.`),
+    h('div', { class: 'lib-head', style: { justifyContent: 'space-between' } },
+      h('span', { class: 'dim' }, total > list.length ? `${list.length} of ${total}` : plural(list.length, 'download')),
+      inClient.length > 1 ? h('button', { class: 'btn sm primary', type: 'button', 'data-needs': 'delete', onclick: (e) => stop(inClient.map((r) => r.id), e.currentTarget) }, `Stop ignoring the ${inClient.length} in the client`) : null),
+    h('div', { class: 'list' }, ...list.map(row)));
+}

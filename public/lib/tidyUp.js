@@ -56,9 +56,12 @@ export function findTidyUp({ kind, items, roots = [], profiles = [], now = Date.
 export function fixRequest(kind, rule, ids, { profileId } = {}) {
   const key = kindOf(kind).ids;
   const path = `${KINDS[kind] ? kind : 'series'}/editor`;
-  if (rule === 'unmonitor') return { method: 'PUT', path, body: { [key]: ids, monitored: false } };
+  // Chaptarr keeps monitoring per format and removes a whole author with
+  // applyToBothFormats; legacy Readarr ignores those fields.
+  const author = kind === 'author';
+  if (rule === 'unmonitor') return { method: 'PUT', path, body: { [key]: ids, monitored: false, ...(author ? { audiobookMonitored: false, ebookMonitored: false } : {}) } };
   if (rule === 'profile') return { method: 'PUT', path, body: { [key]: ids, qualityProfileId: Number(profileId) } };
-  if (rule === 'delete') return { method: 'DELETE', path, body: { [key]: ids, deleteFiles: false, [kindOf(kind).exclusion]: false } };
+  if (rule === 'delete') return { method: 'DELETE', path, body: { [key]: ids, deleteFiles: false, [kindOf(kind).exclusion]: false, ...(author ? { applyToBothFormats: true } : {}) } };
   throw new Error(`No bulk fix for ${rule}`);
 }
 
