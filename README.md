@@ -416,6 +416,9 @@ Readarr-type services get the same page as Sonarr and Radarr, with the differenc
   problems, disk space, scheduled tasks with Run now, version details, the blocklist, Books
   listed twice for the whole library, and the Setup doctor for admins.
 - A search that covers more than 10 books asks first, since indexers limit daily searches.
+- **Overview** — Chaptarr's health checks, stuck imports, failed downloads and one line for the
+  downloads it can't tie to a book join the Action Inbox, and its grabs and imports join the
+  activity feed, as Sonarr's and Radarr's do.
 
 Pictures come from the app's metadata sources (remoteUrl), so they also load in the iOS app.
 
@@ -1056,7 +1059,8 @@ any change for guests). The server still enforces every rule.
 
 **Platform**
 - **PWA** — installable, with **Web Push** notifications (including iOS 16.4+ via Add to
-  Home Screen) for completed downloads, failures, and requests needing approval.
+  Home Screen) for completed downloads (Sonarr, Radarr and Chaptarr; an audiobook's many files
+  count once), failures, and requests needing approval.
 - **Cloudflare Access** service-token injection on every upstream request (secrets stay
   server-side).
 - **Optional auth** — built-in basic auth, or sign-in with your **Plex** account.

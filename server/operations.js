@@ -1,4 +1,5 @@
 import { serviceGet as defaultServiceGet } from './proxy.js';
+import { needsAttention, bookQueueReasons } from '../public/lib/bookImport.js';
 
 const pad = (n) => String(n ?? 0).padStart(2, '0');
 const ts = (value, fallback) => Number.isFinite(new Date(value).getTime()) ? new Date(value).getTime() : fallback;
@@ -88,7 +89,65 @@ async function collectArr(svc, serviceGet, now) {
   return { inbox, activity };
 }
 
-const REQUEST_STATUS = { 1: 'Pending', 2: 'Approved', 3: 'Declined' };
+// Chaptarr and other Readarr-type apps (API v1): health checks, queue
+// problems, one entry for the downloads the app didn't grab (its queue keeps
+// them apart), and grabs, imports and failures from history. An audiobook
+// imports as many files, so imports count once per download.
+async function collectBooks(svc, serviceGet, now) {
+  const [queue, status, history, health] = await Promise.all([
+    serviceGet(svc, 'api/v1/queue?page=1&pageSize=50').catch(() => ({ records: [] })),
+    serviceGet(svc, 'api/v1/queue/status').catch(() => null),
+    serviceGet(svc, 'api/v1/history?page=1&pageSize=50&sortKey=date&sortDirection=descending&includeAuthor=true&includeBook=true').catch(() => ({ records: [] })),
+    serviceGet(svc, 'api/v1/health').catch(() => []),
+  ]);
+  const app = svc.label || svc.key;
+  const inbox = [];
+  const activity = [];
+  for (const h of (health || [])) inbox.push(item({
+    id: `${svc.key}:health:${h.id || h.source || h.message}`,
+    kind: 'health', severity: h.type === 'error' ? 'critical' : 'warning', title: h.source || 'Service health warning', detail: h.message, tab: 'system',
+  }, svc, now));
+  for (const q of ((queue && queue.records) || [])) {
+    const title = q.title || 'Queued download';
+    const moving = /^(downloading|queued|paused|delay)$/i.test(String(q.status || ''));
+    activity.push(item({ id: `${svc.key}:queue:${q.id}`, kind: 'queue', title, detail: `${q.status || 'queued'}${q.timeleft && moving ? ` · ${q.timeleft} remaining` : ''}`, tab: 'queue' }, svc, now));
+    if (!needsAttention(q)) continue;
+    const failed = String(q.status || '').toLowerCase() === 'failed' || /fail|error/i.test(String(q.trackedDownloadState || ''));
+    inbox.push(item({ id: `${svc.key}:queue-problem:${q.id}`, kind: 'queue', severity: failed ? 'critical' : 'warning', title, detail: bookQueueReasons(q)[0] || q.status || 'Needs attention', tab: 'queue' }, svc, now));
+  }
+  const unknown = Number(status && status.unknownCount) || 0;
+  if (unknown && (status.unknownErrors || status.unknownWarnings)) {
+    inbox.push(item({
+      id: `${svc.key}:queue-unknown`, kind: 'queue', severity: status.unknownErrors ? 'critical' : 'warning',
+      title: `${unknown} download${unknown === 1 ? '' : 's'} ${app} can’t tie to a book`,
+      detail: 'Not grabbed by the app, or in a folder it can’t reach: review them in the queue', tab: 'queue',
+    }, svc, now));
+  }
+  const imported = new Set();
+  for (const r of ((history && history.records) || [])) {
+    const type = String(r.eventType || '');
+    // Chaptarr lists a book once per format; say which one it was.
+    const format = r.book && /^(audiobook|ebook)$/.test(r.book.mediaType) ? ` (${r.book.mediaType})` : '';
+    const book = r.book && r.book.title ? `${r.book.title}${format}` : r.sourceTitle || 'Unknown';
+    const author = r.author && r.author.authorName;
+    const detail = (what) => `${what}${author ? ` · ${author}` : ''}`;
+    let event = null;
+    if (type === 'grabbed') event = { kind: 'grab', severity: 'info', detail: detail('Release grabbed') };
+    else if (type === 'downloadFailed') event = { kind: 'failure', severity: 'critical', detail: detail((r.data && r.data.message) || 'Download failed') };
+    else if (type === 'bookImportIncomplete') event = { kind: 'failure', severity: 'warning', detail: detail('Import incomplete') };
+    else if (type === 'bookFileImported' || type === 'downloadImported') {
+      const key = r.downloadId || `book:${r.bookId}`;
+      if (imported.has(key)) continue;
+      imported.add(key);
+      event = { kind: 'import', severity: 'info', detail: detail('Downloaded and imported') };
+    }
+    if (!event) continue;
+    const entry = item({ id: `${svc.key}:history:${r.id}`, ...event, title: book, at: ts(r.date, now), tab: 'history' }, svc, now);
+    activity.push(entry);
+    if (type === 'downloadFailed') inbox.push(entry);
+  }
+  return { inbox, activity };
+}
 const ISSUE_TYPE = { 1: 'Video', 2: 'Audio', 3: 'Subtitles', 4: 'Other' };
 // Overseerr media availability codes (media.status on a request/media object).
 const MEDIA_AVAILABILITY = { 1: 'Unknown', 2: 'Pending', 3: 'Processing', 4: 'Partially Available', 5: 'Available' };
@@ -188,6 +247,7 @@ export async function collectOperations(cfg, { serviceGet = defaultServiceGet, n
     try {
       let result = { inbox: [], activity: [], seerr: [] };
       if (svc.type === 'sonarr' || svc.type === 'radarr') result = await collectArr(svc, serviceGet, now);
+      else if (svc.type === 'readarr') result = await collectBooks(svc, serviceGet, now);
       else if (svc.type === 'overseerr') result = await collectOverseerr(svc, serviceGet, now);
       else if (svc.type === 'bazarr') result = await collectBazarr(svc, serviceGet, now);
       inbox.push(...result.inbox); activity.push(...result.activity); seerr.push(...(result.seerr || []));

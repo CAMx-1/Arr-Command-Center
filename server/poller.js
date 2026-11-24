@@ -1,7 +1,7 @@
 // Server-side background poller.
 //
 // Periodically polls configured services for notable events (Sonarr/Radarr
-// download imports & failures, Overseerr pending approvals) and sends a web-push
+// and Chaptarr download imports & failures, Overseerr pending approvals) and sends a web-push
 // notification for each NEW event, so users get mobile alerts even when the app
 // is closed.
 //
@@ -52,6 +52,30 @@ export async function collectEvents(cfg) {
             category: failed ? 'failed' : 'downloaded',
             title: failed ? 'Download failed' : 'Downloaded',
             body: `${svc.label}: ${title}`,
+            url: '/',
+            at: new Date(r.date).getTime() || Date.now(),
+          });
+        }
+      } else if (svc.type === 'readarr') {
+        // Chaptarr and other Readarr-type apps. An audiobook imports as many
+        // files, so a download is announced once, keyed by its download id.
+        const data = await serviceGet(s, 'api/v1/history?page=1&pageSize=50&sortKey=date&sortDirection=descending&includeAuthor=true&includeBook=true');
+        const announced = new Set();
+        for (const r of (data.records || [])) {
+          const failed = r.eventType === 'downloadFailed';
+          if (!failed && r.eventType !== 'bookFileImported' && r.eventType !== 'downloadImported') continue;
+          const id = failed ? String(r.id) : r.downloadId ? `dl:${r.downloadId}` : `book:${r.bookId}`;
+          if (announced.has(id)) continue;
+          announced.add(id);
+          const book = (r.book && r.book.title) || r.sourceTitle;
+          // Chaptarr lists a book once per format; say which one arrived.
+          const format = r.book && /^(audiobook|ebook)$/.test(r.book.mediaType) ? ` (${r.book.mediaType})` : '';
+          const title = [book && `${book}${format}`, r.author && r.author.authorName].filter(Boolean).join(' · ');
+          events.push({
+            id: `${key}:hist:${id}`,
+            category: failed ? 'failed' : 'downloaded',
+            title: failed ? 'Download failed' : 'Downloaded',
+            body: `${svc.label}: ${title || 'a book'}`,
             url: '/',
             at: new Date(r.date).getTime() || Date.now(),
           });
