@@ -7,7 +7,8 @@
 // and History with book covers; and System (health, tasks, blocklist,
 // unmapped files). Chaptarr keeps audiobook and ebook settings side by side;
 // lib/readarrLibrary.js handles both shapes.
-import { h, mount, tabs, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, openModal, closeModal, confirmModal, rootFolderLabel, swipeToAction } from '../lib/ui.js';
+import { h, mount, tabs, skeletonList, empty, toast, fmtBytes, fmtDate, fmtRelative, timeEl, pct, openModal, closeModal, confirmModal, rootFolderLabel, swipeToAction, overlayOpen, unregisterOverlay } from '../lib/ui.js';
+import { buildHash } from '../lib/urlState.js';
 import { posterHexCard, pagedLibrary } from '../lib/hive.js';
 import { viewToggle, effectiveMode } from '../lib/viewMode.js';
 import { cachedGet, cachedList, invalidate } from '../lib/cache.js';
@@ -29,6 +30,9 @@ import { blocklistSection } from './arrSystem.js';
 import { openBookImport, openUnmappedFiles, openIgnoredDownloads, watchCommand } from '../lib/bookImportUI.js';
 import { openBookRename, openBookRetag, openDuplicateBooks } from '../lib/bookToolsUI.js';
 import { bulkAuthors } from '../lib/authorBulkUI.js';
+import { openEditionPicker } from '../lib/bookEditionsUI.js';
+import { tabFolders } from '../lib/bookFoldersUI.js';
+import { tabLogs } from '../lib/bookLogsUI.js';
 import {
   bookQueueActions, bookQueueReasons, bookQueueMessages, queueProblemKind, isUnknownAuthor, needsAttention, queueCounts, QUEUE_FILTERS,
   inLibraryFolder, duplicateBooks, unmappedUnits, bookSource, conversionState,
@@ -38,6 +42,7 @@ import {
   authorImage, bookCover, initials, nameGradient, isFormatAware, authorFormats, compareAuthors, authorSortKey,
   authorStats, authorStatusLabel, hasBookFile, bookState, bookDate, bookYear, filterBooks, bookCounts, groupBySeries,
   folderFormats, folderDefaults, profilesFor, buildAuthorAddPayload, buildAuthorUpdate, authorDeleteQuery, deletePreviewSummary,
+  buildBookAddPayload, lookupLocalCopies, addableFormats, buildFormatSetup,
 } from '../lib/readarrLibrary.js';
 
 const authorsKey = (ctx) => `arr:${ctx.service.key}:author`;
@@ -69,9 +74,22 @@ function searchBooks(arr, body, count, what) {
 }
 const missingOf = (a) => { const st = authorStats(a); return Math.max(0, st.monitored - st.have); };
 
-function openAuthor(ctx, a) {
+function openAuthor(ctx, a, extra = {}) {
   returnTo = { key: ctx.service.key, authorId: a.id };
-  ctx.go(ctx.service.key, { ...ctx.params, author: a.id });
+  ctx.go(ctx.service.key, { ...ctx.params, author: a.id, ...extra });
+}
+
+// Open an author from inside a dialog. Closing a dialog pops its history
+// entry later, which can undo a navigation made right after it, so the dialog
+// is torn down without the pop and its entry becomes the author page (as
+// app.js navigateFromOverlay does).
+function openAuthorFromDialog(ctx, a, extra = {}) {
+  if (!overlayOpen('modal')) return openAuthor(ctx, a, extra);
+  unregisterOverlay('modal');
+  returnTo = null;
+  try { history.replaceState(null, '', buildHash(ctx.service.key, { ...ctx.params, author: a.id, ...extra })); }
+  catch { return openAuthor(ctx, a, extra); }
+  return ctx.reload();
 }
 
 export async function renderReadarr(root, ctx) {
@@ -87,10 +105,14 @@ export async function renderReadarr(root, ctx) {
   ctx.setActions(
     viewToggle(svc.key, (mode) => ctx.setParams({ mode }, { reload: true }), ctx.params.mode, { table: true }),
     h('button', { class: 'btn', title: 'Entries that waste searches or clutter the library, with bulk fixes', onclick: () => openTidyUp(arr, ctx, 'author') }, 'Tidy up'),
+    h('button', { class: 'btn', 'data-needs': 'write', title: 'Add one book, without the rest of its author’s books', onclick: () => openAddBook(arr, ctx) }, '+ Add Book'),
     h('button', { class: 'btn primary', 'data-needs': 'write', onclick: () => openAddAuthor(arr, ctx) }, '+ Add Author'),
   );
   const notice = h('div', {});
   const body = h('div', {});
+  // Folders and logs are the app's settings and diagnostics: admins only.
+  const admin = roleAllows('admin');
+  const goTab = (tab, extra = {}) => ctx.setParams({ tab, ...extra }, { reload: true });
   const bar = tabs(body, [
     { id: 'library', label: 'Library', render: (c) => tabAuthors(c, arr, ctx) },
     { id: 'wanted', label: 'Wanted', render: (c) => tabWanted(c, arr, ctx) },
@@ -98,6 +120,13 @@ export async function renderReadarr(root, ctx) {
     { id: 'calendar', label: 'Calendar', render: (c) => tabCalendar(c, arr, ctx) },
     { id: 'history', label: 'History', render: (c) => tabHistory(c, arr, ctx) },
     { id: 'system', label: 'System', render: (c) => tabSystem(c, arr, ctx) },
+    ...(admin ? [
+      { id: 'folders', label: 'Folders', render: (c) => tabFolders(c, arr, ctx) },
+      { id: 'logs', label: 'Logs', render: (c) => tabLogs(c, arr, ctx, {
+        folders: () => goTab('folders'),
+        unmapped: () => openUnmappedFiles(arr, ctx, { onChanged: () => invalidate(`arr:${svc.key}:unmapped`) }),
+      }) },
+    ] : []),
   ], `tabs-${svc.key}`, {
     activeId: ctx.params.tab,
     onChange: (id) => ctx.setParams({ tab: id === 'library' ? '' : id }),
@@ -135,23 +164,29 @@ async function tabAuthors(root, arr, ctx) {
       return mount(root, empty('📚', 'No authors yet', 'Add an author to get started', roleAllows('write') ? { label: '+ Add Author', onClick: () => openAddAuthor(arr, ctx) } : undefined));
     }
     const mode = ['hex', 'list', 'table'].includes(ctx.params.mode) ? ctx.params.mode : effectiveMode(key);
+    // Chaptarr: authors can be set up for audiobooks, ebooks or both; the
+    // library can show one format, with that format's numbers.
+    const present = ['audiobook', 'ebook'].filter((f) => authors.some((a) => authorFormats(a).includes(f)));
+    const libFormat = present.length > 1 && present.includes(ctx.params.fmt) ? ctx.params.fmt : '';
+    const shownAuthors = libFormat ? authors.filter((a) => authorFormats(a).includes(libFormat)) : authors;
     let sortKey = ctx.params.sort || 'name';
     let direction = ctx.params.dir === 'desc' ? 'desc' : 'asc';
-    let filtered = authors;
+    let filtered = shownAuthors;
     const listWrap = h('div', {});
     const count = h('span', { class: 'dim lib-count' });
+    const stats = (a) => authorStats(a, libFormat);
     const columns = [
       { key: 'name', label: 'Author', value: authorSortKey, render: (a) => a.authorName || '—' },
       { key: 'status', label: 'Status', value: (a) => a.status || '', render: (a) => authorStatusLabel(a) || '—' },
-      { key: 'monitoredBooks', label: 'Monitored books', value: (a) => authorStats(a).monitored },
-      { key: 'files', label: 'Files', value: (a) => authorStats(a).files },
-      { key: 'size', label: 'On disk', value: (a) => authorStats(a).size, render: (a) => fmtBytes(authorStats(a).size) },
+      { key: 'monitoredBooks', label: 'Monitored books', value: (a) => stats(a).monitored },
+      { key: 'files', label: 'Files', value: (a) => stats(a).files },
+      { key: 'size', label: 'On disk', value: (a) => stats(a).size, render: (a) => fmtBytes(stats(a).size) },
       { key: 'monitored', label: 'Monitored', value: (a) => (a.monitored ? 1 : 0), render: (a) => (a.monitored ? 'Yes' : 'No') },
       { key: 'added', label: 'Added', value: (a) => Date.parse(a.added) || 0, render: (a) => (a.added ? fmtDate(a.added) : '—') },
     ];
     const renderList = (items) => {
       filtered = items;
-      mount(count, items.length === authors.length ? plural(authors.length, 'author') : `${items.length} of ${plural(authors.length, 'author')}`);
+      mount(count, items.length === shownAuthors.length ? plural(shownAuthors.length, 'author') : `${items.length} of ${plural(shownAuthors.length, 'author')}`);
       if (!items.length) return mount(listWrap, empty('', 'No matches', 'No authors match this filter'));
       if (mode === 'table') {
         return mount(listWrap, compactTable(items, {
@@ -160,17 +195,23 @@ async function tabAuthors(root, arr, ctx) {
           onOpen: (a) => openAuthor(ctx, a),
         }));
       }
-      mount(listWrap, pagedLibrary(items, { isHex: mode === 'hex', makeCard: (a) => authorHex(a, arr, ctx), makeRow: (a) => authorRow(a, arr, ctx) }));
+      mount(listWrap, pagedLibrary(items, { isHex: mode === 'hex', makeCard: (a) => authorHex(a, arr, ctx, libFormat), makeRow: (a) => authorRow(a, arr, ctx, libFormat) }));
     };
+    const formatSeg = present.length > 1 ? h('div', { class: 'view-toggle lib-format', role: 'group', 'aria-label': 'Format' },
+      ...[['', 'All', authors.length], ...present.map((f) => [f, `${FORMATS[f].icon} ${FORMATS[f].label}`, authors.filter((a) => authorFormats(a).includes(f)).length])].map(([f, label, n]) => h('button', {
+        class: `view-seg ${libFormat === f ? 'active' : ''}`, type: 'button', title: `${plural(n, 'author')}`,
+        onclick: () => { if (libFormat !== f) ctx.setParams({ fmt: f }, { reload: true }); },
+      }, label))) : null;
     const head = h('div', { class: 'lib-head' }, count,
-      libraryFilter('author', authors, renderList, {
+      formatSeg,
+      libraryFilter('author', shownAuthors, renderList, {
         initialTerm: ctx.params.q || '', initialStatus: ctx.params.status || 'all',
         onStateChange: ({ term, status }) => ctx.setParams({ q: term, status: status === 'all' ? '' : status }),
       }),
       h('button', {
         class: 'btn sm', type: 'button', 'data-needs': 'write', title: 'Select authors to monitor, search, edit, tag or remove many at once',
         onclick: () => bulkAuthors(root, {
-          authors, filtered, arr, ctx, mode, columns, sortKey, direction,
+          authors: shownAuthors, filtered, arr, ctx, mode, columns, sortKey, direction,
           thumb: (a) => authorThumb(a),
           describeDelete: async (ids) => previewText(deletePreviewSummary(await arr.post('author/deletepreview', { authorIds: ids, applyToBothFormats: true }))),
           onExit: () => tabAuthors(root, arr, ctx),
@@ -211,8 +252,8 @@ function formatIcons(a) {
   return authorFormats(a).map((f) => FORMATS[f].icon).join(' ');
 }
 
-function authorHex(a, arr, ctx) {
-  const st = authorStats(a);
+function authorHex(a, arr, ctx, format = '') {
+  const st = authorStats(a, format);
   const sub = [formatIcons(a), [st.size ? fmtBytes(st.size) : null, st.monitored ? `${st.monitored} monitored` : null].filter(Boolean).join(' · ')].filter(Boolean).join('  ');
   return posterHexCard({
     posterUrl: authorImage(a),
@@ -229,8 +270,8 @@ function authorHex(a, arr, ctx) {
   });
 }
 
-function authorRow(a, arr, ctx) {
-  const st = authorStats(a);
+function authorRow(a, arr, ctx, format = '') {
+  const st = authorStats(a, format);
   const status = authorStatusLabel(a);
   return h('div', { class: 'row clickable author-row', onclick: () => openAuthor(ctx, a) },
     authorThumb(a),
@@ -268,12 +309,13 @@ async function renderAuthorPage(root, ctx, arr, authorId) {
   const pageEl = h('div', { class: 'author-page' }, h('div', { class: 'author-hero author-hero-loading' }), skeletonList(4));
   mount(root, pageEl);
 
-  let author; let books; let files;
+  let author; let books; let files; let roots;
   try {
-    [author, books, files] = await Promise.all([
+    [author, books, files, roots] = await Promise.all([
       arr.get(`author/${authorId}`),
       arr.get(`book?authorId=${authorId}`),
       arr.get(`bookfile?authorId=${authorId}`).catch(() => []),
+      cachedGet(`arr:${svc.key}:rootfolder`, () => arr.get('rootfolder'), 600000).catch(() => []),
     ]);
   } catch (err) {
     const gone = err.status === 404;
@@ -281,6 +323,8 @@ async function renderAuthorPage(root, ctx, arr, authorId) {
   }
   books = Array.isArray(books) ? books : [];
   files = Array.isArray(files) ? files : [];
+  roots = Array.isArray(roots) ? roots : [];
+  const reloadPage = () => { invalidate(authorsKey(ctx)); renderAuthorPage(root, ctx, arr, authorId); };
   const filesByBook = new Map();
   for (const f of files) {
     if (!filesByBook.has(f.bookId)) filesByBook.set(f.bookId, []);
@@ -291,9 +335,11 @@ async function renderAuthorPage(root, ctx, arr, authorId) {
   const formats = authorFormats(author);
   const switchable = [...new Set([...formats, ...books.map((b) => b.mediaType)])].filter((f) => FORMATS[f]);
   const showSwitch = switchable.length > 1;
+  const addable = addableFormats(author, roots);
   const state = {
     format: !switchable.length ? '' : switchable.includes(ctx.params.format) ? ctx.params.format
-      : switchable.includes(author.lastSelectedMediaType) ? author.lastSelectedMediaType : switchable[0],
+      : switchable.includes(ctx.params.fmt) ? ctx.params.fmt
+        : switchable.includes(author.lastSelectedMediaType) ? author.lastSelectedMediaType : switchable[0],
     filter: BOOK_FILTERS.some((f) => f.id === ctx.params.books) ? ctx.params.books : 'relevant',
     term: '',
     collapsed: null, // the series the user folded, once they fold or unfold one
@@ -354,6 +400,10 @@ async function renderAuthorPage(root, ctx, arr, authorId) {
             h('button', { class: 'btn', 'data-needs': 'write', title: 'Preview renaming the files to the app’s naming settings', onclick: () => openBookRename(arr, { author, mediaType: state.format, label: svc.label }) }, 'Rename…'),
             h('button', { class: 'btn', 'data-needs': 'write', title: 'Preview writing the author, title and narrator into the files’ tags', onclick: () => openBookRetag(arr, { author, books, files, mediaType: state.format, label: svc.label }) }, 'Write tags…'),
             h('button', { class: 'btn', 'data-needs': 'write', title: 'Edit / remove', onclick: () => openEditAuthor(arr, ctx, author, { onRemoved: () => ctx.go(svc.key, libraryParams) }) }, 'Edit'),
+            ...addable.map((f) => h('button', {
+              class: 'btn', 'data-needs': 'write', title: `Set ${author.authorName} up for ${FORMATS[f].label.toLowerCase()} too: ${svc.label} then lists their ${FORMATS[f].label.toLowerCase()}`,
+              onclick: () => openAddFormat(arr, ctx, author, f, { roots, onDone: reloadPage }),
+            }, `${FORMATS[f].icon} Add ${FORMATS[f].label.toLowerCase()}`)),
           ),
         ),
       ),
@@ -413,6 +463,7 @@ async function renderAuthorPage(root, ctx, arr, authorId) {
     const quality = fs.map((f) => f.quality && f.quality.quality && f.quality.quality.name).find(Boolean);
     const size = bookSize(b);
     const narrators = narratorNames(b);
+    const ebook = b.mediaType === 'ebook';
     return h('div', { class: 'row book-row' },
       bookCoverEl(b),
       h('div', { class: 'row-main' },
@@ -423,6 +474,7 @@ async function renderAuthorPage(root, ctx, arr, authorId) {
           quality ? h('span', { class: 'pill info' }, quality) : null,
           size ? h('span', {}, fmtBytes(size)) : null,
           fs.length > 1 ? h('span', {}, plural(fs.length, 'file')) : null,
+          ebook && Number(b.pageCount) > 0 ? h('span', { class: 'dim' }, `${b.pageCount} pages`) : null,
           narrators.length ? h('span', { class: 'dim' }, `Narrated by ${narrators.slice(0, 2).join(', ')}`) : null,
           b.ratings && Number(b.ratings.value) ? h('span', { title: `${(b.ratings.votes || 0).toLocaleString()} ratings` }, `★ ${Number(b.ratings.value).toFixed(1)}`) : null,
         ),
@@ -436,7 +488,8 @@ async function renderAuthorPage(root, ctx, arr, authorId) {
         actionGroup([
           { label: 'Search', title: 'Automatic search', primary: true, onClick: () => run(arr, { name: 'BookSearch', bookIds: [b.id] }, `Searching for ${b.title}`) },
           { label: 'Interactive', title: 'Interactive search: pick a release yourself', onClick: () => openReleaseSearch(ctx, svc.key, `bookId=${b.id}`, b.title, { version: 'v1', media: 'book', grab: { bookId: b.id } }) },
-          { label: 'Info', title: 'Details and files', onClick: () => openBookInfo(b, fs, author) },
+          { label: 'Edition', needs: 'read', title: ebook ? 'Choose the edition this book uses' : 'Choose the edition (narrator) this book uses', onClick: () => openEditionPicker(arr, ctx, b, { onChanged: reloadPage }) },
+          { label: 'Info', title: 'Details and files', onClick: () => openBookInfo(b, fs, author, { arr, ctx, onChanged: reloadPage }) },
         ], { sheetTitle: b.title }),
       ),
     );
@@ -511,11 +564,12 @@ function mediaInfoBits(mi) {
   return [mi.audioFormat || mi.audioCodec, mi.audioBitrate, mi.audioChannels ? `${mi.audioChannels} ch` : null, mi.audioSampleRate, mi.runTime || mi.duration].filter((x) => x !== null && x !== undefined && x !== '').map(String);
 }
 
-function openBookInfo(b, fs, author) {
+function openBookInfo(b, fs, author, { arr = null, ctx = null, onChanged = null } = {}) {
   const cover = bookCover(b);
   const st = bookState(b);
   const narrators = narratorNames(b);
   const total = fs.reduce((n, f) => n + (Number(f.size) || 0), 0);
+  const ebook = b.mediaType === 'ebook';
   const facts = [
     ['Author', author && author.authorName],
     ['Series', b.seriesTitle],
@@ -535,6 +589,15 @@ function openBookInfo(b, fs, author) {
       f.dateAdded ? h('span', { class: 'dim' }, `Added ${fmtRelative(f.dateAdded)}`) : null,
     ),
   ));
+  // Which edition (for an audiobook: which recording, so which narrator).
+  const editionBlock = arr && ctx ? h('div', { class: 'book-info-edition' },
+    h('div', { class: 'row-main' },
+      h('div', { class: 'section-title', style: { margin: 0 } }, 'Edition'),
+      h('div', { class: 'dim', style: { fontSize: '13px', marginTop: '3px' } },
+        ebook ? 'The edition sets the publisher and page count the app matches releases with.'
+          : narrators.length ? `Narrated by ${narrators.join(', ')}.${b.anyEditionOk === false ? ' Kept as chosen.' : b.anyEditionOk ? ' The app may switch to the edition that best matches the files.' : ''}`
+            : 'Pick the recording (narrator) the app looks for.')),
+    h('button', { class: 'btn sm', type: 'button', onclick: () => openEditionPicker(arr, ctx, b, { onChanged }) }, ebook ? 'Change edition…' : 'Change edition or narrator…')) : null;
   openModal({
     title: b.title || 'Book',
     wide: true,
@@ -547,6 +610,7 @@ function openBookInfo(b, fs, author) {
         ),
       ),
       b.overview ? h('p', { class: 'detail-overview' }, b.overview) : null,
+      editionBlock,
       h('div', { class: 'section-title' }, fs.length ? `${plural(fs.length, 'file')} · ${fmtBytes(total)}` : 'Files'),
       fs.length ? h('div', { class: 'list' }, ...fs.map(fileRow)) : h('div', { class: 'dim' }, 'Nothing on disk for this book.'),
     ),
@@ -603,7 +667,7 @@ function lookupRow(r, arr, ctx, library) {
     ),
     h('div', { class: 'row-actions' },
       existing
-        ? h('button', { class: 'btn sm', title: 'Already in the library: open it', onclick: () => { closeModal(); openAuthor(ctx, existing); } }, 'In library')
+        ? h('button', { class: 'btn sm', title: 'Already in the library: open it', onclick: () => openAuthorFromDialog(ctx, existing) }, 'In library')
         : h('button', { class: 'btn sm primary', 'data-needs': 'write', onclick: () => confirmAddAuthor(r, arr, ctx) }, '+ Add'),
     ),
   );
@@ -612,15 +676,9 @@ function lookupRow(r, arr, ctx, library) {
 async function confirmAddAuthor(r, arr, ctx) {
   const key = ctx.service.key;
   const label = ctx.service.label;
-  let folders = []; let profiles = []; let metas = null;
-  try { folders = await cachedGet(`arr:${key}:rootfolder`, () => arr.get('rootfolder'), 600000); } catch { /* none */ }
-  try { profiles = await cachedGet(`arr:${key}:qualityprofile`, () => arr.get('qualityprofile'), 600000); } catch { /* none */ }
-  // Metadata profiles are an admin read here; others get the folder's default.
-  try { metas = await cachedGet(`arr:${key}:metadataprofile`, () => arr.get('metadataprofile'), 600000); } catch { metas = null; }
-  folders = Array.isArray(folders) ? folders : [];
-  profiles = Array.isArray(profiles) ? profiles : [];
-  metas = Array.isArray(metas) ? metas : null;
-  if (!folders.length) { toast(`${label} has no root folder yet. Add one in its Media Management settings first.`, 'error', 6000); return; }
+  const { folders, profiles, metas } = await addSettings(arr, key);
+  if (!folders.length) { toast(`${label} has no root folder yet. Add one on the Folders tab first.`, 'error', 6000); return; }
+  if (folders.some(isFormatAware)) return confirmAddAuthorFormats(r, arr, ctx, { folders, profiles, metas });
 
   const saved = getAddDefaults(key) || {};
   const start = folders.find((f) => f.path === saved.rootFolderPath && f.accessible !== false) || folders.find((f) => f.accessible !== false) || folders[0];
@@ -697,6 +755,295 @@ async function confirmAddAuthor(r, arr, ctx) {
   });
 }
 
+// ---- Formats, single books -------------------------------------------------
+
+// Root folders and profiles for the add dialogs. Metadata profiles are an
+// admin read in ArrCC; others get each root folder's default.
+async function addSettings(arr, key) {
+  const get = (path, ttl = 600000) => cachedGet(`arr:${key}:${path}`, () => arr.get(path), ttl);
+  const [folders, profiles, metas] = await Promise.all([get('rootfolder').catch(() => []), get('qualityprofile').catch(() => []), get('metadataprofile').catch(() => null)]);
+  return { folders: Array.isArray(folders) ? folders : [], profiles: Array.isArray(profiles) ? profiles : [], metas: Array.isArray(metas) ? metas : null };
+}
+
+// Last formats and root folders used to add authors or books (this device).
+const formatPrefsKey = (key) => `book-add-formats-${key}`;
+function formatPrefs(key) {
+  try { const v = JSON.parse(localStorage.getItem(formatPrefsKey(key)) || 'null'); return v && typeof v === 'object' ? v : {}; } catch { return {}; }
+}
+function saveFormatPrefs(key, prefs) {
+  try { localStorage.setItem(formatPrefsKey(key), JSON.stringify({ ...formatPrefs(key), ...prefs })); } catch { /* not remembered */ }
+}
+
+// Root folder, quality and metadata profile for one format, as the add
+// dialogs show them. The folder's own defaults fill the profiles in.
+function formatSide(f, { folders, profiles, metas, savedRoot }) {
+  const list = folders.filter((x) => folderFormats(x).includes(f));
+  const isDefault = (x) => (f === 'ebook' ? x.isEffectiveDefaultEbook : x.isEffectiveDefaultAudiobook);
+  const start = list.find((x) => x.path === savedRoot && x.accessible !== false) || list.find((x) => isDefault(x) && x.accessible !== false)
+    || list.find((x) => x.accessible !== false) || list[0];
+  const folderSel = h('select', { class: 'input' }, ...list.map((x) => h('option', { value: x.path }, folderLabel(x))));
+  if (start) folderSel.value = start.path;
+  const folder = () => list.find((x) => x.path === folderSel.value) || start;
+  const qList = profilesFor(profiles, f);
+  const mList = metas ? profilesFor(metas, f) : [];
+  const qSel = qList.length ? selectOf(qList.map((p) => [p.id, p.name]), null) : null;
+  const mSel = mList.length ? selectOf(mList.map((p) => [p.id, p.name]), null) : null;
+  const fill = () => {
+    const d = folderDefaults(folder(), f);
+    if (qSel) qSel.value = String(firstKnown(qList, [d.qualityProfileId]));
+    if (mSel) mSel.value = String(firstKnown(mList, [d.metadataProfileId]));
+  };
+  folderSel.addEventListener('change', fill);
+  fill();
+  return {
+    f, list, folderSel, folder, qSel, mSel,
+    quality: () => (qSel ? qSel.value : folderDefaults(folder(), f).qualityProfileId),
+    metadata: () => (mSel ? mSel.value : (folderDefaults(folder(), f).metadataProfileId ?? (mList[0] && mList[0].id) ?? 1)),
+    fields: h('div', { class: 'grid', style: { gap: '12px' } },
+      field('Root folder', folderSel),
+      qSel ? field('Quality profile', qSel) : null,
+      mSel ? field('Metadata profile', mSel) : null),
+  };
+}
+
+// Chaptarr with a root folder per format: add the author for audiobooks,
+// ebooks or both, each with its own folder and profiles.
+function confirmAddAuthorFormats(r, arr, ctx, { folders, profiles, metas }) {
+  const key = ctx.service.key;
+  const label = ctx.service.label;
+  const prefs = formatPrefs(key);
+  const saved = getAddDefaults(key) || {};
+  const offered = ['audiobook', 'ebook'].filter((f) => folders.some((x) => folderFormats(x).includes(f)));
+  const wanted = Array.isArray(prefs.formats) && prefs.formats.some((f) => offered.includes(f)) ? prefs.formats : [offered[0]];
+  const sides = offered.map((f) => {
+    const side = formatSide(f, { folders, profiles, metas, savedRoot: (prefs.roots || {})[f] });
+    const on = switchOf(wanted.includes(f), `${FORMATS[f].icon} ${FORMATS[f].label}`);
+    const body = h('div', { class: 'add-format-body' }, side.fields);
+    const sync = () => { body.hidden = !on.input.checked; };
+    on.input.addEventListener('change', sync);
+    sync();
+    return { ...side, on, el: h('div', { class: 'edit-format add-format' }, h('div', { class: 'edit-format-title' }, on.el), body) };
+  });
+  const first = sides.find((s) => s.on.input.checked) || sides[0];
+  const d = folderDefaults(first.folder(), first.f);
+  const monitorSel = selectOf(MONITOR_OPTIONS, d.monitor || (saved.monitored === false ? 'none' : 'all'));
+  const newSel = selectOf(NEW_ITEM_OPTIONS, d.monitorNewItems || 'all');
+  const search = switchOf(saved.searchOnAdd !== false, 'Search for missing books');
+
+  const doAdd = async (btn) => {
+    const picked = sides.filter((s) => s.on.input.checked);
+    if (!picked.length) { toast('Pick audiobooks, ebooks or both', 'error'); return; }
+    const choice = {
+      monitor: monitorSel.value, monitorNewItems: newSel.value, searchOnAdd: search.input.checked, tags: [],
+      formats: Object.fromEntries(picked.map((s) => [s.f, { rootFolder: s.folder(), qualityProfileId: s.quality(), metadataProfileId: s.metadata() }])),
+    };
+    btn.disabled = true;
+    try {
+      await arr.post('author', buildAuthorAddPayload(r, choice));
+      saveFormatPrefs(key, { formats: picked.map((s) => s.f), roots: Object.fromEntries(sides.map((s) => [s.f, s.folder() && s.folder().path])) });
+      setAddDefaults(key, { qualityProfileId: picked[0].quality(), rootFolderPath: picked[0].folder().path, monitored: choice.monitor !== 'none', searchOnAdd: choice.searchOnAdd });
+      invalidate(authorsKey(ctx));
+      toast(`Added ${r.authorName}. ${label} is fetching their ${picked.map((s) => FORMATS[s.f].label.toLowerCase()).join(' and ')}.`, 'success', 3500);
+      closeModal();
+      ctx.reload();
+    } catch (e) {
+      toast(e.message, 'error', 6000);
+      btn.disabled = false;
+    }
+  };
+  openModal({
+    title: `Add “${r.authorName}”`,
+    body: h('div', { class: 'grid', style: { gap: '14px' } },
+      ...sides.map((s) => s.el),
+      field('Monitor', monitorSel),
+      field('Monitor new books', newSel),
+      search.el),
+    footer: h('div', { style: { display: 'flex', gap: '10px' } },
+      h('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
+      h('button', { class: 'btn primary', onclick: (e) => doAdd(e.currentTarget) }, 'Add Author')),
+  });
+}
+
+// Add one book (book/lookup): in Chaptarr it comes in with its author when
+// the author isn't in the library yet, and only this book is monitored.
+function openAddBook(arr, ctx) {
+  let library = [];
+  cachedList(authorsKey(ctx), () => arr.get('author'), 300000).then((list) => { library = list; }).catch(() => {});
+  openLookupModal({
+    title: 'Add Book',
+    placeholder: 'Search for a book title, ISBN or ASIN…',
+    lookup: (term) => arr.get(`book/lookup?term=${encodeURIComponent(term)}`),
+    renderRow: (r) => bookLookupRow(r, arr, ctx, library),
+    limit: 20,
+  });
+}
+
+const normName = (n) => String(n || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+function libraryAuthorFor(r, library) {
+  const a = r.author || {};
+  return library.find((x) => (a.foreignAuthorId && x.foreignAuthorId === a.foreignAuthorId) || (r.authorId && x.id === r.authorId))
+    || library.find((x) => normName(x.authorName) && normName(x.authorName) === normName(a.authorName || r.authorTitle));
+}
+
+function bookLookupRow(r, arr, ctx, library) {
+  const copies = lookupLocalCopies(r);
+  const author = libraryAuthorFor(r, library);
+  const mediaType = FORMATS[r.mediaType] ? r.mediaType : '';
+  const local = mediaType ? copies[mediaType] : [...copies.audiobook, ...copies.ebook];
+  const year = bookYear(r);
+  const authorName = (r.author && r.author.authorName) || r.authorTitle || '';
+  const sub = [authorName, r.seriesTitle, year].filter(Boolean).join(' · ');
+  const open = (format) => { if (author) openAuthorFromDialog(ctx, { id: author.id }, format ? { format } : {}); else closeModal(); };
+  let action;
+  if (local.length) {
+    const copy = local.find((x) => x.monitored) || local[0];
+    action = copy.monitored || copy.hasFiles
+      ? h('button', { class: 'btn sm', type: 'button', title: author ? 'Already in the library: open the author' : 'Already in the library', onclick: () => open(mediaType) }, 'In library')
+      : h('button', { class: 'btn sm primary', type: 'button', 'data-needs': 'write', title: 'In the library but not monitored: monitor it and search', onclick: async (e) => {
+        const btn = e.currentTarget; btn.disabled = true;
+        try {
+          await arr.put('book/monitor', { bookIds: [copy.id], monitored: true });
+          await arr.post('command', { name: 'BookSearch', bookIds: [copy.id] });
+          invalidate(authorsKey(ctx));
+          toast(`Monitoring ${r.title} and searching for it`, 'success');
+          btn.textContent = '✓ Monitored';
+        } catch (err) { toast(err.message, 'error'); btn.disabled = false; }
+      } }, 'Monitor');
+  } else {
+    action = h('button', { class: 'btn sm primary', type: 'button', 'data-needs': 'write', onclick: () => confirmAddBook(r, arr, ctx, author) }, '+ Add');
+  }
+  return h('div', { class: 'row book-row' },
+    bookCoverEl(r),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title' }, r.title || 'Untitled'),
+      sub ? h('div', { class: 'row-sub' }, sub) : null,
+      h('div', { class: 'meta-line', style: { marginTop: '4px' } },
+        mediaType ? h('span', { class: 'pill muted' }, `${FORMATS[mediaType].icon} ${FORMATS[mediaType].one}`) : null,
+        author ? h('span', { class: 'dim' }, 'Author in the library') : authorName ? h('span', { class: 'dim' }, 'New author') : null,
+        ...['audiobook', 'ebook'].filter((f) => copies[f].length && f !== mediaType).map((f) => h('span', { class: 'pill ok' }, `${FORMATS[f].icon} in library`)),
+        bookSource(r) ? h('span', { class: 'dim', title: 'Metadata source' }, bookSource(r)) : null)),
+    h('div', { class: 'row-actions' }, action));
+}
+
+async function confirmAddBook(r, arr, ctx, author) {
+  const key = ctx.service.key;
+  const label = ctx.service.label;
+  const { folders, profiles, metas } = await addSettings(arr, key);
+  if (!folders.length) { toast(`${label} has no root folder yet. Add one on the Folders tab first.`, 'error', 6000); return; }
+  const formatAware = folders.some(isFormatAware);
+  const prefs = formatPrefs(key);
+  const saved = getAddDefaults(key) || {};
+  const offered = formatAware ? ['audiobook', 'ebook'].filter((f) => folders.some((x) => folderFormats(x).includes(f))) : [null];
+  let format = formatAware ? (offered.includes(r.mediaType) ? r.mediaType : offered[0]) : null;
+  const authorName = (r.author && r.author.authorName) || r.authorTitle || 'the author';
+  const sideSlot = h('div', {});
+  const noteSlot = h('div', {});
+  const newSel = selectOf(NEW_ITEM_OPTIONS, 'none');
+  const newWrap = field('Monitor new books by this author', newSel, 'Leave at None to add just this book.');
+  const search = switchOf(saved.searchOnAdd !== false, 'Search for this book now');
+  let side = null;
+  let legacy = null;
+  const hasSide = (f) => !!(author && (!f || authorFormats(author).includes(f)));
+  const render = () => {
+    if (formatAware) {
+      side = formatSide(format, { folders, profiles, metas, savedRoot: (prefs.roots || {})[format] });
+      mount(sideSlot, hasSide(format) ? null : side.fields);
+    } else {
+      const start = folders.find((f) => f.path === saved.rootFolderPath && f.accessible !== false) || folders.find((f) => f.accessible !== false) || folders[0];
+      const folderSel = h('select', { class: 'input' }, ...folders.map((f) => h('option', { value: f.path }, folderLabel(f))));
+      folderSel.value = start.path;
+      const q = profiles.length ? selectOf(profiles.map((p) => [p.id, p.name]), firstKnown(profiles, [saved.qualityProfileId, start.defaultQualityProfileId])) : null;
+      const m = metas && metas.length ? selectOf(metas.map((p) => [p.id, p.name]), firstKnown(metas, [start.defaultMetadataProfileId])) : null;
+      legacy = { folder: () => folders.find((f) => f.path === folderSel.value) || start, q, m };
+      mount(sideSlot, hasSide(null) ? null : h('div', { class: 'grid', style: { gap: '12px' } }, field('Root folder', folderSel), q ? field('Quality profile', q) : null, m ? field('Metadata profile', m) : null));
+    }
+    newWrap.hidden = hasSide(format);
+    const what = format ? FORMATS[format].label.toLowerCase() : 'books';
+    mount(noteSlot, h('p', { class: 'dim', style: { margin: 0, fontSize: '13px', lineHeight: '1.5' } },
+      hasSide(format) ? `Adds the book to ${author.authorName}’s ${what}, monitored.`
+        : author ? `${author.authorName} is in the library but not for ${what}: this sets them up for ${what} with the folder below, and monitors only this book.`
+          : `Also adds ${authorName}, without their other books: ${label} lists them, but only this one is monitored.`));
+  };
+  const formatSeg = formatAware && offered.length > 1 ? h('div', { class: 'view-toggle', role: 'group', 'aria-label': 'Format' }, ...offered.map((f) => h('button', {
+    class: `view-seg ${f === format ? 'active' : ''}`, type: 'button', dataset: { format: f },
+    onclick: (e) => { format = f; for (const b of e.currentTarget.parentElement.children) b.classList.toggle('active', b.dataset.format === f); render(); },
+  }, `${FORMATS[f].icon} ${FORMATS[f].one}`))) : null;
+  render();
+
+  const doAdd = async (btn) => {
+    const choice = formatAware
+      ? { format, rootFolder: side.folder(), qualityProfileId: side.quality(), metadataProfileId: side.metadata(), monitorNewItems: newSel.value, searchOnAdd: search.input.checked }
+      : { rootFolder: legacy.folder(), qualityProfileId: legacy.q ? legacy.q.value : saved.qualityProfileId, metadataProfileId: legacy.m ? legacy.m.value : (legacy.folder().defaultMetadataProfileId ?? 1), monitorNewItems: newSel.value, searchOnAdd: search.input.checked };
+    btn.disabled = true;
+    try {
+      const res = await arr.post(`book${format ? `?mediaType=${format}` : ''}`, buildBookAddPayload(r, choice));
+      if (format) saveFormatPrefs(key, { roots: { ...(prefs.roots || {}), [format]: choice.rootFolder && choice.rootFolder.path } });
+      invalidate(authorsKey(ctx));
+      if (res && res.pendingId) { closeModal(); toast(res.message || `${label} is still fetching this book; it shows up shortly.`, 'info', 6000); return; }
+      toast(`Added ${r.title}${choice.searchOnAdd ? ', searching for it' : ''}`, 'success', 3500);
+      const authorId = (res && res.authorId) || (author && author.id);
+      if (authorId) openAuthorFromDialog(ctx, { id: authorId }, format ? { format } : {});
+      else { closeModal(); ctx.reload(); }
+    } catch (e) {
+      toast(e.message, 'error', 7000);
+      btn.disabled = false;
+    }
+  };
+  openModal({
+    title: `Add “${r.title}”`,
+    body: h('div', { class: 'grid', style: { gap: '14px' } },
+      h('div', { class: 'row book-row add-book-head' }, bookCoverEl(r), h('div', { class: 'row-main' },
+        h('div', { class: 'row-title' }, r.title || 'Untitled'),
+        h('div', { class: 'row-sub' }, [authorName, r.seriesTitle, bookYear(r)].filter(Boolean).join(' · ')))),
+      formatSeg ? field('Format', formatSeg) : null,
+      noteSlot,
+      sideSlot,
+      newWrap,
+      search.el),
+    footer: h('div', { style: { display: 'flex', gap: '10px' } },
+      h('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
+      h('button', { class: 'btn primary', onclick: (e) => doAdd(e.currentTarget) }, 'Add Book')),
+  });
+}
+
+// Set an author up for another format (Chaptarr): a root folder and
+// profiles for it. Chaptarr then refreshes the author and lists their books
+// in that format; "monitor new books" decides which of those it monitors.
+async function openAddFormat(arr, ctx, author, format, { roots = null, onDone } = {}) {
+  const label = ctx.service.label;
+  const settings = await addSettings(arr, ctx.service.key);
+  const folders = roots && roots.length ? roots : settings.folders;
+  const side = formatSide(format, { ...settings, folders, savedRoot: (formatPrefs(ctx.service.key).roots || {})[format] });
+  if (!side.list.length) { toast(`${label} has no root folder for ${FORMATS[format].label.toLowerCase()}. Add one on the Folders tab.`, 'error', 6000); return; }
+  const what = FORMATS[format].label.toLowerCase();
+  const newSel = selectOf(NEW_ITEM_OPTIONS, 'none');
+  const save = async (btn) => {
+    btn.disabled = true;
+    try {
+      const full = await arr.get(`author/${author.id}`).catch(() => author);
+      await arr.put(`author/${author.id}`, buildFormatSetup(full, format, { rootFolder: side.folder(), qualityProfileId: side.quality(), metadataProfileId: side.metadata(), monitorNewItems: newSel.value }));
+      invalidate(authorsKey(ctx));
+      toast(`${author.authorName} is set up for ${what}. ${label} is fetching the list.`, 'success', 4000);
+      closeModal();
+      if (onDone) setTimeout(onDone, 1500);
+    } catch (e) {
+      toast(e.message, 'error', 7000);
+      btn.disabled = false;
+    }
+  };
+  openModal({
+    title: `${FORMATS[format].icon} Add ${what} for ${author.authorName}`,
+    body: h('div', { class: 'grid', style: { gap: '14px' } },
+      h('p', { class: 'dim', style: { margin: 0, fontSize: '13px', lineHeight: '1.5' } },
+        `${label} then lists ${author.authorName}’s ${what} next to the ${FORMATS[format === 'ebook' ? 'audiobook' : 'ebook'].label.toLowerCase()} you have.`),
+      side.fields,
+      field('Monitor new books', newSel, `Which of the ${what} ${label} finds it monitors: All monitors every one (now and later), New releases only the ones that come out later, None none, so you pick them on the ${FORMATS[format].label} list.`)),
+    footer: h('div', { style: { display: 'flex', gap: '10px' } },
+      h('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
+      h('button', { class: 'btn primary', onclick: (e) => save(e.currentTarget) }, `Add ${what}`)),
+  });
+}
+
 // ---- Edit / remove an author -----------------------------------------------
 
 async function openEditAuthor(arr, ctx, listed, { onRemoved } = {}) {
@@ -709,6 +1056,12 @@ async function openEditAuthor(arr, ctx, listed, { onRemoved } = {}) {
   const allTags = await loadTags(arr);
   const tagIds = [...(a.tags || [])];
   const formats = authorFormats(a);
+  let roots = [];
+  try { roots = await cachedGet(`arr:${key}:rootfolder`, () => arr.get('rootfolder'), 600000); } catch { /* none */ }
+  const missing = addableFormats(a, Array.isArray(roots) ? roots : []).map((f) => h('div', { class: 'edit-format edit-format-missing' },
+    h('div', { class: 'edit-format-title' }, `${FORMATS[f].icon} ${FORMATS[f].label}`),
+    h('div', { class: 'dim', style: { fontSize: '13px' } }, `Not set up for ${a.authorName}.`),
+    h('button', { class: 'btn sm', type: 'button', 'data-needs': 'write', onclick: () => openAddFormat(arr, ctx, a, f, { roots, onDone: () => ctx.reload() }) }, `Add ${FORMATS[f].label.toLowerCase()}…`)));
   const sides = (formats.length ? formats : [null]).map((f) => {
     const monitored = f ? a[`${f}Monitored`] !== false : !!a.monitored;
     const mon = switchOf(monitored, f ? `Monitor ${FORMATS[f].label.toLowerCase()}` : 'Monitored');
@@ -757,6 +1110,7 @@ async function openEditAuthor(arr, ctx, listed, { onRemoved } = {}) {
     title: `Edit “${a.authorName}”`,
     body: h('div', { class: 'grid', style: { gap: '14px' } },
       ...sides.map((s) => s.el),
+      ...missing,
       field('Tags', tagEditor(allTags, tagIds, arr)),
       field('Maintenance', h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
         cmdButton('Refresh & scan', { name: 'RefreshAuthor', authorId: a.id }, `Refreshing ${a.authorName}`),
@@ -826,7 +1180,12 @@ async function tabWanted(root, arr, ctx, mode = 'missing') {
   const endpoint = mode === 'cutoff' ? 'wanted/cutoff' : 'wanted/missing';
   const pageSize = 50;
   try {
-    const data = await arr.get(`${endpoint}?page=1&pageSize=${pageSize}&sortKey=releaseDate&sortDirection=descending&includeAuthor=true`);
+    // Chaptarr with both formats: Wanted can show one (mediaType).
+    const roots = await cachedGet(`arr:${ctx.service.key}:rootfolder`, () => arr.get('rootfolder'), 600000).catch(() => []);
+    const offered = ['audiobook', 'ebook'].filter((f) => (Array.isArray(roots) ? roots : []).some((r) => folderFormats(r).includes(f)));
+    const mt = offered.length > 1 && offered.includes(ctx.params.wfmt) ? ctx.params.wfmt : '';
+    const query = (page) => `${endpoint}?page=${page}&pageSize=${pageSize}&sortKey=releaseDate&sortDirection=descending&includeAuthor=true${mt ? `&mediaType=${mt}` : ''}`;
+    const data = await arr.get(query(1));
     let shown = records(data);
     let total = Number(data && data.totalRecords) || shown.length;
     const seg = (m, label) => h('button', { class: `view-seg ${mode === m ? 'active' : ''}`, onclick: () => { if (mode !== m) tabWanted(root, arr, ctx, m); } }, label);
@@ -880,9 +1239,14 @@ async function tabWanted(root, arr, ctx, mode = 'missing') {
     }
     const head = h('div', { class: 'lib-head', style: { justifyContent: 'space-between' } },
       h('div', { class: 'view-toggle wanted-toggle', role: 'group', 'aria-label': 'Wanted list' }, seg('missing', 'Missing'), seg('cutoff', 'Cutoff Unmet')),
+      offered.length > 1 ? h('div', { class: 'view-toggle', role: 'group', 'aria-label': 'Format' }, ...[['', 'All'], ...offered.map((f) => [f, `${FORMATS[f].icon} ${FORMATS[f].label}`])].map(([f, label]) => h('button', {
+        class: `view-seg ${mt === f ? 'active' : ''}`, type: 'button',
+        onclick: () => { if (mt !== f) ctx.setParams({ wfmt: f }, { reload: true }); },
+      }, label))) : null,
       totalEl,
       selectBtn,
-      searchAll,
+      // Search all covers every format, so it only shows when Wanted does too.
+      mt ? null : searchAll,
     );
     paintTotal();
     if (!shown.length) return mount(root, head, empty('✅', mode === 'cutoff' ? 'Nothing below cutoff' : 'Nothing missing', 'Every monitored book is on disk.'));
@@ -892,7 +1256,7 @@ async function tabWanted(root, arr, ctx, mode = 'missing') {
     more.onclick = async () => {
       more.disabled = true;
       try {
-        const next = records(await arr.get(`${endpoint}?page=${page + 1}&pageSize=${pageSize}&sortKey=releaseDate&sortDirection=descending&includeAuthor=true`));
+        const next = records(await arr.get(query(page + 1)));
         page++;
         shown = shown.concat(next.filter((r) => !shown.some((s) => s.id === r.id)));
         paintRows();

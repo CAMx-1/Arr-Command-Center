@@ -375,10 +375,12 @@ Readarr-type services get the same page as Sonarr and Radarr, with the differenc
 
 - **Library** — authors with their pictures as hexagons, a list or a sortable table, filtered by
   name and status (monitored, with files, continuing, ended). Each shows its files, size on disk
-  and how many books are monitored. **☑ Select** works like Sonarr's and Radarr's: pick authors
-  (or every one the filter shows) and monitor, unmonitor, search, refresh, tag or remove them at
-  once, or edit their monitoring, quality and metadata profile and root folder (Chaptarr: per
-  format, side by side). A search of many authors only asks about those with missing books.
+  and how many books are monitored. On Chaptarr, All / Audiobooks / Ebooks shows only the
+  authors with that format, with that format's counts. **☑ Select** works like Sonarr's and
+  Radarr's: pick authors (or every one the filter shows) and monitor, unmonitor, search,
+  refresh, tag or remove them at once, or edit their monitoring, quality and metadata profile
+  and root folder (Chaptarr: per format, side by side). A search of many authors only asks
+  about those with missing books.
 - **Author page** — the author's picture, biography, genres and links, and every book grouped by
   series in reading order, with its cover. Each book shows whether it is on disk, missing or not
   monitored, its format and size, and its narrator. Monitor or unmonitor a book or a whole
@@ -386,6 +388,21 @@ Readarr-type services get the same page as Sonarr and Radarr, with the differenc
   book's details and files. The list starts with the books that are monitored or on disk; long
   lists start with each series folded. Chaptarr authors with both audiobooks and ebooks get a
   switch between the two, as in Chaptarr.
+- **Editions** — a book's **Edition** action lists every edition of it, grouped by narrator for
+  audiobooks, with length, publisher, year, language, ASIN or ISBN and files, and a filter for
+  long lists. For an audiobook the edition is the recording: its narrator and length are what
+  the app matches releases and writes tags with. **Use** switches after a confirmation, and
+  **Automatically switch edition** hands the choice back to the app. Book details show the
+  edition in use.
+- **Add Book** — search for one book and add it without the rest of the author's books. A new
+  author comes along with only this book monitored. A copy already in the library that isn't
+  monitored offers Monitor instead.
+- **Audiobooks and ebooks (Chaptarr)** — Add Author can add an author's audiobooks, ebooks or
+  both, each with its own root folder and profiles. **Add ebooks** / **Add audiobooks** on the
+  author page (also in Edit, and **Add format…** in ☑ Select for several authors) sets up the
+  format an author is missing. Chaptarr then lists that format's books, monitored as "monitor
+  new books" says (None unless you choose otherwise). Wanted switches between audiobooks and
+  ebooks too.
 - **Add, edit and remove authors** — search for an author and add them with a root folder,
   quality and metadata profile (Chaptarr: per format), which books to monitor and whether to
   search right away; the root folder's own defaults are filled in. Edit monitoring, quality
@@ -418,6 +435,16 @@ Readarr-type services get the same page as Sonarr and Radarr, with the differenc
   folders, search missing, check health, back up), health checks with Show downloads for folder
   problems, disk space, scheduled tasks with Run now, version details, the blocklist, Books
   listed twice for the whole library, and the Setup doctor for admins.
+- **Folders** (admins) — root folders with their format, defaults, free space and authors; add
+  one with a folder browser, edit or remove it. **Download folders** runs every folder a
+  download client saves to through Chaptarr's own mapping test and says whether Chaptarr can
+  reach it. When it can't, it suggests a remote path mapping, tried with the same test first.
+  Remote path mappings can be added, edited, tested and removed. Legacy Readarr has no mapping
+  test, so it gets the lists without the check.
+- **Logs** (admins) — the app's log files (the newest 3 unless you pick more), with warnings
+  and errors grouped by message. Paths, numbers and titles are taken out, so the same problem
+  with different books is one line with a count, when it was first and last seen, and the
+  latest examples. Common problems say what they mean and link to Folders or Unmapped files.
 - A search that covers more than 10 books asks first, since indexers limit daily searches.
 - **Overview** — Chaptarr's health checks, stuck imports, failed downloads and one line for the
   downloads it can't tie to a book join the Action Inbox, and its grabs and imports join the
@@ -1011,7 +1038,8 @@ any change for guests). The server still enforces every rule.
   URL hash so any state is bookmarkable and shareable.
 - **Add / edit / delete** titles, interactive + automatic search, and a season/episode
   browser with monitor toggles. Chaptarr and Readarr have an author page with every book by
-  series (see [Chaptarr and other Readarr-compatible apps](#chaptarr-and-other-readarr-compatible-apps)).
+  series, a choice of edition (for audiobooks, the narrator), Add Book for a single book, and
+  Folders and Logs tabs for admins (see [Chaptarr and other Readarr-compatible apps](#chaptarr-and-other-readarr-compatible-apps)).
 - **Wanted** tab — Missing + Cutoff Unmet, with per-item search.
 - **System** tab — health checks, disk space, quality profiles, tags (view/create/delete),
   blocklist (view/remove), and commands.
@@ -1135,9 +1163,10 @@ arr-command-center/
 │   ├── index.html, styles.css, app.js, sw.js, manifest.webmanifest
 │   ├── lib/                  # api client, UI toolkit, theme, density, command palette,
 │   │                         #   saved views, url/scroll state (no build step)
-│   └── views/                # home, sonarr, radarr, musicbooks (lidarr/readarr),
-│                             #   overseerr, sabnzbd, qbittorrent, tautulli, bazarr,
-│                             #   prowlarr, indexer, plex, settings, …
+│   └── views/                # home, sonarr, radarr, musicbooks (lidarr/bindery),
+│                             #   readarr (Chaptarr/Readarr), overseerr, sabnzbd,
+│                             #   qbittorrent, tautulli, bazarr, prowlarr, indexer,
+│                             #   plex, settings, …
 ├── docs/                     # README screenshots (see test/generate-screenshots.mjs)
 ├── config.example.json
 ├── .env.example

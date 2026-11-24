@@ -164,7 +164,8 @@ export function classifyAppRoute(method, path) {
 const ARR_TYPES = new Set(['sonarr', 'radarr', 'lidarr', 'readarr', 'bindery', 'prowlarr', 'listenarr', 'whisparr']);
 // Arr resources whose GET responses contain secrets (API keys, passwords).
 // backup/... is the backup zip itself, which holds the app's config and keys.
-const ARR_SECRET_READ = /^(config(\/|$)|downloadclient|indexer(?!stats|status)|notification|importlist|applications|indexerproxy|metadata|system\/backup|backup\/|update|log\/file)/;
+// Logs (the log list and the log files) name paths, hosts and users.
+const ARR_SECRET_READ = /^(config(\/|$)|downloadclient|indexer(?!stats|status)|notification|importlist|applications|indexerproxy|metadata|system\/backup|backup\/|update|log(\/|$))/;
 // Arr resources that are settings: any change is admin-only.
 const ARR_SETTINGS = /^(config|downloadclient|indexer|notification|importlist|applications|indexerproxy|metadata|remotepathmapping|delayprofile|releaseprofile|qualityprofile|qualitydefinition|customformat|rootfolder|autotagging|appprofile|system|update|health)(\/|$)/;
 const ADMIN_COMMANDS = /delete|backup|update|restart|shutdown|clear|reset|cleanup/i;

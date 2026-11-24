@@ -2363,7 +2363,18 @@ function makeReadarr(opts = {}) {
   const app = express();
   app.use(express.json());
   mountBackupMock(app, name, 'v1');
-  mountDoctorMock(app, 'v1', { clients: [] });
+  // Chaptarr's download client and its one remote path mapping: SABnzbd runs
+  // on another host and reports its folders as /mnt/user/…, which Chaptarr
+  // sees under /downloads. Only the ebook folder is mapped, so audiobook
+  // downloads can't be reached until a mapping is added (Folders tab).
+  const SAB_ROOTS = ['/mnt/user/downloads/complete/audiobooks/', '/mnt/user/downloads/complete/ebooks/'];
+  const dlClients = chaptarr ? [{
+    id: 1, name: 'SABnzbd', implementation: 'Sabnzbd', implementationName: 'SABnzbd', configContract: 'SabnzbdSettings', protocol: 'usenet', enable: true, priority: 1,
+    removeCompletedDownloads: true, removeFailedDownloads: true, tags: [],
+    fields: [dlField('host', 'sabnzbd'), dlField('port', 8080), dlField('useSsl', false), dlField('urlBase', ''), dlField('apiKey', '********'), dlField('audiobookCategory', 'audio'), dlField('ebookCategory', 'books')],
+  }] : [];
+  const mappings = chaptarr ? [{ id: 1, host: 'sabnzbd', remotePath: SAB_ROOTS[1], localPath: '/downloads/complete/ebooks/', downloadClientId: 0 }] : [];
+  mountDoctorMock(app, 'v1', { clients: dlClients, mappings });
   const now = Date.now();
   const day = 86400000;
   const iso = (t) => new Date(t).toISOString();
@@ -2375,7 +2386,9 @@ function makeReadarr(opts = {}) {
         ebook: { qualityProfileId: 1, metadataProfileId: 2, monitored: true, monitorExistingMode: 'all', monitorNewItems: 'all', tags: [] }, ebookQualityProfileId: 1, ebookMetadataProfileId: 2, ebookMonitorNewItems: 'all' },
     ]
     : [{ id: 1, path: '/books', freeSpace: 120000000000, accessible: true, defaultQualityProfileId: 1, defaultMetadataProfileId: 1, defaultMonitorOption: 'all', defaultNewItemMonitorOption: 'all' }];
-  const rootFor = (format) => (chaptarr ? roots.find((r) => r.folderType === (format === 'ebook' ? 2 : 1)).path : '/books');
+  const rootFor = (format) => (chaptarr
+    ? (roots.find((r) => r.folderType === (format === 'ebook' ? 2 : 1)) || roots.find((r) => r.folderType === 0) || { path: format === 'ebook' ? '/books/ebooks' : '/books/audiobooks' }).path
+    : (roots[0] || { path: '/books' }).path);
   const profiles = chaptarr ? [{ id: 1, name: 'E-Book', profileType: 'ebook' }, { id: 2, name: 'Audiobook', profileType: 'audiobook' }] : [{ id: 1, name: 'eBook' }, { id: 2, name: 'Audiobook' }];
   const metadataProfiles = chaptarr ? [{ id: 1, name: 'Audiobook Default', profileType: 'audiobook' }, { id: 2, name: 'Ebook Default', profileType: 'ebook' }] : [{ id: 1, name: 'Standard' }];
   let tags = [{ id: 1, label: 'favourites' }];
@@ -2522,8 +2535,8 @@ function makeReadarr(opts = {}) {
       { ...done, id: 603, title: 'Brandon Sanderson - Warbreaker [Unabridged] MP3', authorId: 1, bookId: warbreakerCopy && warbreakerCopy.id, trackedDownloadState: 'importBlocked', canRetryImport: true, size: 553648128, indexer: 'NZBgeek', downloadId: 'SABnzbd_nzo_warbreaker', outputPath: '/downloads/complete/audiobooks/Brandon Sanderson - Warbreaker', quality: { quality: { id: 10, name: 'MP3' } },
         statusMessages: [msg('Brandon Sanderson - Warbreaker', 'Import completion could not be proven for the requested files and books'), msg('Warbreaker - Part 01.mp3', `Rejected: Completed download was grabbed for 'Warbreaker' (BookId ${warbreakerCopy && warbreakerCopy.id}), but import matched 'Warbreaker' (BookId ${warbreaker && warbreaker.id}, work hc:4009).`)],
         errorMessage: 'Import completion could not be proven for the requested files and books' },
-      { ...done, id: 604, title: 'Andy.Weir-The.Martian.Unabridged.2014', trackedDownloadState: 'importPending', size: 412090368, downloadId: 'SABnzbd_nzo_martian', outputPath: '/Volumes/Media/audiobooks/Andy.Weir-The.Martian.Unabridged.2014', quality: { quality: { id: 0, name: 'Unknown' } },
-        statusMessages: [msg('Andy.Weir-The.Martian.Unabridged.2014', 'Source file has not been imported'), msg('Andy.Weir-The.Martian.Unabridged.2014', 'Download path is not accessible to Chaptarr: /Volumes/Media/audiobooks/Andy.Weir-The.Martian.Unabridged.2014. Check the download client path, remote path mapping, and container volume mappings.')],
+      { ...done, id: 604, title: 'Andy.Weir-The.Martian.Unabridged.2014', trackedDownloadState: 'importPending', size: 412090368, downloadId: 'SABnzbd_nzo_martian', outputPath: '/mnt/user/downloads/complete/audiobooks/Andy.Weir-The.Martian.Unabridged.2014', quality: { quality: { id: 0, name: 'Unknown' } },
+        statusMessages: [msg('Andy.Weir-The.Martian.Unabridged.2014', 'Source file has not been imported'), msg('Andy.Weir-The.Martian.Unabridged.2014', 'Download path is not accessible to Chaptarr: /mnt/user/downloads/complete/audiobooks/Andy.Weir-The.Martian.Unabridged.2014. Check the download client path, remote path mapping, and container volume mappings.')],
         errorMessage: 'Source file has not been imported' },
       { ...done, id: 605, title: 'Agatha.Christie-And.Then.There.Were.None.Hugh.Fraser', status: 'failed', trackedDownloadState: 'downloading', size: 301989888, downloadId: 'SABnzbd_nzo_christie', outputPath: '/downloads/incomplete/Agatha.Christie-And.Then.There.Were.None.Hugh.Fraser', quality: { quality: { id: 0, name: 'Unknown' } },
         statusMessages: [msg('Agatha.Christie-And.Then.There.Were.None.Hugh.Fraser', 'Download wasn\u2019t grabbed by Chaptarr, skipping')], errorMessage: 'Download wasn\u2019t grabbed by Chaptarr, skipping' },
@@ -2581,7 +2594,6 @@ function makeReadarr(opts = {}) {
   app.get('/api/v1/system/status', (req, res) => res.json(chaptarr
     ? { version: '0.9.1000.0', appName: 'Chaptarr', instanceName: opts.instanceName || 'Chaptarr (mock)', branch: 'develop' }
     : { version: '0.4.7.2718', appName: 'Readarr', instanceName: opts.instanceName || 'Readarr (mock)' }));
-  app.get('/api/v1/rootfolder', (req, res) => res.json(roots));
   app.get('/api/v1/diskspace', (req, res) => res.json([{ path: '/', label: 'root', freeSpace: 120000000000, totalSpace: 500000000000 }]));
   app.get('/api/v1/qualityprofile', (req, res) => res.json(profiles));
   app.get('/api/v1/metadataprofile', (req, res) => res.json(metadataProfiles));
@@ -2643,6 +2655,11 @@ function makeReadarr(opts = {}) {
       if (chaptarr) {
         // As in Chaptarr: a side only changes on authors set up for that format.
         for (const f of ['audiobook', 'ebook']) {
+          if (b[`${f}RootFolderPath`] && !a[`${f}RootFolderPath`] && rootMatches(b[`${f}RootFolderPath`], f)) {
+            // Chaptarr sets the format up and refreshes the author.
+            gainFormat(a, f, { rootFolderPath: b[`${f}RootFolderPath`], qualityProfileId: b[`${f}QualityProfileId`], metadataProfileId: b[`${f}MetadataProfileId`], monitorNewItems: b[`${f}MonitorNewItems`], monitored: b[`${f}Monitored`] });
+            continue;
+          }
           if (b[`${f}RootFolderPath`] && roots.some((r) => r.path === b[`${f}RootFolderPath`])) {
             a[`${f}RootFolderPath`] = b[`${f}RootFolderPath`];
             a[`${f}Folder`] = `${b[`${f}RootFolderPath`]}/${a.authorName}`;
@@ -2681,6 +2698,12 @@ function makeReadarr(opts = {}) {
     if (Array.isArray(b.tags)) a.tags = b.tags.map(Number);
     if (chaptarr) {
       for (const f of ['audiobook', 'ebook']) {
+        // A root folder for a format the author doesn't have sets it up.
+        if (!a[`${f}RootFolderPath`] && b[`${f}RootFolderPath`]) {
+          if (!rootMatches(b[`${f}RootFolderPath`], f)) return res.status(400).json([{ propertyName: `${f === 'ebook' ? 'Ebook' : 'Audiobook'}RootFolderPath`, errorMessage: `${f === 'ebook' ? 'Ebook' : 'Audiobook'} root folder '${b[`${f}RootFolderPath`]}' is not configured` }]);
+          gainFormat(a, f, { rootFolderPath: b[`${f}RootFolderPath`], qualityProfileId: b[`${f}QualityProfileId`], metadataProfileId: b[`${f}MetadataProfileId`], monitorNewItems: b[`${f}MonitorNewItems`], monitored: b[`${f}Monitored`] });
+          continue;
+        }
         if (!a[`${f}RootFolderPath`]) continue;
         if (typeof b[`${f}Monitored`] === 'boolean') a[`${f}Monitored`] = b[`${f}Monitored`];
         if (b[`${f}QualityProfileId`]) a[`${f}QualityProfileId`] = Number(b[`${f}QualityProfileId`]);
@@ -2803,14 +2826,16 @@ function makeReadarr(opts = {}) {
     res.json(paged(history().filter((r) => !wanted.length || wanted.includes(r.eventType)).map((r) => withRefs(r, req)), req));
   });
   app.get('/api/v1/wanted/missing', (req, res) => {
-    const list = books.filter((b) => b.monitored && !bookHasFile(b) && Date.parse(b.releaseDate) <= Date.now())
+    const mt = req.query.mediaType;
+    const list = books.filter((b) => b.monitored && !bookHasFile(b) && Date.parse(b.releaseDate) <= Date.now() && (!chaptarr || !mt || b.mediaType === mt))
       .sort((x, y) => Date.parse(y.releaseDate) - Date.parse(x.releaseDate));
     res.json(paged(list.map((b) => withRefs(bookResource(b), req)), req));
   });
   app.get('/api/v1/wanted/cutoff', (req, res) => res.json({ page: 1, pageSize: 50, totalRecords: 0, records: [] }));
 
   // ---- Manual import (Chaptarr's Interactive Import contract) ----
-  const editionOf = (b) => (b ? { id: 50000 + b.id, bookId: b.id, title: b.title, monitored: true, foreignEditionId: `${b.foreignBookId}:ed` } : null);
+  // The edition in use (the one the import goes to unless told otherwise).
+  const editionOf = (b) => (b ? editionsFor(b).find((e) => e.monitored) || null : null);
   const candidate = (id, path, size, book, extra = {}) => {
     const author = book ? authorRef(book.authorId) : undefined;
     const ext = String(path).split('.').pop().toLowerCase();
@@ -2859,7 +2884,7 @@ function makeReadarr(opts = {}) {
     });
     app.get('/api/v1/edition', (req, res) => {
       const ids = new Set([].concat(req.query.bookId || []).map(Number));
-      res.json(books.filter((b) => ids.has(b.id)).map(editionOf));
+      res.json(books.filter((b) => ids.has(b.id)).flatMap(editionsFor));
     });
     app.get('/api/v1/rename', (req, res) => {
       const authorId = Number(req.query.authorId);
@@ -2903,6 +2928,396 @@ function makeReadarr(opts = {}) {
     app.get('/api/v1/config/metadataprovider', (req, res) => res.json({ id: 1, writeAudioTags: 'no', scrubAudioTags: false, writeBookTags: 'newFiles', updateCovers: true, embedMetadata: false }));
     app.get('/api/v1/config/mediamanagement', (req, res) => res.json({ id: 1, recycleBin: '/books/.recycle', recycleBinCleanupDays: 7, bookMatchingStrictness: 'balanced', usePathAsTagsFallback: true }));
   }
+
+  // ---- Editions, one book, folders, mappings, logs --------------------------
+  // Editions follow Chaptarr's GET edition?bookId= (every format of the work,
+  // the one in use monitored) and PUT book/{id} with one monitored edition.
+  const NARRATOR_POOL = ['Michael Kramer', 'Kate Reading', 'Ray Porter', 'R. C. Bray', 'Hugh Fraser', 'Nigel Planer', 'Stephen Briggs', 'Full Cast'];
+  const editionChoice = new Map();
+  const hashOf = (s) => { let x = 7; for (const ch of String(s)) x = (x * 31 + ch.charCodeAt(0)) % 1000003; return x; };
+  const editionsFor = (b) => {
+    if (!b) return [];
+    const author = authors.find((a) => a.id === b.authorId) || {};
+    const def = BOOK_LIBRARY.find((d) => d.id === b.authorId) || BOOK_LOOKUP.find((d) => d.name === author.authorName) || {};
+    const ebook = chaptarr ? b.mediaType === 'ebook' : true;
+    const h0 = hashOf(b.title);
+    const year = new Date(b.releaseDate).getUTCFullYear() || 2015;
+    const fileCount = files.filter((f) => f.bookId === b.id).length;
+    const cover = (k) => [{ url: `/MediaCoverProxy/${(h0 + k).toString(16)}/cover.jpg`, coverType: 'cover', extension: '.jpg', remoteUrl: bookCoverUri(b.title, author.authorName || '', ((def.hue || 200) + k * 47) % 360, !ebook) }];
+    const base = (k, fields) => ({
+      id: k === 0 ? 50000 + b.id : 60000 + b.id * 10 + k, bookId: b.id, foreignEditionId: `${b.foreignBookId}:ed${k}`, title: b.title, language: 'eng', overview: '',
+      images: cover(k), links: [], ratings: { votes: Math.max(0, 900 - k * 300 + (h0 % 200)), value: 4.1 + (k % 3) / 10, popularity: 10 }, bookFileCount: k === 0 ? fileCount : 0, manualAdd: false, ...fields,
+    });
+    let list;
+    if (ebook) {
+      list = [
+        base(0, { format: 'ebook', isEbook: true, publisher: 'Tor Books', pageCount: b.pageCount || 400, releaseDate: b.releaseDate, isbn13: `978076${String(h0).padStart(7, '0').slice(0, 7)}` }),
+        base(1, { format: 'ebook', isEbook: true, publisher: 'Gollancz', pageCount: (b.pageCount || 400) + 24, releaseDate: `${year + 1}-03-01T00:00:00Z`, isbn13: `978057${String(h0 + 1).padStart(7, '0').slice(0, 7)}` }),
+        base(2, { format: 'ebook', isEbook: true, publisher: 'Heyne', pageCount: (b.pageCount || 400) + 60, releaseDate: `${year + 2}-09-01T00:00:00Z`, language: 'ger', title: `${b.title} (German edition)` }),
+      ];
+    } else {
+      const own = (def.narrators || []).length ? def.narrators : [NARRATOR_POOL[h0 % NARRATOR_POOL.length]];
+      const second = own[1] || NARRATOR_POOL[(h0 + 3) % NARRATOR_POOL.length];
+      const secs = 28000 + (h0 % 30000);
+      const voice = (n) => ({ narrator: n, narratorNames: n ? [n] : [], narrators: n ? [{ name: n, isCastLabel: n === 'Full Cast' }] : [] });
+      list = [
+        base(0, { format: 'audiobook', isEbook: false, ...voice(own[0]), durationSeconds: secs, publisher: 'Macmillan Audio', releaseDate: b.releaseDate, asin: `B0${String(h0).padStart(8, '0').slice(0, 8)}`, chapterCount: 40 }),
+        base(1, { format: 'audiobook', isEbook: false, ...voice(second), durationSeconds: secs + 2400, publisher: 'Audible Studios', releaseDate: `${Math.min(year + 6, 2024)}-05-14T00:00:00Z`, asin: `B0${String(h0 + 7).padStart(8, '0').slice(0, 8)}`, chapterCount: 52 }),
+        base(2, { format: 'audiobook', isEbook: false, ...voice(own[0]), durationSeconds: 0, publisher: 'Brilliance Audio', releaseDate: `${year}-01-01T00:00:00Z` }),
+        base(3, { format: 'audiobook', isEbook: false, ...voice(''), durationSeconds: 0, publisher: 'Recorded Books', releaseDate: `${year}-01-01T00:00:00Z` }),
+        // Chaptarr lists the work's other formats too.
+        base(4, { format: 'ebook', isEbook: true, publisher: 'Tor Books', pageCount: 412, releaseDate: b.releaseDate }),
+      ];
+    }
+    const chosen = editionChoice.get(b.id);
+    return list.map((e) => ({ ...e, monitored: chosen ? e.id === chosen : e.id === 50000 + b.id }));
+  };
+  if (!chaptarr) {
+    app.get('/api/v1/edition', (req, res) => {
+      const ids = new Set([].concat(req.query.bookId || []).map(Number));
+      res.json(books.filter((b) => ids.has(b.id)).flatMap(editionsFor));
+    });
+  }
+
+  // book/lookup and POST book: one book, its author too when new, with only
+  // that book monitored (Chaptarr's specificBook).
+  const catalogFor = (authorName) => BOOK_LIBRARY.find((d) => d.name === authorName) || BOOK_LOOKUP.find((d) => d.name === authorName);
+  const localInstance = (b) => ({ id: b.id, title: b.title, titleSlug: b.titleSlug, mediaType: b.mediaType, narrator: (b.narratorNames || [])[0] || '', monitored: !!b.monitored, hasFiles: bookHasFile(b) });
+  const lookupResult = (def, [title, series, date], mediaType) => {
+    const a = authors.find((x) => x.authorName === def.name);
+    const mine = a ? books.filter((b) => b.authorId === a.id && b.title === title) : [];
+    const audio = mediaType === 'audiobook';
+    const foreignBookId = mine.length ? mine[0].foreignBookId : `${chaptarr ? 'hc:' : ''}${77000 + (hashOf(title) % 9999)}`;
+    return {
+      title, authorTitle: `${(def.lastFirst || def.name).toLowerCase()} ${title}`, seriesTitle: series || '', ...(chaptarr ? { seriesLabels: series ? [series] : [] } : {}),
+      foreignBookId, titleSlug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-'), overview: `${title}, by ${def.name}.`,
+      releaseDate: typeof date === 'number' ? iso(now + date * day) : `${date}T00:00:00Z`,
+      monitored: false, anyEditionOk: true, ratings: { votes: 3000 + (hashOf(title) % 9000), value: 4.2, popularity: 50 }, genres: def.genres || [],
+      images: [{ url: '', coverType: 'cover', extension: '.jpg', remoteUrl: bookCoverUri(title, def.name, (def.hue + 30) % 360, audio) }],
+      author: {
+        authorName: def.name, foreignAuthorId: a ? a.foreignAuthorId : (lookupIds.get(def.name) || `hc:${260000 + (hashOf(def.name) % 999)}`), overview: def.overview, status: def.status,
+        images: [{ url: '', coverType: 'poster', extension: '.jpg', remoteUrl: authorPortraitUri(def.name, def.hue) }],
+      },
+      editions: [{ title, foreignEditionId: `${foreignBookId}:ed0`, monitored: true, format: audio ? 'audiobook' : 'ebook', isEbook: !audio }],
+      ...(chaptarr
+        ? { mediaType, authorId: 0, localAudiobookBooks: mine.filter((b) => b.mediaType === 'audiobook').map(localInstance), localEbookBooks: mine.filter((b) => b.mediaType === 'ebook').map(localInstance) }
+        : { authorId: a ? a.id : 0 }),
+    };
+  };
+  app.get('/api/v1/book/lookup', (req, res) => {
+    const term = String(req.query.term || '').trim().toLowerCase();
+    if (!term) return res.status(400).json({ error: 'term is required' });
+    const mt = chaptarr ? (['audiobook', 'ebook'].includes(req.query.mediaType) ? req.query.mediaType : 'audiobook') : undefined;
+    const out = [];
+    for (const def of [...BOOK_LIBRARY, ...BOOK_LOOKUP]) {
+      for (const entry of def.books || []) if (`${entry[0]} ${def.name} ${entry[1] || ''}`.toLowerCase().includes(term)) out.push(lookupResult(def, entry, mt));
+    }
+    setTimeout(() => res.json(out.slice(0, 25)), 250);
+  });
+  // One book entry, shaped like the catalog ones (no files).
+  const newBook = (a, [title, series, date], format, monitored) => {
+    const def = catalogFor(a.authorName) || {};
+    const audio = format === 'audiobook';
+    const b = {
+      id: nextBook++, authorId: a.id, title, titleSlug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-'), foreignBookId: `${chaptarr ? 'hc:' : ''}${9000 + nextBook}`,
+      seriesTitle: series || '', ...(chaptarr ? { seriesLabels: series ? [series] : [] } : {}),
+      releaseDate: typeof date === 'number' ? iso(now + date * day) : String(date).includes('T') ? date : `${date}T00:00:00Z`,
+      monitored: !!monitored, anyEditionOk: true, pageCount: audio ? 0 : 250 + (title.length * 17) % 600, genres: def.genres || [],
+      ratings: { votes: 5000 + title.length * 311, value: Math.round((3.7 + (title.length % 12) / 10) * 100) / 100, popularity: 500 },
+      images: [{ url: `/MediaCover/Books/${nextBook - 1}/cover.jpg`, coverType: 'cover', extension: '.jpg', remoteUrl: bookCoverUri(title, a.authorName, ((def.hue || 200) + (series ? series.length * 7 : 0)) % 360, audio) }],
+      added: iso(Date.now()),
+    };
+    if (chaptarr) Object.assign(b, { mediaType: format, audiobookMonitored: audio && !!monitored, ebookMonitored: !audio && !!monitored, narratorNames: audio ? (def.narrators || []).slice(0, 1) : [], narrators: [] });
+    books.push(b);
+    return b;
+  };
+  // An author set up for another format: Chaptarr lists their books in it,
+  // monitoring them as "monitor new books" says (All: every one).
+  const gainFormat = (a, f, s = {}) => {
+    if (!chaptarr || a[`${f}RootFolderPath`]) return false;
+    const rootPath = s.rootFolderPath || rootFor(f);
+    const monitorNew = s.monitorNewItems || 'none';
+    Object.assign(a, {
+      [`${f}RootFolderPath`]: rootPath, [`${f}Folder`]: `${rootPath}/${a.authorName}`, [`${f}Monitored`]: s.monitored !== false,
+      [`${f}QualityProfileId`]: Number(s.qualityProfileId) || (f === 'ebook' ? 1 : 2), [`${f}MetadataProfileId`]: Number(s.metadataProfileId) || (f === 'ebook' ? 2 : 1),
+      [`${f}MonitorNewItems`]: monitorNew, [`${f}Tags`]: a.tags || [],
+    });
+    a.monitored = ['audiobook', 'ebook'].some((x) => a[`${x}Monitored`] === true);
+    const titles = new Map();
+    for (const b of books.filter((x) => x.authorId === a.id)) if (!titles.has(b.title)) titles.set(b.title, [b.title, b.seriesTitle, b.releaseDate]);
+    for (const entry of (catalogFor(a.authorName) || {}).books || []) if (!titles.has(entry[0])) titles.set(entry[0], entry);
+    for (const entry of titles.values()) if (!books.some((x) => x.authorId === a.id && x.title === entry[0] && x.mediaType === f)) newBook(a, entry, f, monitorNew === 'all');
+    return true;
+  };
+  const rootMatches = (path, f) => roots.some((r) => r.path === String(path || '').replace(/\/+$/, '') && (!chaptarr || r.folderType === 0 || r.folderType === (f === 'ebook' ? 2 : 1)));
+  app.post('/api/v1/book', (req, res) => {
+    const body = req.body || {};
+    const format = chaptarr ? String(req.query.mediaType || body.mediaType || '') : null;
+    if (chaptarr && !['audiobook', 'ebook'].includes(format)) return res.status(400).json({ message: `Invalid mediaType parameter: '${format}'. Valid values are: audiobook, ebook` });
+    const a0 = body.author || {};
+    const def = catalogFor(a0.authorName);
+    const entry = def && (def.books || []).find((x) => x[0] === body.title);
+    if (!def || !entry) return res.status(404).json({ message: 'Book not found on the metadata server' });
+    let a = authors.find((x) => (a0.foreignAuthorId && x.foreignAuthorId === a0.foreignAuthorId) || x.authorName === a0.authorName);
+    const side = (k) => a0[`${format}${k}`];
+    if (chaptarr && (!a || !a[`${format}RootFolderPath`]) && !rootMatches(side('RootFolderPath'), format)) {
+      return res.status(400).json([{ propertyName: `${format === 'ebook' ? 'Ebook' : 'Audiobook'}RootFolderPath`, errorMessage: `Choose a root folder for ${format}s` }]);
+    }
+    if (!chaptarr && !a && !rootMatches(a0.rootFolderPath)) return res.status(400).json([{ propertyName: 'RootFolderPath', errorMessage: 'Choose a root folder' }]);
+    if (!a) {
+      const settings = chaptarr
+        ? { [`${format}QualityProfileId`]: Number(side('QualityProfileId')) || (format === 'ebook' ? 1 : 2), [`${format}MetadataProfileId`]: Number(side('MetadataProfileId')) || (format === 'ebook' ? 2 : 1), [`${format}MonitorNewItems`]: side('MonitorNewItems') || 'none', [`${format}RootFolderPath`]: side('RootFolderPath'), [`${format}Folder`]: `${String(side('RootFolderPath')).replace(/\/+$/, '')}/${def.name}` }
+        : { rootFolderPath: a0.rootFolderPath, qualityProfileId: Number(a0.qualityProfileId) || 1, metadataProfileId: Number(a0.metadataProfileId) || 1, monitorNewItems: a0.monitorNewItems || 'none' };
+      a = addCatalogAuthor({ ...def, books: [] }, { formats: chaptarr ? [format] : undefined, foreignAuthorId: a0.foreignAuthorId || lookupIds.get(def.name), extra: settings });
+      a.added = iso(Date.now());
+      for (const e of def.books || []) newBook(a, e, format, e[0] === body.title);
+    } else if (chaptarr && !a[`${format}RootFolderPath`]) {
+      gainFormat(a, format, { rootFolderPath: side('RootFolderPath'), qualityProfileId: side('QualityProfileId'), metadataProfileId: side('MetadataProfileId'), monitorNewItems: side('MonitorNewItems') || 'none' });
+    }
+    let b = books.find((x) => x.authorId === a.id && x.title === body.title && (!chaptarr || x.mediaType === format));
+    if (!b) b = newBook(a, entry, format, true);
+    b.monitored = true;
+    if (chaptarr) { b.audiobookMonitored = format === 'audiobook'; b.ebookMonitored = format === 'ebook'; }
+    res.status(201).json(bookResource(b));
+  });
+  app.get('/api/v1/book/:id', (req, res) => {
+    const b = books.find((x) => x.id === Number(req.params.id));
+    if (!b) return res.status(404).json({ message: 'Book not found' });
+    // Readarr hands the editions out with the book; Chaptarr under /edition.
+    res.json({ ...bookResource(b), ...(chaptarr ? {} : { editions: editionsFor(b) }) });
+  });
+  app.put('/api/v1/book/:id', (req, res) => {
+    const b = books.find((x) => x.id === Number(req.params.id));
+    if (!b) return res.status(404).json({ message: 'Book not found' });
+    const body = req.body || {};
+    const list = editionsFor(b);
+    const sent = Array.isArray(body.editions) ? body.editions : [];
+    if (sent.length) {
+      const ids = sent.map((e) => Number(e && e.id));
+      if (ids.some((id) => !list.some((e) => e.id === id))) return res.status(400).json([{ propertyName: 'Editions', errorMessage: 'All editions must belong to the book being updated.' }]);
+      const picked = sent.filter((e) => e && e.monitored);
+      if (picked.length > 1 || new Set(ids).size !== ids.length) return res.status(400).json([{ propertyName: 'Editions', errorMessage: 'Submit each edition once and select at most one monitored edition.' }]);
+      if (picked.length === 1) {
+        const e = list.find((x) => x.id === Number(picked[0].id));
+        editionChoice.set(b.id, e.id);
+        if (chaptarr) b.anyEditionOk = false;
+        if (!e.isEbook) b.narratorNames = e.narratorNames || [];
+      }
+    } else if (typeof body.anyEditionOk === 'boolean') {
+      b.anyEditionOk = body.anyEditionOk;
+    }
+    res.status(202).json(b.id);
+  });
+
+  // A small filesystem as the app sees it (its container): library roots,
+  // author folders, the download folders and a spare folder for a new root.
+  const FS_BASE = ['/books/audiobooks', '/books/ebooks', '/books/comics', '/downloads/complete/audiobooks/Andy.Weir-The.Martian.Unabridged.2014', '/downloads/complete/ebooks', '/downloads/incomplete', '/config/logs'];
+  const dirOf = (p) => { const s = String(p || '').trim().replace(/\/{2,}/g, '/'); return s ? (s.endsWith('/') ? s : `${s}/`) : ''; };
+  const noSlash = (p) => dirOf(p).replace(/\/$/, '') || '/';
+  const fsDirs = () => {
+    const set = new Set(chaptarr ? FS_BASE : ['/books', '/downloads/complete', '/config/logs']);
+    for (const r of roots) set.add(r.path);
+    for (const a of authors) for (const k of ['audiobookFolder', 'ebookFolder', 'path']) if (a[k]) set.add(noSlash(a[k]));
+    for (const u of unmapped) if (u.importUnitRoot) set.add(noSlash(u.importUnitRoot));
+    for (const p of [...set]) { let q = p; while ((q = q.replace(/\/[^/]+$/, ''))) set.add(q); }
+    return set;
+  };
+  const fsHas = (p) => fsDirs().has(noSlash(p));
+  app.get('/api/v1/filesystem', (req, res) => {
+    const p = noSlash(req.query.path || '/');
+    const top = p === '/';
+    const children = [...fsDirs()].filter((d) => (top ? /^\/[^/]+$/.test(d) : d.startsWith(`${p}/`) && !d.slice(p.length + 1).includes('/'))).sort();
+    res.json({
+      parent: top ? undefined : (p.replace(/\/[^/]+$/, '') || '/') + (p.replace(/\/[^/]+$/, '') ? '/' : ''),
+      directories: children.map((d) => ({ type: 'folder', name: d.split('/').pop(), path: `${d}/`, size: 0, lastModified: iso(now) })),
+      files: [],
+    });
+  });
+
+  // Root folders: Chaptarr's per-format defaults, its "folder of one format
+  // can't have the other's settings" rule, and Readarr's default* fields.
+  const SIDE_KEYS = ['QualityProfileId', 'MetadataProfileId', 'Monitored', 'MonitorExistingMode', 'MonitorNewItems', 'Tags', 'MonitorExisting', 'MonitorFuture', 'MonitorExistingBooks', 'WriteAudioBookShelfMetadataJson', 'WriteAudioBookShelfCover'];
+  const typeFormatsOf = (t) => (Number(t) === 0 ? ['audiobook', 'ebook'] : Number(t) === 2 ? ['ebook'] : ['audiobook']);
+  const rootResource = (b, id) => {
+    const out = { id, name: String(b.name || '').trim() || noSlash(b.path).split('/').pop(), path: noSlash(b.path), accessible: true, freeSpace: 404942340096, totalSpace: 12000119750656, isCalibreLibrary: false, defaultTags: b.defaultTags || [] };
+    if (!chaptarr) {
+      return { ...out, defaultQualityProfileId: Number(b.defaultQualityProfileId) || 1, defaultMetadataProfileId: Number(b.defaultMetadataProfileId) || 1, defaultMonitorOption: b.defaultMonitorOption || 'all', defaultNewItemMonitorOption: b.defaultNewItemMonitorOption || 'all' };
+    }
+    out.folderType = Number(b.folderType);
+    out.placeEbooksWithAudiobooks = !!b.placeEbooksWithAudiobooks;
+    for (const f of typeFormatsOf(b.folderType)) {
+      const s = {
+        qualityProfileId: Number(b[`${f}QualityProfileId`]) || (f === 'ebook' ? 1 : 2), metadataProfileId: Number(b[`${f}MetadataProfileId`]) || (f === 'ebook' ? 2 : 1),
+        monitored: b[`${f}Monitored`] !== false, monitorExistingMode: b[`${f}MonitorExistingMode`] || 'all', monitorNewItems: b[`${f}MonitorNewItems`] || 'all', tags: b[`${f}Tags`] || [],
+      };
+      Object.assign(out, { [f]: s, [`${f}QualityProfileId`]: s.qualityProfileId, [`${f}MetadataProfileId`]: s.metadataProfileId, [`${f}MonitorNewItems`]: s.monitorNewItems });
+    }
+    return out;
+  };
+  const rootProblem = (b, existing) => {
+    const path = noSlash(b.path);
+    if (!b.path || path === '/') return [{ propertyName: 'Path', errorMessage: 'Invalid Path' }];
+    if (!fsHas(path)) return [{ propertyName: 'Path', errorMessage: `Folder '${dirOf(path)}' does not exist` }];
+    if (!existing && roots.some((r) => r.path === path)) return [{ propertyName: 'Path', errorMessage: 'Path is already configured as a root folder' }];
+    if (chaptarr) {
+      const t = Number(b.folderType);
+      if (![0, 1, 2].includes(t)) return { message: `Invalid folder type: ${b.folderType}. Valid values are 0 (Mixed), 1 (Audiobook), 2 (Ebook).` };
+      const other = t === 1 ? 'ebook' : t === 2 ? 'audiobook' : null;
+      if (other && SIDE_KEYS.some((k) => b[`${other}${k}`] !== undefined && b[`${other}${k}`] !== null)) return { message: `${t === 1 ? 'Audiobook' : 'Ebook'}-only folders cannot have ${other} settings` };
+      if (b.audiobookMonitorExistingMode && !['all', 'missing', 'existing', 'none'].includes(b.audiobookMonitorExistingMode)) return { message: 'audiobook MonitorExistingMode must be All, Missing, Existing, None, or null (unconfigured)' };
+      if (b.ebookMonitorExistingMode && !['all', 'missing', 'existing', 'none'].includes(b.ebookMonitorExistingMode)) return { message: 'ebook MonitorExistingMode must be All, Missing, Existing, None, or null (unconfigured)' };
+    }
+    return null;
+  };
+  const withDefaults = (r) => {
+    if (!chaptarr) return r;
+    const firstOf = (t) => roots.find((x) => x.folderType === t || x.folderType === 0);
+    return { ...r, isEffectiveDefaultAudiobook: firstOf(1) === r, isEffectiveDefaultEbook: firstOf(2) === r };
+  };
+  app.get('/api/v1/rootfolder', (req, res) => res.json(roots.map(withDefaults)));
+  app.post('/api/v1/rootfolder', (req, res) => {
+    const b = req.body || {};
+    const problem = rootProblem(b, null);
+    if (problem) return res.status(400).json(problem);
+    const r = rootResource(b, Math.max(0, ...roots.map((x) => x.id)) + 1);
+    roots.push(r);
+    res.status(201).json(withDefaults(r));
+  });
+  app.put('/api/v1/rootfolder/:id', (req, res) => {
+    const i = roots.findIndex((x) => x.id === Number(req.params.id));
+    if (i < 0) return res.status(404).json({ message: 'Root folder not found' });
+    const b = req.body || {};
+    if (b.path && noSlash(b.path) !== roots[i].path) return res.status(400).json({ message: 'Cannot edit root folder path' });
+    const problem = rootProblem({ ...b, path: roots[i].path }, roots[i]);
+    if (problem) return res.status(400).json(problem);
+    if (chaptarr && Number(b.folderType) !== roots[i].folderType && Number(b.folderType) !== 0
+      && authors.some((a) => a.audiobookRootFolderPath === roots[i].path || a.ebookRootFolderPath === roots[i].path)) {
+      return res.status(400).json({ message: 'Authors are assigned to this root folder, so its type can only change to audiobooks and ebooks.' });
+    }
+    roots[i] = rootResource({ ...b, path: roots[i].path }, roots[i].id);
+    res.status(202).json(withDefaults(roots[i]));
+  });
+  app.delete('/api/v1/rootfolder/:id', (req, res) => {
+    const i = roots.findIndex((x) => x.id === Number(req.params.id));
+    if (i < 0) return res.status(404).json({ message: 'Root folder not found' });
+    roots.splice(i, 1);
+    res.json({});
+  });
+
+  // Remote path mappings, Chaptarr's suggestions and its test.
+  if (chaptarr) {
+    const clientRoots = (c) => (c && c.id === 1 ? SAB_ROOTS : []);
+    const mappingProblem = (b, id = 0) => {
+      if (!String(b.host || '').trim()) return [{ propertyName: 'Host', errorMessage: "'Host' must not be empty." }];
+      if (!dirOf(b.remotePath)) return [{ propertyName: 'RemotePath', errorMessage: "'Remote Path' must not be empty." }];
+      if (!dirOf(b.localPath) || noSlash(b.localPath) === '/') return [{ propertyName: 'LocalPath', errorMessage: 'Invalid LocalPath. LocalPath cannot be empty and must not be the root.' }];
+      if (!fsHas(b.localPath)) return [{ propertyName: 'LocalPath', errorMessage: "Can't add mount point directory that doesn't exist." }];
+      const scope = Number(b.downloadClientId) || 0;
+      if (mappings.some((m) => m.id !== id && (Number(m.downloadClientId) || 0) === scope && (scope || m.host.toLowerCase() === String(b.host).toLowerCase()) && dirOf(m.remotePath) === dirOf(b.remotePath))) {
+        return [{ propertyName: 'RemotePath', errorMessage: scope ? 'RemotePath already configured for this download client.' : 'RemotePath already configured.' }];
+      }
+      return null;
+    };
+    const mappingOf = (b, id) => ({ id, host: String(b.host).trim(), remotePath: dirOf(b.remotePath), localPath: dirOf(b.localPath), downloadClientId: Number(b.downloadClientId) || 0 });
+    app.post('/api/v1/remotepathmapping', (req, res) => {
+      const b = req.body || {};
+      const problem = mappingProblem(b);
+      if (problem) return res.status(400).json(problem);
+      const m = mappingOf(b, Math.max(0, ...mappings.map((x) => x.id)) + 1);
+      mappings.push(m);
+      noteReachability();
+      res.status(201).json(m);
+    });
+    app.get('/api/v1/remotepathmapping/suggestions', (req, res) => {
+      const id = Number(req.query.downloadClientId) || 0;
+      const host = String(req.query.host || '').toLowerCase();
+      const scoped = mappings.filter((m) => (id ? Number(m.downloadClientId) === id : !Number(m.downloadClientId) && (!host || m.host.toLowerCase() === host)));
+      const uniq = (list) => [...new Set(list)].sort();
+      res.json({
+        downloadClientPaths: uniq([...scoped.map((m) => m.remotePath), ...clientRoots(dlClients.find((c) => c.id === id))]),
+        chaptarrPaths: uniq([...mappings.map((m) => m.localPath), ...roots.map((r) => dirOf(r.path))]),
+      });
+    });
+    app.post('/api/v1/remotepathmapping/test', (req, res) => {
+      const b = req.body || {};
+      if (!String(b.host || '').trim() || !dirOf(b.remotePath) || !dirOf(b.localPath) || noSlash(b.localPath) === '/') return res.status(400).json([{ propertyName: 'LocalPath', errorMessage: 'Invalid mapping' }]);
+      const remote = dirOf(b.remotePath); const local = dirOf(b.localPath);
+      const exists = fsHas(local);
+      const client = dlClients.find((c) => c.id === Number(b.downloadClientId));
+      const matched = client ? clientRoots(client).find((r) => r.startsWith(remote) || remote.startsWith(r)) : null;
+      const item = client ? queue.filter((q) => q.downloadClient === client.name && q.outputPath).map((q) => dirOf(q.outputPath)).find((p) => p.startsWith(remote)) : null;
+      const itemLocal = item ? local + item.slice(remote.length) : undefined;
+      res.json({
+        downloadClientId: Number(b.downloadClientId) || 0, host: b.host, remotePath: remote, localPath: local, mappedPath: local, isMapped: local !== remote,
+        localPathExists: exists, localPathWritable: exists, mappedPathExists: exists, mappedPathWritable: exists,
+        downloadClientPathChecked: !!client, downloadClientPathMatched: !!matched, ...(matched ? { downloadClientMatchedPath: matched } : {}),
+        downloadClientItemPathChecked: !!item, ...(item ? { downloadClientItemMappedPath: itemLocal, downloadClientItemPathExists: fsHas(itemLocal), downloadClientItemPathWritable: fsHas(itemLocal) } : { downloadClientItemPathExists: false, downloadClientItemPathWritable: false }),
+      });
+    });
+    app.put('/api/v1/remotepathmapping/:id', (req, res) => {
+      const i = mappings.findIndex((m) => m.id === Number(req.params.id));
+      if (i < 0) return res.status(404).json({ message: 'NotFound' });
+      const problem = mappingProblem(req.body || {}, mappings[i].id);
+      if (problem) return res.status(400).json(problem);
+      mappings[i] = mappingOf(req.body, mappings[i].id);
+      noteReachability();
+      res.status(202).json(mappings[i]);
+    });
+    app.delete('/api/v1/remotepathmapping/:id', (req, res) => {
+      const i = mappings.findIndex((m) => m.id === Number(req.params.id));
+      if (i >= 0) mappings.splice(i, 1);
+      noteReachability();
+      res.json({});
+    });
+  }
+
+  // Log files, as the app writes them (times in UTC): a download it can't
+  // reach every minute, RSS syncs, and a few warnings worth grouping.
+  // The files cover the last six hours; the import error stops at the time a
+  // mapping made the folder reachable, as in a real log.
+  const logName = chaptarr ? 'chaptarr' : 'readarr';
+  const logStamp = (t) => new Date(t).toISOString().replace('T', ' ').replace(/(\.\d)\d\dZ$/, '$1');
+  const audioUnreachable = () => chaptarr && !mappings.some((m) => m.host.toLowerCase() === 'sabnzbd' && SAB_ROOTS[0].startsWith(dirOf(m.remotePath)));
+  let reachableSince = 0;
+  const noteReachability = () => { if (audioUnreachable()) reachableSince = 0; else if (!reachableSince) reachableSince = Date.now(); };
+  const logFiles = () => {
+    const out = [];
+    const until = Date.now();
+    for (let k = 0; k < 3; k++) {
+      const end = until - k * 7200000; const start = end - 7200000;
+      const lines = [];
+      const add = (t, level, logger, message, extra = []) => lines.push([t, [`${logStamp(t)}|${level}|${logger}|${message}`, ...extra].join('\n')]);
+      for (let t = start, i = 0; t < end; t += 60000, i++) {
+        if (chaptarr && !(reachableSince && t + 1200 >= reachableSince)) add(t + 1200, 'Error', 'DownloadedBooksImportService', 'Import failed, path does not exist or is not accessible by Chaptarr: /mnt/user/downloads/complete/audiobooks/Andy.Weir-The.Martian.Unabridged.2014. Ensure the path exists and the user running Chaptarr has the correct permissions');
+        if (i % 15 === 0) add(t + 400, 'Info', 'RssSyncService', `RSS Sync Completed. Reports found: ${38 + ((i * 7) % 19)}, Reports grabbed: 0`);
+      }
+      if (k === 0) {
+        for (const [n, file] of [[1, 'Edgedancer - Part 01'], [2, 'Edgedancer - Part 02'], [3, 'Secret History 1 of 2']]) {
+          add(start + n * 600000, 'Warn', 'FileMatchingService', `[HOLY-GRAIL][unrestricted/path-tags][STAGED-FTS-UNCLEAR] Structural field evidence did not produce one physically compatible Book: 1|Audiobook|base:hc:${4000 + n}:tier=1,fields=2,durationConflict=False for '${file}'`);
+        }
+        for (const n of [1, 2, 3]) add(start + n * 900000, 'Warn', 'AudioDurationResolver', `FFprobe returned no valid duration for '/books/audiobooks/Brandon Sanderson/Elantris/${String(n).padStart(2, '0')} - Elantris.mp3': N/A`);
+      } else if (k === 1) {
+        for (const n of [1, 2]) {
+          add(start + n * 1800000, 'Error', 'Newznab', 'An error occurred while processing feed. https://api.nzbgeek.info/api?t=search&cat=3030&extended=1&apikey=(removed)&offset=0&limit=100&q=Warbreaker',
+            ['', '[v0.9.1000.0] System.Net.Http.HttpRequestException: Response status code does not indicate success: 503 (Service Unavailable).', '   at NzbDrone.Common.Http.HttpClient.ExecuteAsync(HttpRequest request)', '   at NzbDrone.Core.Indexers.HttpIndexerBase`1.FetchPage(IndexerRequest request, IParseIndexerResponse parser)']);
+        }
+        add(start + 3000000, 'Warn', 'BookInfoProxy', "[SERVER-BUG-CANDIDATE] V5 returned 2 books with provider id(s) appearing in multiple pockets: [az:B01EM0LH0U, az:B07DP8M4F2] for author 'Brandon Sanderson' (hcAuthor=hc:204214)");
+      } else {
+        for (const [n, title] of [[1, 'Brandon Sanderson 3-Book Boxed Set'], [2, 'Mistborn [Paperback]'], [3, 'The Way of Kings (Spanish Edition)']]) {
+          add(start + n * 1200000, 'Warn', 'RefreshBookService', `Book [${8000 + n}][${title}] not found in metadata and is being deleted`);
+        }
+      }
+      lines.sort((x, y) => x[0] - y[0]);
+      out.push({ filename: k === 0 ? `${logName}.txt` : `${logName}.${k - 1}.txt`, lastWriteTime: iso(end), text: `${lines.map((l) => l[1]).join('\n')}\n` });
+    }
+    return out;
+  };
+  app.get('/api/v1/log/file', (req, res) => res.json(logFiles().map((f, i, all) => ({ id: all.length - i, filename: f.filename, lastWriteTime: f.lastWriteTime, contentsUrl: `/api/v1/log/file/${f.filename}`, downloadUrl: `/logfile/${f.filename}` }))));
+  app.get('/api/v1/log/file/:filename', (req, res) => {
+    const f = logFiles().find((x) => x.filename === req.params.filename);
+    if (!f) return res.status(404).json({ message: 'NotFound' });
+    res.type('text/plain').send(f.text);
+  });
 
   // Commands finish on the second poll; a few change the library like the real app.
   const commands = new Map();
@@ -2952,9 +3367,14 @@ function makeReadarr(opts = {}) {
     if (cmd.polls >= 2 && cmd.status !== 'completed') { runCommand(cmd.body); cmd.status = 'completed'; cmd.message = 'Completed'; } else if (cmd.status === 'queued') cmd.status = 'started';
     res.json(cmd);
   });
-  app.get('/api/v1/health', (req, res) => res.json(chaptarr && queue.some((q) => q.id === 604) ? [
-    { source: 'RemotePathMappingCheck', type: 'error', message: 'You are using docker; download client SABnzbd places downloads in /Volumes/Media/audiobooks/Andy.Weir-The.Martian.Unabridged.2014 but this directory does not appear to exist inside the container. Review your remote path mappings and container volume settings.', wikiUrl: 'https://wiki.servarr.com/readarr/system#remote-path-mapping' },
-  ] : []));
+  // Chaptarr's RemotePathMappingCheck: the download client's folder it can't see.
+  app.get('/api/v1/health', (req, res) => {
+    const unreachable = chaptarr ? SAB_ROOTS.filter((r) => !mappings.some((m) => m.host.toLowerCase() === 'sabnzbd' && r.startsWith(dirOf(m.remotePath)))) : [];
+    res.json(unreachable.length ? [{
+      source: 'RemotePathMappingCheck', type: 'error', wikiUrl: 'https://wiki.servarr.com/readarr/system#remote-path-mapping',
+      message: `You are using docker; download client SABnzbd places downloads in ${unreachable[0].replace(/\/$/, '')} but this directory does not appear to exist inside the container. Review your remote path mappings and container volume settings.`,
+    }] : []);
+  });
   return app;
 }
 

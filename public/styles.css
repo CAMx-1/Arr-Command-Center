@@ -2214,3 +2214,78 @@ html[data-theme="dark"] .history-detail.bad { color: #fbbf24; }
   .queue-head > .view-toggle { flex: 1 0 100%; }
   .queue-head > .view-toggle .view-seg { flex: 1; padding-left: 6px; padding-right: 6px; }
 }
+
+/* ---------- Books: editions, one book, formats, folders and logs ---------- */
+.edition-picker { display: grid; gap: 12px; }
+.edition-current, .edition-confirm { display: flex; gap: 14px; align-items: flex-start; padding: 14px; }
+.edition-current-main { min-width: 0; flex: 1; }
+.edition-confirm { flex-direction: column; border: 1px solid rgba(var(--accent-rgb), 0.45); }
+.edition-confirm-head { display: flex; gap: 14px; align-items: flex-start; }
+.edition-confirm-actions { display: flex; gap: 10px; justify-content: flex-end; width: 100%; }
+.edition-cover { width: 46px; height: 46px; object-fit: cover; border-radius: 8px; flex-shrink: 0; box-shadow: var(--shadow-sm); background: var(--surface-2); }
+.edition-current .edition-cover, .edition-confirm .edition-cover { width: 72px; height: 72px; }
+.edition-cover-fallback { display: flex; align-items: center; justify-content: center; font-size: 20px; color: #fff; background-size: cover; }
+.edition-auto { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 13px; font-weight: 600; }
+.edition-tools { display: flex; gap: 10px; align-items: center; }
+.edition-tools .input { flex: 1; min-width: 0; }
+.edition-group { display: grid; gap: 6px; }
+.edition-group-head { display: flex; gap: 10px; align-items: baseline; margin-top: 6px; }
+.edition-group > .btn { justify-self: start; }
+.book-info-edition { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 12px; margin: 4px 0 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.add-format .edit-format-title label { font-weight: 800; }
+.add-format-body { padding-top: 2px; }
+.edit-format-missing { border-style: dashed; }
+.edit-format-missing > .btn { justify-self: start; }
+.add-book-head { padding: 0; background: none; box-shadow: none; clip-path: none; }
+
+.section-head { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin: 22px 0 6px; }
+.section-head:first-child { margin-top: 4px; }
+.section-note { font-size: 13px; line-height: 1.5; margin: 0 0 12px; max-width: 760px; }
+.root-folder-row .row-actions, .mapping-row .row-actions { flex-shrink: 0; }
+.mapping-row .row-title, .download-check-row .row-title, .folder-browser-path, .path-chips .chip, .path-input .input, .log-example .mono, .log-pattern, .log-exception {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+.download-check { display: grid; gap: 6px; margin-bottom: 12px; }
+.download-check-head { display: flex; gap: 10px; align-items: baseline; }
+.download-check-row { align-items: flex-start; }
+.check-mark { min-width: 26px; justify-content: center; margin-top: 1px; }
+.test-lines { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; font-size: 12.5px; line-height: 1.45; }
+.test-lines li { display: flex; gap: 8px; }
+.test-lines .test-mark { flex-shrink: 0; width: 14px; text-align: center; font-weight: 800; }
+.test-lines .ok .test-mark { color: var(--green); }
+.test-lines .bad { color: var(--red); }
+.test-lines .info { color: var(--text-dim); }
+.path-input { display: flex; gap: 8px; align-items: center; }
+.path-input .input { flex: 1; min-width: 0; font-size: 13px; }
+.path-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.path-chips .chip { border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); border-radius: 999px; padding: 3px 10px; font-size: 11.5px; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.path-chips .chip:hover { border-color: var(--accent); }
+.folder-browser { margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.folder-browser-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.folder-browser-path { flex: 1; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.folder-browser-list { display: grid; gap: 2px; max-height: 240px; overflow: auto; }
+.folder-browser-row { display: flex; gap: 8px; align-items: center; padding: 7px 8px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.folder-browser-row:hover { background: var(--surface-hover); }
+
+.log-head { justify-content: flex-start; flex-wrap: wrap; }
+.log-head select.input { width: auto; flex: 0 0 auto; }
+.log-summary { display: flex; gap: 8px 16px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; font-size: 13px; }
+.log-group { align-items: flex-start; cursor: pointer; }
+.log-count { flex-shrink: 0; min-width: 58px; text-align: right; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.log-pattern { font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.log-detail { margin-top: 8px; cursor: auto; }
+.log-hint { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); font-size: 13px; }
+.log-examples { display: grid; gap: 4px; font-size: 12px; }
+.log-example { overflow-wrap: anywhere; line-height: 1.4; }
+.log-exception { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 11.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+
+@media (max-width: 720px) {
+  .row.edition-row .row-main, .row.log-group .row-main, .row.download-check-row .row-main, .row.mapping-row .row-main, .row.root-folder-row .row-main { flex: 1 1 0; min-width: 0; }
+  .edition-current, .edition-confirm-head { gap: 10px; }
+  .edition-current .edition-cover, .edition-confirm .edition-cover { width: 56px; height: 56px; }
+  .book-info-edition { flex-direction: column; align-items: flex-start; }
+  .root-folder-row, .mapping-row, .download-check-row { flex-wrap: wrap; }
+  .root-folder-row .row-actions, .mapping-row .row-actions, .download-check-row .row-actions { width: 100%; justify-content: flex-end; }
+  .log-count { min-width: 44px; font-size: 15px; }
+  .lib-format { order: 3; }
+}

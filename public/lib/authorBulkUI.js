@@ -285,12 +285,87 @@ export function bulkAuthors(root, opts) {
     });
   };
 
+  // Chaptarr: set the selected authors up for another format (ebooks for
+  // audiobook authors, say). Chaptarr refreshes each one and lists their
+  // books in that format; "monitor new books" decides which it monitors.
+  const openAddFormat = async () => {
+    const list = chosen();
+    const key = ctx.service.key;
+    const [profiles, metas, roots] = await Promise.all([
+      cachedGet(`arr:${key}:qualityprofile`, () => arr.get('qualityprofile'), 600000).catch(() => []),
+      cachedGet(`arr:${key}:metadataprofile`, () => arr.get('metadataprofile'), 600000).catch(() => null),
+      cachedGet(`arr:${key}:rootfolder`, () => arr.get('rootfolder'), 600000).catch(() => []),
+    ]);
+    const offered = ['audiobook', 'ebook'].filter((f) => (Array.isArray(roots) ? roots : []).some((r) => folderFormats(r).includes(f)) && list.some((a) => !authorFormats(a).includes(f)));
+    if (!offered.length) { toast(`Every selected author is already set up for each format ${label} has a root folder for`, 'info', 4500); return; }
+    const field = (text, control) => h('label', { class: 'pw-field' }, h('span', { class: 'pw-field-label' }, text), control);
+    const fmtSel = h('select', { class: 'input', 'aria-label': 'Format' }, ...offered.map((f) => h('option', { value: f }, `${FORMATS[f].icon} ${FORMATS[f].label}`)));
+    const slot = h('div', { class: 'pw-form' });
+    const noteEl = h('p', { class: 'dim', style: { margin: 0 } });
+    let side = null;
+    const render = () => {
+      const f = fmtSel.value;
+      const targets = list.filter((a) => !authorFormats(a).includes(f));
+      noteEl.textContent = `${names(targets)} ${targets.length === 1 ? 'isn’t' : 'aren’t'} set up for ${FORMATS[f].label.toLowerCase()} yet.${targets.length < list.length ? ` ${plural(list.length - targets.length, 'other author')} already ${list.length - targets.length === 1 ? 'is' : 'are'} and stay as they are.` : ''}`;
+      const rList = (Array.isArray(roots) ? roots : []).filter((r) => folderFormats(r).includes(f));
+      const rf = h('select', { class: 'input', 'aria-label': 'Root folder' }, ...rList.map((r) => h('option', { value: r.path }, rootFolderLabel(r))));
+      const def = rList.find((r) => (f === 'ebook' ? r.isEffectiveDefaultEbook : r.isEffectiveDefaultAudiobook)) || rList[0];
+      if (def) rf.value = def.path;
+      const qList = profilesFor(profiles, f);
+      const qp = qList.length ? h('select', { class: 'input', 'aria-label': 'Quality profile' }, ...qList.map((p) => h('option', { value: p.id }, p.name))) : null;
+      const mList = Array.isArray(metas) ? profilesFor(metas, f) : [];
+      const mp = mList.length ? h('select', { class: 'input', 'aria-label': 'Metadata profile' }, ...mList.map((p) => h('option', { value: p.id }, p.name))) : null;
+      const sideOf = (r) => (r && (r[f] || {})) || {};
+      const fill = () => {
+        const r = rList.find((x) => x.path === rf.value) || def;
+        if (qp && sideOf(r).qualityProfileId) qp.value = String(sideOf(r).qualityProfileId);
+        if (mp && sideOf(r).metadataProfileId) mp.value = String(sideOf(r).metadataProfileId);
+      };
+      rf.addEventListener('change', fill);
+      fill();
+      const ni = h('select', { class: 'input', 'aria-label': 'Monitor new books' }, ...NEW_ITEM_OPTIONS.map(([v, t]) => h('option', { value: v, selected: v === 'none' ? 'selected' : null }, t)));
+      side = { f, targets, rf, qp, mp, ni, rList };
+      mount(slot, field('Root folder', rf), qp ? field('Quality profile', qp) : null, mp ? field('Metadata profile', mp) : null, field('Monitor new books', ni),
+        h('div', { class: 'dim', style: { fontSize: '12px' } }, `Which of the books ${label} then finds it monitors: All every one, New releases only later ones, None none (pick them on each author’s page).`));
+    };
+    fmtSel.addEventListener('change', render);
+    render();
+    const save = async (btn) => {
+      const { f, targets, rf, qp, mp, ni, rList } = side;
+      if (!targets.length || !rf.value) { toast('Nothing to change', 'info'); return; }
+      const r = rList.find((x) => x.path === rf.value);
+      btn.disabled = true;
+      const body = {
+        authorIds: targets.map((a) => a.id),
+        [`${f}RootFolderPath`]: rf.value,
+        [`${f}QualityProfileId`]: qp ? Number(qp.value) : (r && r[f] && r[f].qualityProfileId) || undefined,
+        [`${f}MetadataProfileId`]: mp ? Number(mp.value) : (r && r[f] && r[f].metadataProfileId) || undefined,
+        [`${f}Monitored`]: true,
+        [`${f}MonitorNewItems`]: ni.value,
+        moveFiles: false,
+      };
+      try {
+        await arr.put('author/editor', body);
+        closeModal();
+        changed(`${plural(targets.length, 'author')} set up for ${FORMATS[f].label.toLowerCase()}. ${label} is fetching the lists.`);
+      } catch (e) { toast(e.message, 'error', 7000); btn.disabled = false; }
+    };
+    openModal({
+      title: `Add a format · ${plural(list.length, 'author')}`,
+      body: h('div', { class: 'grid', style: { gap: '14px' } }, field('Format', fmtSel), noteEl, slot),
+      footer: h('div', { class: 'modal-actions' },
+        h('button', { class: 'btn', type: 'button', onclick: closeModal }, 'Cancel'),
+        h('button', { class: 'btn primary', type: 'button', onclick: (e) => save(e.currentTarget) }, 'Add format')),
+    });
+  };
+
   const group = actionGroup([
     { label: 'Monitor', title: 'Monitor the selected authors', onClick: () => monitor(true) },
     { label: 'Unmonitor', title: 'Stop monitoring the selected authors', onClick: () => monitor(false) },
     { label: 'Search', primary: true, title: 'Search for the missing monitored books of the selected authors', onClick: searchAll },
     { label: 'Refresh', title: 'Refresh the selected authors from the metadata source and rescan their folders', onClick: refreshAuthors },
     { label: 'Edit…', title: 'Monitoring, profiles and root folder', onClick: openEdit },
+    formatAware ? { label: 'Add format…', title: 'Set the selected authors up for ebooks or audiobooks too', onClick: openAddFormat } : null,
     { label: 'Tags…', title: 'Add or remove a tag', onClick: openTags },
     { label: 'Remove…', variant: 'danger', needs: 'delete', title: 'Remove the selected authors', onClick: openDelete },
   ], { sheetTitle: 'Selected authors' });

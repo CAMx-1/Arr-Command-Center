@@ -89,8 +89,9 @@ export function compareAuthors(a, b) {
 // Library numbers from the app's own statistics. bookCount is the number of
 // monitored books; availableBookCount the monitored ones on disk; one
 // audiobook can be many files, so files are counted apart from books.
-export function authorStats(a) {
-  const s = (a && a.statistics) || {};
+// Chaptarr also counts each format apart (audiobookStatistics, ...).
+export function authorStats(a, format = '') {
+  const s = (format && a && a[`${format}Statistics`]) || (a && a.statistics) || {};
   const monitored = Number(s.bookCount) || 0;
   const have = Number(s.availableBookCount) || 0;
   const percent = monitored ? Math.max(0, Math.min(100, Number.isFinite(Number(s.percentOfBooks)) && Number(s.percentOfBooks) > 0 ? Number(s.percentOfBooks) : (100 * have) / monitored)) : null;
@@ -256,6 +257,9 @@ export function profilesFor(profiles, format) {
 //   choice: { rootFolder, qualityProfileId, metadataProfileId, monitor,
 //             monitorNewItems, searchOnAdd, tags,
 //             perFormat: { audiobook: { qualityProfileId, metadataProfileId }, ... } }
+//   Chaptarr with a root folder per format: choice.formats = { audiobook:
+//   { rootFolder, qualityProfileId, metadataProfileId }, ebook: {...} } adds
+//   the author for each format listed.
 export function buildAuthorAddPayload(lookup, choice = {}) {
   const base = { ...(lookup || {}) };
   delete base.id;
@@ -264,7 +268,10 @@ export function buildAuthorAddPayload(lookup, choice = {}) {
   const monitor = monitorChoice(choice.monitor) || 'all';
   const monitorNewItems = newItemChoice(choice.monitorNewItems) || 'all';
   const addOptions = { monitor, searchForMissingBooks: !!choice.searchOnAdd };
-  const formats = folderFormats(folder);
+  const picked = choice.formats && typeof choice.formats === 'object'
+    ? Object.keys(choice.formats).filter((f) => FORMATS[f] && choice.formats[f] && choice.formats[f].rootFolder)
+    : null;
+  const formats = picked || folderFormats(folder);
   const num = (v) => (v === null || v === undefined || v === '' ? undefined : Number(v));
   if (!formats.length) {
     return {
@@ -274,8 +281,8 @@ export function buildAuthorAddPayload(lookup, choice = {}) {
   }
   const out = { ...base, monitored: true, addOptions, tags };
   for (const f of formats) {
-    const side = (choice.perFormat && choice.perFormat[f]) || {};
-    out[`${f}RootFolderPath`] = folder.path;
+    const side = (picked ? choice.formats[f] : (choice.perFormat && choice.perFormat[f])) || {};
+    out[`${f}RootFolderPath`] = picked ? side.rootFolder.path : folder.path;
     out[`${f}QualityProfileId`] = num(side.qualityProfileId ?? choice.qualityProfileId);
     out[`${f}MetadataProfileId`] = num(side.metadataProfileId ?? choice.metadataProfileId);
     out[`${f}Monitored`] = true;
@@ -284,6 +291,94 @@ export function buildAuthorAddPayload(lookup, choice = {}) {
   }
   if (formats.length === 1) out.lastSelectedMediaType = formats[0];
   return out;
+}
+
+// ---- One book --------------------------------------------------------------
+
+// The copies of a book/lookup result already in the library, per format
+// (Chaptarr marks them on the result).
+export function lookupLocalCopies(lookup) {
+  const r = lookup || {};
+  const list = (k) => (Array.isArray(r[k]) ? r[k].filter(Boolean) : []);
+  return { audiobook: list('localAudiobookBooks'), ebook: list('localEbookBooks') };
+}
+
+// POST book body for a book/lookup result: the book and, when the author
+// isn't in the library (or not for this format), the author too, with only
+// this book monitored (Chaptarr's "specificBook").
+//   choice: { format, rootFolder, qualityProfileId, metadataProfileId,
+//             monitorNewItems, searchOnAdd, tags }
+export function buildBookAddPayload(lookup, choice = {}) {
+  const book = JSON.parse(JSON.stringify(lookup || {}));
+  const author = { ...(book.author || {}) };
+  const folder = choice.rootFolder || {};
+  const tags = Array.isArray(choice.tags) ? choice.tags : [];
+  const num = (v) => (v === null || v === undefined || v === '' ? undefined : Number(v));
+  const newItems = newItemChoice(choice.monitorNewItems) || 'none';
+  const foreignId = book.foreignBookId || book.foreignId || book.hardcoverBookId || book.goodreadsBookId;
+  const format = FORMATS[choice.format] ? choice.format : null;
+  if (format) {
+    Object.assign(author, {
+      [`${format}RootFolderPath`]: folder.path,
+      [`${format}QualityProfileId`]: num(choice.qualityProfileId),
+      [`${format}MetadataProfileId`]: num(choice.metadataProfileId),
+      [`${format}Monitored`]: true,
+      [`${format}MonitorNewItems`]: newItems,
+      [`${format}Tags`]: tags,
+      tags, monitored: true,
+      addOptions: { monitor: 'specificBook', booksToMonitor: foreignId ? [foreignId] : [], searchForMissingBooks: false },
+    });
+    book.mediaType = format;
+    book.audiobookMonitored = format === 'audiobook';
+    book.ebookMonitored = format === 'ebook';
+    book.id = 0;
+    book.localBookId = null;
+  } else {
+    Object.assign(author, {
+      rootFolderPath: folder.path, qualityProfileId: num(choice.qualityProfileId), metadataProfileId: num(choice.metadataProfileId),
+      monitored: true, monitorNewItems: newItems, tags,
+      addOptions: { monitor: 'none', searchForMissingBooks: false },
+    });
+    delete book.id;
+  }
+  book.author = author;
+  book.monitored = true;
+  book.addOptions = { ...(book.addOptions || {}), searchForNewBook: !!choice.searchOnAdd };
+  if (Array.isArray(book.editions) && book.editions.length) {
+    if (!book.editions.some((e) => e && e.monitored)) book.editions[0].monitored = true;
+  } else if (format) {
+    book.editions = [{ monitored: true, manualAdd: false, title: book.title, overview: book.overview || '' }];
+  }
+  return book;
+}
+
+// ---- Another format for an author (Chaptarr) -------------------------------
+
+// Formats the app has a root folder for that this author isn't set up for.
+export function addableFormats(author, folders) {
+  if (!isFormatAware(author)) return [];
+  const have = new Set(authorFormats(author));
+  const offered = new Set((folders || []).flatMap(folderFormats));
+  return ['audiobook', 'ebook'].filter((f) => offered.has(f) && !have.has(f));
+}
+
+// The fields that set a format up on an author: PUT author/{id} (with the
+// author) or PUT author/editor (with authorIds). Chaptarr then refreshes the
+// author and lists their books in that format, monitoring them as
+// "monitor new books" says.
+//   choice: { rootFolder, qualityProfileId, metadataProfileId, monitorNewItems }
+export function formatSetupFields(format, choice = {}) {
+  const num = (v) => (v === null || v === undefined || v === '' ? undefined : Number(v));
+  return {
+    [`${format}RootFolderPath`]: choice.rootFolder && choice.rootFolder.path,
+    [`${format}QualityProfileId`]: num(choice.qualityProfileId),
+    [`${format}MetadataProfileId`]: num(choice.metadataProfileId),
+    [`${format}Monitored`]: true,
+    [`${format}MonitorNewItems`]: newItemChoice(choice.monitorNewItems) || 'none',
+  };
+}
+export function buildFormatSetup(author, format, choice = {}) {
+  return { ...(author || {}), ...formatSetupFields(format, choice), monitored: true };
 }
 
 // PUT author/{id} body: the stored author with the edited fields.
